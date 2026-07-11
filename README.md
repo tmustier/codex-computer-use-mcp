@@ -1,6 +1,6 @@
 # Codex Computer Use MCP
 
-> **0.2 development branch:** direct Pi-owned Computer Use tools. The package/repository name is unchanged pending a separate naming decision.
+> **0.2 direct candidate:** direct Pi-owned Computer Use tools. The package/repository name is unchanged; npm 0.1 remains the released nested implementation until a separate release gate.
 
 This project exposes the official signed macOS Computer Use capabilities as **direct typed tools** for Pi and MCP clients. The calling agent chooses every tool and argument itself.
 
@@ -64,7 +64,7 @@ Full mode does **not** bypass:
 - strict OpenAI Team ID and code-signature checks;
 - exact upstream ten-tool schema verification;
 - canonical app identity resolution and per-app kernel locks;
-- focus telemetry, timeouts, process-group cleanup, or private audit logging.
+- focus telemetry, timeouts, verified process-tree cleanup, or private audit logging.
 
 ## Why the signed app-server is required
 
@@ -89,13 +89,7 @@ The direct bridge starts app-server with a new private `CODEX_HOME` containing n
 
 ## Pi integration
 
-After a separately approved 0.2 release:
-
-```bash
-pi install npm:codex-computer-use-mcp@0.2.0
-```
-
-For this source branch:
+The npm package remains at the released 0.1 nested architecture; do not assume an npm 0.2 exists. To evaluate an exact reviewed source commit:
 
 ```bash
 npm ci
@@ -149,12 +143,12 @@ Each call:
 4. acquires a per-app kernel lock;
 5. starts global focus telemetry;
 6. verifies fixed OpenAI-signed broker/client binaries;
-7. starts a credential-free isolated app-server process group with model transport disabled;
-8. creates one empty ephemeral runtime context;
+7. starts a credential-free isolated app-server process tree with model transport disabled;
+8. requires explicit `ephemeral: true`, `turns: []`, and `path: null` attestation;
 9. verifies the exact upstream ten-tool inventory and schemas;
 10. issues exactly one `mcpServer/tool/call`;
-11. rejects any model-turn notification;
-12. terminates the process group, removes temporary state, releases the lock, and writes a content-safe audit.
+11. rejects any model-turn notification, including during teardown;
+12. terminates and verifies the app-server plus separately grouped descendants, removes temporary state, releases the lock, and writes a content-safe audit.
 
 Focus checks are detection/completion criteria, not a preventive macOS sandbox. If the target becomes frontmost, the call is reported as failed even though an individual official action may already have completed.
 
@@ -164,7 +158,7 @@ Tool results may contain visible target-app text or screenshots because that is 
 
 Direct state defaults to `~/.direct-computer-use`; override with `CODEX_COMPUTER_USE_HOME`. Direct mode does not silently reuse the released nested wrapper's state.
 
-See [`MIGRATION.md`](MIGRATION.md) for opt-in migration, rollback, and conflict avoidance. No live configuration is changed by this development branch.
+See [`MIGRATION.md`](MIGRATION.md) for the immutable-review gate, exact-head opt-in migration, rollback, and conflict avoidance.
 
 ## Development
 
@@ -178,7 +172,7 @@ npm audit --omit=dev
 npm pack --dry-run
 ```
 
-Runtime dependencies are exact-pinned and the package includes `npm-shrinkwrap.json`.
+Registry dependency tarballs are exact-pinned with integrity and the package includes `npm-shrinkwrap.json`.
 
 See [`PROOF.md`](PROOF.md), [`SECURITY.md`](SECURITY.md), and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 

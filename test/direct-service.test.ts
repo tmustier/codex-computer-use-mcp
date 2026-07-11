@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { saveConfig } from "../src/config.ts";
 import { executeDirectTool, DirectPolicyError, type DirectServiceDependencies } from "../src/direct-service.ts";
-import type { DirectBrokerResult } from "../src/direct-broker.ts";
+import { DirectBrokerCallError, type DirectBrokerResult } from "../src/direct-broker.ts";
 
 function brokerResult(content = "ok", isError = false): DirectBrokerResult {
 	return {
@@ -108,6 +108,57 @@ test("focus telemetry fails closed after a completed direct action", async () =>
 		assert.equal(audit.outcome, "focus_violation");
 		assert.equal(audit.backgroundPreserved, false);
 		assert.equal(audit.directCalls, 1);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("broker failures preserve content-safe architecture evidence in audit", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-broker-evidence-test."));
+	try {
+		await assert.rejects(
+			executeDirectTool(
+				{ method: "get_app_state", arguments: { app: "TextEdit" } },
+				deps(root, async () => {
+					throw new DirectBrokerCallError("model activity", true, undefined, {
+						directCalls: 1,
+						modelTurnsStarted: 1,
+						ephemeralThread: true,
+						approvalRequests: 1,
+						brokerVersion: "test-app-server",
+						clientBuild: "test-client",
+					});
+				}),
+			),
+			/model activity/,
+		);
+		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
+		assert.equal(audit.outcome, "broker_failed");
+		assert.equal(audit.directCalls, 1);
+		assert.equal(audit.modelTurnsStarted, 1);
+		assert.equal(audit.ephemeralThread, true);
+		assert.equal(audit.approvalRequests, 1);
+		assert.equal(audit.brokerCleanupVerified, true);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("asynchronous focus sampling failures are handled and fail closed", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-sample-test."));
+	try {
+		await saveConfig(root, { version: 1, permissionMode: "full-permissions" });
+		const testDeps = deps(root, async () => {
+			await new Promise((resolve) => setTimeout(resolve, 150));
+			return brokerResult("pressed");
+		});
+		testDeps.frontmostAsync = async () => { throw new Error("sample failed"); };
+		await assert.rejects(
+			executeDirectTool(
+				{ method: "press_key", arguments: { app: "TextEdit", key: "ESC" } },
+				testDeps,
+			),
+			/background-safe/,
+		);
+		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
+		assert.equal(audit.outcome, "focus_violation");
+		assert.equal(audit.backgroundPreserved, false);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 

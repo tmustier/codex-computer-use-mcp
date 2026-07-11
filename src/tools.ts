@@ -16,13 +16,7 @@ export const DIRECT_TOOL_SCHEMAS = {
 			x: coordinate.optional(),
 			y: coordinate.optional(),
 		})
-		.strict()
-		.superRefine((value, ctx) => {
-			const byElement = value.element_index !== undefined;
-			const byCoordinates = value.x !== undefined && value.y !== undefined;
-			if (!byElement && !byCoordinates) ctx.addIssue({ code: "custom", message: "click requires element_index or both x and y" });
-			if ((value.x === undefined) !== (value.y === undefined)) ctx.addIssue({ code: "custom", message: "click coordinates require both x and y" });
-		}),
+		.strict(),
 	perform_secondary_action: z
 		.object({ app, element_index: elementIndex, action: z.string().trim().min(1).max(200) })
 		.strict(),

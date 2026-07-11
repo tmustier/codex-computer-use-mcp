@@ -1,6 +1,6 @@
 # Migration and rollback
 
-Version 0.2 is a breaking architecture change. This branch does not install, reload, switch live configuration, merge, publish, or release it.
+Version 0.2 is a breaking architecture change. It must remain off the live Pi path until an immutable exact-head review returns no P0/P1/P2 blocker. After that gate, an exact-head push to `main` and rollback-safe local switch are authorized; npm publication, tags, GitHub releases, and renames are not.
 
 ## What changes
 
@@ -37,23 +37,24 @@ CODEX_COMPUTER_USE_HOME="$(mktemp -d)" \
 
 Start in safe mode. Use only benign real apps and official first-party approvals. Do not use disposable harnesses as acceptance evidence.
 
-## Eventual opt-in migration
+## Reviewed exact-head migration
 
-Only after merge/release approval:
+Only after the independent no-blocker review, and only while `main` still identifies the reviewed commit:
 
 1. Back up `~/.pi/agent/settings.json`, `~/.pi/agent/mcp.json`, and the installed 0.1 package/extension directory.
-2. Remove or disable the 0.1 aggregate adapter registration.
-3. Install the approved exact 0.2 package version.
-4. Leave direct state in safe mode initially.
-5. Start a fresh Pi process; do not rely on hot-reloading a security-boundary change.
-6. Verify `/computer-use-status` reports:
+2. Record the reviewed commit/tree and verify the pushed `main` commit matches byte-for-byte.
+3. Remove or disable the 0.1 aggregate adapter and generic MCP registration.
+4. Install the reviewed 0.2 source from the exact pushed commit without publishing a new npm version.
+5. Leave direct state in safe mode initially.
+6. Start a fresh Pi process; do not rely on hot-reloading a security-boundary change.
+7. Verify `/computer-use-status` reports:
    - `brokerVerified: true`;
    - `nestedModel: false`;
    - `modelUsage: false`;
    - `ephemeralZeroTurnRuntimeContextRequired: true`.
-7. Run read-only `computer_use_list_apps` and `computer_use_get_app_state` against a benign real app with external focus sampling.
-8. Enable full-permissions only through the explicit interactive command if approved.
-9. Exercise mutating methods on benign disposable content, restore app state, then check audits and process cleanup.
+8. Run read-only `computer_use_list_apps` and `computer_use_get_app_state` against a benign real app with external focus sampling.
+9. Enable full-permissions only through the explicit interactive command if approved.
+10. Exercise mutating methods on benign disposable content, restore app state, then check audits and process cleanup.
 
 Do not copy the old full-permissions file into the new state root. Full mode must be re-acknowledged for the direct surface.
 
@@ -71,4 +72,4 @@ Direct state can be removed only after rollback evidence is captured and no proc
 
 ## Generic MCP gateway
 
-If Pi uses `mcp.json`, retain `directTools: false`. During migration, use a distinct temporary server name and source path. Remove the temporary entry after acceptance; do not silently replace the released server command before the separate live-switch gate.
+If Pi uses `mcp.json`, retain `directTools: false`. During source acceptance, use a distinct temporary server name and source path. Remove that temporary entry after acceptance. The reviewed direct Pi adapter is the primary live path; do not leave the released aggregate server active after the rollback-safe switch.

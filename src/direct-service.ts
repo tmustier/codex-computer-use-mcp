@@ -182,10 +182,13 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 	let watcher: TargetFrontmostWatcher | undefined;
 	let focusTimer: NodeJS.Timeout | undefined;
 	let focusSample: Promise<void> | undefined;
+	let focusSamplingFailed = false;
 	let frontBefore: string | undefined;
 	let targetBecameFrontmost = false;
 	let unrelatedFocusChanges = false;
 	let broker: DirectBrokerResult | undefined;
+	let brokerFailure: DirectBrokerCallError | undefined;
+	let brokerDispatchAttempted = false;
 	let outcome = "failed";
 	let brokerCleanupVerified = false;
 	let response: DirectResponse | undefined;
@@ -210,12 +213,16 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 				})().finally(() => { focusSample = undefined; });
 				return focusSample;
 			};
-			focusTimer = setInterval(() => void sample(), 100);
+			await sample().catch(() => { focusSamplingFailed = true; });
+			focusTimer = setInterval(() => {
+				void sample().catch(() => { focusSamplingFailed = true; });
+			}, 100);
 			focusTimer.unref();
 		}
 
 		await deps.onProgress?.(`Direct ${request.method}: verified target lease; calling the signed official tool without a model turn…`);
 		try {
+			brokerDispatchAttempted = true;
 			broker = await (deps.callTool ?? callOfficialDirectTool)(request.method, canonicalArgs, {
 				signal: deps.signal,
 				timeoutMs: 120_000,
@@ -223,7 +230,10 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			});
 			brokerCleanupVerified = broker.brokerCleanupVerified;
 		} catch (error) {
-			brokerCleanupVerified = error instanceof DirectBrokerCallError && error.cleanupVerified;
+			if (error instanceof DirectBrokerCallError) {
+				brokerFailure = error;
+				brokerCleanupVerified = error.cleanupVerified;
+			}
 			throw error;
 		}
 		if (broker.modelTurnsStarted !== 0 || broker.ephemeralThread !== true) {
@@ -251,13 +261,14 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 		};
 	} catch (error) {
 		outcome = error instanceof DirectPolicyError ? "policy_violation" : deps.signal?.aborted ? "cancelled" : "broker_failed";
+		if (!brokerDispatchAttempted) brokerCleanupVerified = true;
 		thrown = new Error(safeErrorMessage(error));
 	} finally {
 		if (focusTimer) clearInterval(focusTimer);
-		if (focusSample) await focusSample.catch(() => undefined);
-		let watcherFailed = false;
+		if (focusSample) await focusSample.catch(() => { focusSamplingFailed = true; });
+		let watcherFailed = focusSamplingFailed;
 		if (watcher) {
-			watcherFailed = !watcher.healthy();
+			watcherFailed ||= !watcher.healthy();
 			try { await watcher.stop(); }
 			catch { watcherFailed = true; }
 			if (identity?.bundleId) targetBecameFrontmost ||= watcher.becameFrontmost(identity.bundleId);
@@ -288,12 +299,12 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			inputBytes: inputByteCount(canonicalArgs),
 			outcome,
 			durationMs: Date.now() - startedAt,
-			brokerVersion: broker?.brokerVersion ?? null,
-			clientBuild: broker?.clientBuild ?? null,
-			directCalls: broker ? 1 : 0,
-			modelTurnsStarted: broker?.modelTurnsStarted ?? 0,
-			ephemeralThread: broker?.ephemeralThread ?? null,
-			approvalRequests: broker?.approvalRequests ?? 0,
+			brokerVersion: broker?.brokerVersion ?? brokerFailure?.brokerVersion ?? null,
+			clientBuild: broker?.clientBuild ?? brokerFailure?.clientBuild ?? null,
+			directCalls: broker ? 1 : brokerFailure?.directCalls ?? 0,
+			modelTurnsStarted: broker?.modelTurnsStarted ?? brokerFailure?.modelTurnsStarted ?? 0,
+			ephemeralThread: broker?.ephemeralThread ?? brokerFailure?.ephemeralThread ?? null,
+			approvalRequests: broker?.approvalRequests ?? brokerFailure?.approvalRequests ?? 0,
 			backgroundPreserved,
 			brokerCleanupVerified,
 			resultContentTypes: metadata.types,

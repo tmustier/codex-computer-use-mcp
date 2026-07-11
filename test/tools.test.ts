@@ -11,4 +11,5 @@ test("common Pi key aliases normalize to the official xdotool-style key table", 
 		app: "TextEdit",
 		key: "Meta_L+a",
 	});
+	assert.deepEqual(validateDirectArguments("click", { app: "TextEdit" }), { app: "TextEdit" });
 });

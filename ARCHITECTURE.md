@@ -27,7 +27,7 @@ The same read-only call through signed app-server `mcpServer/tool/call` succeede
 - all ten exact tools discovered;
 - one `mcpServer/tool/call`;
 - 39 apps returned;
-- ephemeral context had `turns: 0` and `path: null`;
+- ephemeral context explicitly attested `ephemeral: true`, `turns: []`, and `path: null`;
 - no `turn/start`, `turn/*`, or `item/*` model activity;
 - no account auth file or model API credential available to app-server;
 - a dummy provider with `supports_websockets = false` and unreachable loopback base URL;
@@ -35,6 +35,27 @@ The same read-only call through signed app-server `mcpServer/tool/call` succeede
 - trace/network sampling showed no app-server Responses API connection or model request after those controls (the separate official Computer Use service may use its own network transport).
 
 This is the narrow official boundary: direct calls require a loaded thread runtime ID in the current API, but do not require a conversation turn or model generation. Literal removal of the thread-shaped runtime object would require an upstream app-server API change.
+
+## Sender-authentication differential
+
+A supported fake stdio MCP server was substituted only to observe the app-server's public downstream envelope shape. App-server used:
+
+- MCP protocol `2025-06-18`;
+- `clientInfo` name/title/version identifying `codex-mcp-client` / Codex / the installed CLI;
+- standard `elicitation.form` and `elicitation.url` capability keys;
+- standard progress metadata on `tools/list`;
+- standard progress metadata plus public app-server-added `threadId` metadata on `tools/call`.
+
+An ordinary MCP SDK client then repeated a read-only raw-helper call with the same client identity, capability shape, protocol behavior, and public `progressToken`/random `threadId` metadata shape. The helper still returned `-10000 Sender process is not authenticated`. Changing documented handshake fields therefore does not repair raw dispatch.
+
+The relevant construction difference is the macOS responsible-process chain:
+
+- unsupported: ad-hoc/no-Team-ID Node parent → signed helper;
+- supported: Node/Pi → strict-valid OpenAI-signed app-bundled Codex (`2DC432GLL2`) → strict-valid OpenAI-signed helper (`2DC432GLL2`).
+
+Process sampling confirmed the helper children were direct descendants of signed app-server; helper processes may create their own process groups, so cleanup discovers and verifies separately grouped descendants rather than assuming one PGID. The app-server has the expected sandbox/application-group entitlement keys; the helper has OpenAI application/team identifiers, application groups, and keychain-access-group entitlements. Ordinary Node has no Team ID or entitlement set. The service's peer audit token is not exposed through the supported MCP layer. No private socket inspection, identity spoofing, copied signing material, re-signing, injection, or TCC change was attempted. The remaining enforcement boundary is therefore OS peer/responsible-process identity, not a missing public JSON field.
+
+Command, environment, cwd, and config differences were also isolated: both paths invoke the same signed helper with `mcp`; the accepted path gives it a signed parent plus a private fixed cwd/config environment. Matching public MCP fields did not alter the raw error, while the signed-parent path succeeds without model credentials.
 
 ## Process path
 
@@ -101,7 +122,9 @@ nested prompts or result summaries
 The native Pi adapter advertises supported form elicitation and renders each official field through Pi UI. A human must provide the response and confirm submission. The adapter:
 
 - defaults to decline;
-- declines headless, URL, proprietary, oversized, or unsupported forms;
+- caps field count, key length, enum cardinality/bytes, string/number values, and each UI wait;
+- enforces supported declared string/numeric bounds;
+- declines headless, URL, proprietary, oversized, malformed, or unsupported forms;
 - never selects `Always allow` or any other option automatically;
 - does not write elicitation content to audits.
 
@@ -113,7 +136,7 @@ Only official `text` and `image` MCP blocks are accepted. They are returned to t
 
 ## Naming proposal—separate approval required
 
-The existing repository/package remains `codex-computer-use-mcp` in this PR. That name reflects the released nested implementation and overstates Codex as product identity.
+The existing repository/package remains `codex-computer-use-mcp` in this change. That name reflects the released nested implementation and overstates Codex as product identity.
 
 Recommended future name: **`pi-computer-use`**.
 
@@ -125,4 +148,4 @@ Why:
 
 Alternative if MCP parity should remain prominent: **`pi-computer-use-mcp`**.
 
-No repository rename, npm rename, redirect, merge, or release belongs in this PR without a separate explicit gate.
+No repository/npm rename, npm publish, tag, or GitHub release belongs in this change without a separate explicit gate.

@@ -111,36 +111,6 @@ export function resolveAppLeaseId(app: string): string {
 	return resolveAppIdentity(app).leaseId;
 }
 
-export async function ensureAppRunningInBackground(app: string, identity = resolveAppIdentity(app)): Promise<ResolvedAppIdentity> {
-	if (identity.bundleId) {
-		const found = spawnSync("/usr/bin/lsappinfo", ["find", `bundleID=${identity.bundleId}`], {
-			encoding: "utf8",
-			timeout: 3000,
-		});
-		if (found.status === 0 && (found.stdout ?? "").trim().startsWith("ASN:")) return identity;
-	}
-	const selectorIsBundleId = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(app.trim());
-	const launchArgs = path.isAbsolute(app)
-		? ["-g", app]
-		: identity.bundleId || selectorIsBundleId
-			? ["-g", "-b", identity.bundleId ?? app.trim()]
-			: ["-g", "-a", app];
-	const launched = spawnSync("/usr/bin/open", launchArgs, { encoding: "utf8", timeout: 10_000 });
-	if (launched.status !== 0) throw new Error("Could not launch the target app in the background");
-	for (let attempt = 0; attempt < 100; attempt++) {
-		const resolved = resolveAppIdentity(identity.bundleId ?? app);
-		if (resolved.bundleId) {
-			const found = spawnSync("/usr/bin/lsappinfo", ["find", `bundleID=${resolved.bundleId}`], {
-				encoding: "utf8",
-				timeout: 3000,
-			});
-			if (found.status === 0 && (found.stdout ?? "").trim().startsWith("ASN:")) return resolved;
-		}
-		await new Promise((resolve) => setTimeout(resolve, 50));
-	}
-	throw new Error("Target app did not become available after background launch");
-}
-
 export interface TargetFrontmostWatcher {
 	becameFrontmost(bundleId: string): boolean;
 	healthy(): boolean;

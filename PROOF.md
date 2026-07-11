@@ -25,7 +25,7 @@ The official helper's stdio MCP handshake succeeds and exposes all ten schemas. 
 Computer Use server error -10000: Sender process is not authenticated
 ```
 
-No attempt was made to forge sender identity, invoke a private pipe/socket, re-sign code, inject into a process, extract credentials, or alter TCC.
+Matching the app-server's observed public downstream MCP identity/capability/progress/`threadId` metadata shape in an ordinary raw MCP SDK client still produced the same sender-authentication rejection. Process and signing evidence identified the material difference as ad-hoc/no-Team-ID Node parent versus strict-valid OpenAI-signed app-server parent. The supported layer does not expose the service peer audit token. No attempt was made to forge sender identity, invoke a private pipe/socket, re-sign code, inject into a process, extract credentials, or alter TCC.
 
 ### Positive official app-server probe
 
@@ -33,7 +33,7 @@ The same signed helper through official app-server `mcpServer/tool/call` succeed
 
 - exact ten-tool inventory;
 - one direct `list_apps` call;
-- empty ephemeral context: `turns: 0`, `path: null`;
+- empty ephemeral context explicitly attested `ephemeral: true`, `turns: []`, and `path: null`;
 - no `turn/start`, `turn/*`, or `item/*` model activity;
 - app-server `CODEX_HOME` isolated from the user's Codex home and containing no auth;
 - model provider replaced by a non-websocket dummy bound to unreachable loopback;
@@ -54,9 +54,12 @@ Current branch tests cover:
 - direct JSONL request sequence with no `turn/start`;
 - isolated credential-free `CODEX_HOME` even when the parent environment contains a model API key;
 - production app-server arguments disable model transport, plugins, and remote control;
-- default elicitation decline and explicit handler forwarding;
-- fatal rejection of model-turn notifications;
-- cancellation process-group termination;
+- default elicitation decline, bounded/manual form handling, and explicit handler forwarding;
+- cancellation while UI is pending cannot write to a closed broker;
+- fatal rejection of model-turn notifications, including a notification emitted during teardown;
+- strict `ephemeral: true` / `path: null` / `turns: []` response attestation before dispatch;
+- pre-buffer rejection of an oversized unterminated protocol line;
+- cancellation process-tree termination, including separately grouped descendants and stdio closure;
 - safe read-only dispatch and pre-dispatch mutation rejection;
 - full-permissions absence of wrapper app/intent/action gates;
 - canonical bundle-ID dispatch;
@@ -99,23 +102,23 @@ Evidence:
 
 Earlier exploratory attempts exposed and fixed two acceptance-quality issues rather than being counted as proof: common `CMD+A` needed normalization to the official `Meta_L+a` key form, and TextEdit state restoration had to be reset before a fresh run. The final evidence above is from the corrected direct path.
 
-## Release-quality gate
+## Review and activation gate
 
-This branch must not merge, install, switch live config, publish npm, rename the package/repository, or create a GitHub release during this task.
+The candidate must remain off the live Pi path until an independent pristine exact-head `gpt-5.6-sol`/`xhigh` review returns no P0/P1/P2 blocker. After that immutable-head gate, pushing the reviewed head to `main` and a rollback-safe local Pi switch are explicitly authorized; npm publication, tags, GitHub releases, and repository/package renames are not.
 
 Candidate validation completed before independent review:
 
 - `npm ci`: pass;
 - `npm run check`: pass;
 - `npm run check:pi`: pass;
-- `npm test`: 33/33 pass;
+- `npm test`: 39/39 pass;
 - `npm run build`: pass;
 - `npm audit --omit=dev`: zero vulnerabilities;
 - `npm pack --dry-run`: 36 intended files, shrinkwrap present, no removed nested-runner artifact;
 - public-source scrub: no secrets, private absolute paths, or machine identifiers found;
 - fresh-Pi real-app acceptance: pass as above.
 
-Remaining gate: independent pristine exact-head `gpt-5.6-sol`/`xhigh` security and architecture review, then open a PR and stop merge-ready. Record the final commit, tree, tracked-content aggregate, package integrity, and reviewer P0–P3 verdict before opening the PR.
+Remaining gate: commit the hardened candidate, perform an independent pristine exact-head `gpt-5.6-sol`/`xhigh` security and architecture review, and require zero P0/P1/P2 findings. Record the final commit, tree, tracked-content aggregate, package integrity, and reviewer P0–P3 verdict before any exact-head push or local switch.
 
 ## Non-goals
 

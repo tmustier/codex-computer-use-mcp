@@ -71,18 +71,37 @@ async function handleElicitation(request: any, ctx: ExtensionContext): Promise<E
   }
   const schema = request?.requestedSchema;
   const properties = schema?.properties;
-  if (!properties || typeof properties !== "object" || Array.isArray(properties) || Object.keys(properties).length > 8) {
+  const propertiesValid = properties && typeof properties === "object" && !Array.isArray(properties);
+  const entries = propertiesValid ? Object.entries(properties as Record<string, unknown>) : [];
+  const requiredValues = schema?.required === undefined ? [] : schema.required;
+  if (
+    schema?.type !== "object"
+    || !propertiesValid
+    || entries.length > 8
+    || entries.some(([key, field]) => key.length === 0 || key.length > 100 || !field || typeof field !== "object" || Array.isArray(field))
+    || !Array.isArray(requiredValues)
+    || requiredValues.length > 8
+    || requiredValues.some((item: unknown) => typeof item !== "string" || item.length > 100 || !Object.prototype.hasOwnProperty.call(properties, item))
+  ) {
     ctx.ui.notify("Official Computer Use requested an invalid approval form; it was declined.", "warning");
     return { action: "decline" };
   }
-  const required = new Set(Array.isArray(schema.required) ? schema.required.filter((item: unknown): item is string => typeof item === "string") : []);
+  const required = new Set(requiredValues as string[]);
   const content: Record<string, unknown> = {};
   const message = safePromptText(request.message);
-  for (const [key, rawField] of Object.entries(properties as Record<string, any>)) {
-    const field = rawField as any;
+  for (const [key, rawField] of entries) {
+    const field = rawField as Record<string, unknown>;
     const title = safePromptText(field.title ?? key);
-    if (Array.isArray(field.enum) && field.enum.every((item: unknown) => typeof item === "string")) {
-      const choice = await ctx.ui.select(`${message}\n${title}`, field.enum as string[]);
+    if (Array.isArray(field.enum)) {
+      const choices = field.enum;
+      if (
+        field.type !== "string"
+        || choices.length === 0
+        || choices.length > 50
+        || !choices.every((item: unknown) => typeof item === "string" && item.length <= 256)
+        || choices.reduce((total: number, item: unknown) => total + String(item).length, 0) > 4_096
+      ) return { action: "decline" };
+      const choice = await ctx.ui.select(`${message}\n${title}`, choices as string[], { timeout: 60_000 });
       if (choice === undefined) return { action: "cancel" };
       content[key] = choice;
       continue;
@@ -92,18 +111,33 @@ async function handleElicitation(request: any, ctx: ExtensionContext): Promise<E
       continue;
     }
     if (field.type === "string") {
-      const value = await ctx.ui.input(`${message}\n${title}`, safePromptText(field.description ?? ""));
+      const minLength = field.minLength === undefined ? (required.has(key) ? 1 : 0) : field.minLength;
+      const maxLength = field.maxLength === undefined ? 10_000 : field.maxLength;
+      if (!Number.isInteger(minLength) || !Number.isInteger(maxLength) || Number(minLength) < 0 || Number(maxLength) > 10_000 || Number(minLength) > Number(maxLength)) {
+        return { action: "decline" };
+      }
+      const value = await ctx.ui.input(`${message}\n${title}`, safePromptText(field.description ?? ""), { timeout: 60_000 });
       if (value === undefined) return { action: "cancel" };
-      if (required.has(key) && value.length === 0) return { action: "decline" };
-      if (value.length > 10_000) return { action: "decline" };
+      if (value.length < Number(minLength) || value.length > Number(maxLength)) return { action: "decline" };
       content[key] = value;
       continue;
     }
     if (field.type === "number" || field.type === "integer") {
-      const value = await ctx.ui.input(`${message}\n${title}`, "number");
+      const bounds = [field.minimum, field.maximum, field.exclusiveMinimum, field.exclusiveMaximum]
+        .filter((value) => value !== undefined);
+      if (bounds.some((value) => typeof value !== "number" || !Number.isFinite(value))) return { action: "decline" };
+      const value = await ctx.ui.input(`${message}\n${title}`, "number", { timeout: 60_000 });
       if (value === undefined) return { action: "cancel" };
       const parsed = Number(value);
-      if (!Number.isFinite(parsed) || (field.type === "integer" && !Number.isInteger(parsed))) return { action: "decline" };
+      if (
+        !Number.isFinite(parsed)
+        || Math.abs(parsed) > 1_000_000_000
+        || (field.type === "integer" && !Number.isInteger(parsed))
+        || (typeof field.minimum === "number" && parsed < field.minimum)
+        || (typeof field.maximum === "number" && parsed > field.maximum)
+        || (typeof field.exclusiveMinimum === "number" && parsed <= field.exclusiveMinimum)
+        || (typeof field.exclusiveMaximum === "number" && parsed >= field.exclusiveMaximum)
+      ) return { action: "decline" };
       content[key] = parsed;
       continue;
     }

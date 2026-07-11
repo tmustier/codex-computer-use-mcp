@@ -1,5 +1,4 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createInterface } from "node:readline";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -44,6 +43,20 @@ export interface DirectBrokerResult {
 	brokerCleanupVerified: true;
 }
 
+function boundedElicitationResponse(value: unknown): ElicitationResponse {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return { action: "cancel" };
+	const response = value as ElicitationResponse;
+	if (response.action !== "accept" && response.action !== "decline" && response.action !== "cancel") {
+		return { action: "cancel" };
+	}
+	try {
+		if (Buffer.byteLength(JSON.stringify(response), "utf8") > 64 * 1024) return { action: "cancel" };
+	} catch {
+		return { action: "cancel" };
+	}
+	return response;
+}
+
 export interface DirectBrokerOptions {
 	timeoutMs?: number;
 	signal?: AbortSignal;
@@ -66,10 +79,34 @@ export class BrokerVerificationError extends Error {
 
 export class DirectBrokerCallError extends Error {
 	readonly cleanupVerified: boolean;
-	constructor(message: string, cleanupVerified: boolean, cause?: unknown) {
+	readonly directCalls: number;
+	readonly modelTurnsStarted: number;
+	readonly ephemeralThread: boolean;
+	readonly approvalRequests: number;
+	readonly brokerVersion: string;
+	readonly clientBuild: string;
+	constructor(
+		message: string,
+		cleanupVerified: boolean,
+		cause?: unknown,
+		evidence: {
+			directCalls?: number;
+			modelTurnsStarted?: number;
+			ephemeralThread?: boolean;
+			approvalRequests?: number;
+			brokerVersion?: string;
+			clientBuild?: string;
+		} = {},
+	) {
 		super(message, { cause });
 		this.name = "DirectBrokerCallError";
 		this.cleanupVerified = cleanupVerified;
+		this.directCalls = evidence.directCalls ?? 0;
+		this.modelTurnsStarted = evidence.modelTurnsStarted ?? 0;
+		this.ephemeralThread = evidence.ephemeralThread ?? false;
+		this.approvalRequests = evidence.approvalRequests ?? 0;
+		this.brokerVersion = evidence.brokerVersion ?? "unknown";
+		this.clientBuild = evidence.clientBuild ?? "unknown";
 	}
 }
 
@@ -116,12 +153,12 @@ export function verifyOfficialDirectBroker(): { brokerVersion: string; clientBui
 	return { brokerVersion: (version.stdout ?? "").trim(), clientBuild: clientBuild() };
 }
 
-function buildBrokerEnv(codexHome: string): NodeJS.ProcessEnv {
+function buildBrokerEnv(codexHome: string, tempRoot: string): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {
-		HOME: os.homedir(),
+		HOME: tempRoot,
 		CODEX_HOME: codexHome,
 		PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
-		TMPDIR: process.env.TMPDIR ?? os.tmpdir(),
+		TMPDIR: tempRoot,
 		NO_COLOR: "1",
 		CLICOLOR: "0",
 	};
@@ -229,6 +266,15 @@ function validateResult(value: unknown): {
 	};
 }
 
+function processExists(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error: any) {
+		return error?.code === "EPERM";
+	}
+}
+
 function processGroupExists(pid: number): boolean {
 	try {
 		process.kill(-pid, 0);
@@ -238,24 +284,55 @@ function processGroupExists(pid: number): boolean {
 	}
 }
 
+function collectDescendants(rootPid: number): Set<number> {
+	const descendants = new Set<number>();
+	const queue = [rootPid];
+	while (queue.length > 0 && descendants.size < 64) {
+		const parent = queue.shift()!;
+		const result = spawnSync("/usr/bin/pgrep", ["-P", String(parent)], { encoding: "utf8", timeout: 2000 });
+		if (result.status !== 0 && result.status !== 1) continue;
+		for (const token of (result.stdout ?? "").trim().split(/\s+/)) {
+			const child = Number(token);
+			if (!Number.isSafeInteger(child) || child <= 1 || child === rootPid || descendants.has(child)) continue;
+			descendants.add(child);
+			queue.push(child);
+		}
+	}
+	return descendants;
+}
+
 async function terminateGroup(proc: ChildProcessWithoutNullStreams | undefined): Promise<void> {
 	const pid = proc?.pid;
 	if (!pid) return;
+	const descendants = collectDescendants(pid);
 	try {
 		process.kill(-pid, "SIGTERM");
 	} catch {
-		try { proc.kill("SIGTERM"); } catch { return; }
+		try { proc.kill("SIGTERM"); } catch { /* already exited */ }
 	}
 	for (let elapsed = 0; elapsed < 1000; elapsed += 50) {
-		if (!processGroupExists(pid)) return;
+		if (processExists(pid)) for (const child of collectDescendants(pid)) descendants.add(child);
+		if (!processGroupExists(pid) && [...descendants].every((child) => !processExists(child))) return;
 		await new Promise((resolve) => setTimeout(resolve, 50));
 	}
 	try { process.kill(-pid, "SIGKILL"); } catch { try { proc.kill("SIGKILL"); } catch { /* exited */ } }
-	for (let elapsed = 0; elapsed < 500; elapsed += 25) {
-		if (!processGroupExists(pid)) return;
+	for (const child of descendants) {
+		try { process.kill(child, "SIGTERM"); } catch { /* exited */ }
+	}
+	for (let elapsed = 0; elapsed < 250; elapsed += 25) {
+		if (!processGroupExists(pid) && [...descendants].every((child) => !processExists(child))) return;
 		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
-	if (processGroupExists(pid)) throw new Error("Official app-server process group did not terminate");
+	for (const child of descendants) {
+		try { process.kill(child, "SIGKILL"); } catch { /* exited */ }
+	}
+	for (let elapsed = 0; elapsed < 500; elapsed += 25) {
+		if (!processGroupExists(pid) && [...descendants].every((child) => !processExists(child))) return;
+		await new Promise((resolve) => setTimeout(resolve, 25));
+	}
+	if (processGroupExists(pid) || [...descendants].some((child) => processExists(child))) {
+		throw new Error("Official app-server process tree did not terminate");
+	}
 }
 
 export async function callOfficialDirectTool(
@@ -276,12 +353,17 @@ export async function callOfficialDirectTool(
 	await chmod(codexHome, 0o700);
 
 	let proc: ChildProcessWithoutNullStreams | undefined;
+	let processClosed: Promise<void> | undefined;
+	let termination: Promise<void> | undefined;
 	let abortHandler: (() => void) | undefined;
 	let fatalError: Error | undefined;
 	let stderr = "";
 	let nextId = 1;
 	let approvalRequests = 0;
+	let elicitationPending = false;
 	let modelTurnsStarted = 0;
+	let directCalls = 0;
+	let ephemeralThread = false;
 	let finalResult: DirectBrokerResult | undefined;
 	let primaryError: Error | undefined;
 	let cleanupVerified = false;
@@ -293,10 +375,14 @@ export async function callOfficialDirectTool(
 		}
 		pending.clear();
 	};
+	const ensureTerminated = (): Promise<void> => {
+		termination ??= terminateGroup(proc);
+		return termination;
+	};
 	const fail = (error: Error): void => {
 		fatalError ??= error;
 		rejectAll(fatalError);
-		void terminateGroup(proc);
+		void ensureTerminated().catch(() => undefined);
 	};
 	const send = (message: unknown): void => {
 		if (!proc?.stdin.writable) throw new Error("Official app-server stdin is unavailable");
@@ -308,7 +394,7 @@ export async function callOfficialDirectTool(
 			const timer = setTimeout(() => {
 				pending.delete(id);
 				reject(new Error(`Official app-server request timed out: ${methodName}`));
-				void terminateGroup(proc);
+				void ensureTerminated().catch(() => undefined);
 			}, timeoutMs);
 			pending.set(id, { resolve, reject, timer });
 			try { send({ method: methodName, id, params }); } catch (error) {
@@ -327,8 +413,9 @@ export async function callOfficialDirectTool(
 			detached: true,
 			shell: false,
 			stdio: ["pipe", "pipe", "pipe"],
-			env: buildBrokerEnv(codexHome),
+			env: buildBrokerEnv(codexHome, tempRoot),
 		});
+		processClosed = new Promise((resolve) => proc!.once("close", () => resolve()));
 		if (proc.pid) options.onSpawn?.(proc.pid);
 		proc.stdin.on("error", (error: NodeJS.ErrnoException) => {
 			if (error.code !== "EPIPE") fail(error);
@@ -342,46 +429,81 @@ export async function callOfficialDirectTool(
 			if (pending.size > 0) fail(new Error(`Official app-server exited before completing the request (${code ?? "unknown"})`));
 		});
 
-		const lines = createInterface({ input: proc.stdout, crlfDelay: Number.POSITIVE_INFINITY });
-		lines.on("line", (line) => {
-			if (Buffer.byteLength(line, "utf8") > MAX_PROTOCOL_LINE_BYTES) {
-				fail(new Error("Official app-server protocol line exceeded the 8MB safety bound"));
-				return;
-			}
+		const processProtocolLine = (line: string): void => {
 			let message: any;
 			try { message = JSON.parse(line); } catch {
 				fail(new Error("Official app-server emitted malformed JSONL"));
 				return;
 			}
-			if (message?.id != null && (Object.prototype.hasOwnProperty.call(message, "result") || Object.prototype.hasOwnProperty.call(message, "error"))) {
-				const waiter = pending.get(String(message.id));
-				if (!waiter) return;
-				pending.delete(String(message.id));
-				clearTimeout(waiter.timer);
-				if (message.error) waiter.reject(new Error(`Official app-server error: ${String(message.error.message ?? "unknown")}`));
-				else waiter.resolve(message.result);
-				return;
-			}
-			if (message?.id != null && typeof message.method === "string") {
-				if (message.method !== "mcpServer/elicitation/request") {
-					send({ id: message.id, error: { code: -32601, message: "Unsupported server request" } });
-					return;
-				}
-				approvalRequests += 1;
-				void (async () => {
-					let response: ElicitationResponse = { action: "decline" };
-					if (options.onElicitation) {
-						try { response = await options.onElicitation(message.params as ElicitationRequest); }
-						catch { response = { action: "cancel" }; }
-					}
-					send({ id: message.id, result: response });
-				})();
-				return;
-			}
 			if (typeof message?.method === "string" && (message.method.startsWith("turn/") || message.method.startsWith("item/"))) {
 				modelTurnsStarted += 1;
 				fail(new Error("Official app-server unexpectedly emitted model-turn activity during direct dispatch"));
+				return;
 			}
+			if (fatalError) return;
+			try {
+				if (message?.id != null && (Object.prototype.hasOwnProperty.call(message, "result") || Object.prototype.hasOwnProperty.call(message, "error"))) {
+					const waiter = pending.get(String(message.id));
+					if (!waiter) return;
+					pending.delete(String(message.id));
+					clearTimeout(waiter.timer);
+					if (message.error) waiter.reject(new Error(`Official app-server error: ${String(message.error.message ?? "unknown")}`));
+					else waiter.resolve(message.result);
+					return;
+				}
+				if (message?.id != null && typeof message.method === "string") {
+					if (message.method !== "mcpServer/elicitation/request") {
+						send({ id: message.id, error: { code: -32601, message: "Unsupported server request" } });
+						return;
+					}
+					if (elicitationPending || approvalRequests >= 8) {
+						fail(new Error("Official app-server emitted overlapping or excessive elicitation requests"));
+						return;
+					}
+					approvalRequests += 1;
+					elicitationPending = true;
+					void (async () => {
+						let response: ElicitationResponse = { action: "decline" };
+						if (options.onElicitation) {
+							try { response = boundedElicitationResponse(await options.onElicitation(message.params as ElicitationRequest)); }
+							catch { response = { action: "cancel" }; }
+						}
+						if (!proc?.stdin.writable || fatalError) return;
+						send({ id: message.id, result: response });
+					})().catch((error) => {
+						if (!fatalError) fail(error instanceof Error ? error : new Error(String(error)));
+					}).finally(() => { elicitationPending = false; });
+					return;
+				}
+			} catch (error) {
+				fail(error instanceof Error ? error : new Error(String(error)));
+			}
+		};
+		let stdoutBuffer = "";
+		proc.stdout.setEncoding("utf8");
+		proc.stdout.on("data", (chunk: string) => {
+			let offset = 0;
+			while (offset < chunk.length) {
+				const newline = chunk.indexOf("\n", offset);
+				const end = newline === -1 ? chunk.length : newline;
+				const segment = chunk.slice(offset, end);
+				if (Buffer.byteLength(stdoutBuffer, "utf8") + Buffer.byteLength(segment, "utf8") > MAX_PROTOCOL_LINE_BYTES) {
+					fail(new Error("Official app-server protocol line exceeded the 8MB safety bound"));
+					return;
+				}
+				if (newline === -1) {
+					stdoutBuffer += segment;
+					return;
+				}
+				const line = stdoutBuffer + segment;
+				stdoutBuffer = "";
+				if (line.length > 0) processProtocolLine(line);
+				offset = newline + 1;
+			}
+		});
+		proc.stdout.on("end", () => {
+			if (stdoutBuffer.length > 0) processProtocolLine(stdoutBuffer);
+			stdoutBuffer = "";
 		});
 
 		if (options.signal) {
@@ -406,16 +528,26 @@ export async function callOfficialDirectTool(
 			{ cwd: workDir, approvalPolicy: "never", sandbox: "read-only", ephemeral: true, serviceName: "pi_direct_computer_use" },
 			30_000,
 		)) as any;
-		const threadId = started?.thread?.id;
-		if (typeof threadId !== "string" || started.thread.path != null || (started.thread.turns?.length ?? 0) !== 0) {
-			throw new BrokerVerificationError("App-server did not create an empty ephemeral runtime context");
+		const thread = started?.thread;
+		const threadId = thread?.id;
+		if (
+			typeof threadId !== "string"
+			|| thread.ephemeral !== true
+			|| !Object.prototype.hasOwnProperty.call(thread, "path")
+			|| thread.path !== null
+			|| !Array.isArray(thread.turns)
+			|| thread.turns.length !== 0
+		) {
+			throw new BrokerVerificationError("App-server did not attest an empty pathless ephemeral runtime context");
 		}
+		ephemeralThread = true;
 		const inventory = await request(
 			"mcpServerStatus/list",
 			{ threadId, detail: "toolsAndAuthOnly" },
 			45_000,
 		);
 		validateInventory(inventory);
+		directCalls = 1;
 		const raw = await request(
 			"mcpServer/tool/call",
 			{ threadId, server: "computer-use", tool: method, arguments: args },
@@ -442,14 +574,35 @@ export async function callOfficialDirectTool(
 		if (abortHandler && options.signal) options.signal.removeEventListener("abort", abortHandler);
 		rejectAll(new Error("Official app-server closed"));
 		try {
-			await terminateGroup(proc);
+			await ensureTerminated();
+			if (processClosed) {
+				await new Promise<void>((resolve, reject) => {
+					const timer = setTimeout(() => reject(new Error("Official app-server stdio did not close")), 1_000);
+					processClosed!.then(() => {
+						clearTimeout(timer);
+						resolve();
+					});
+				});
+			}
+			await new Promise<void>((resolve) => setImmediate(resolve));
+			if (fatalError || modelTurnsStarted !== 0) {
+				primaryError = fatalError ?? new BrokerVerificationError("Model-turn activity was observed during broker teardown");
+			}
 			await rm(tempRoot, { recursive: true, force: true });
 			cleanupVerified = true;
 		} catch (cleanupError) {
 			primaryError = new Error("Official direct Computer Use broker cleanup failed", { cause: cleanupError });
 		}
 	}
-	if (primaryError) throw new DirectBrokerCallError(primaryError.message, cleanupVerified, primaryError);
-	if (!finalResult) throw new DirectBrokerCallError("Official direct Computer Use ended without a result", cleanupVerified);
+	const failureEvidence = {
+		directCalls,
+		modelTurnsStarted,
+		ephemeralThread,
+		approvalRequests,
+		brokerVersion: verification.brokerVersion,
+		clientBuild: verification.clientBuild,
+	};
+	if (primaryError) throw new DirectBrokerCallError(primaryError.message, cleanupVerified, primaryError, failureEvidence);
+	if (!finalResult) throw new DirectBrokerCallError("Official direct Computer Use ended without a result", cleanupVerified, undefined, failureEvidence);
 	return finalResult;
 }
