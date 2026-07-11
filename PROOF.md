@@ -67,7 +67,7 @@ Current branch tests cover:
 - target focus violation fail-closed behavior;
 - official error preservation;
 - private metadata-only audits with no arguments/results and truthful separate broker/lease cleanup evidence;
-- secure config/audit no-follow and mode checks;
+- secure audit-directory/file no-follow and mode checks;
 - global per-user same-app exclusion across different supported state roots, race behavior, crash release, private lock roots, and bounded lock filenames;
 - focus-event ASN retry/drain behavior, including valid events at the start of a single large stdout chunk;
 - stdio MCP all-ten inventory/status with no alternate mode route;
