@@ -67,6 +67,8 @@ export interface DirectBrokerOptions {
 	appServerArgs?: string[];
 	/** Test-only signature bypass. */
 	skipSignatureVerification?: boolean;
+	/** Test-only process-enumerator override. */
+	processEnumeratorCommand?: string;
 	onSpawn?: (pid: number) => void;
 }
 
@@ -284,13 +286,20 @@ function processGroupExists(pid: number): boolean {
 	}
 }
 
-function collectDescendants(rootPid: number): Set<number> {
+function collectDescendants(rootPid: number, processEnumeratorCommand = "/usr/bin/pgrep"): Set<number> {
 	const descendants = new Set<number>();
 	const queue = [rootPid];
-	while (queue.length > 0 && descendants.size < 64) {
+	while (queue.length > 0) {
+		if (descendants.size >= 256) throw new Error("Official app-server process tree exceeded the cleanup bound");
 		const parent = queue.shift()!;
-		const result = spawnSync("/usr/bin/pgrep", ["-P", String(parent)], { encoding: "utf8", timeout: 2000 });
-		if (result.status !== 0 && result.status !== 1) continue;
+		const result = spawnSync(processEnumeratorCommand, ["-P", String(parent)], { encoding: "utf8", timeout: 2000 });
+		if (
+			result.error
+			|| (result.status !== 0 && result.status !== 1)
+			|| (result.status === 1 && (result.stderr ?? "").trim().length > 0)
+		) {
+			throw new Error("Could not enumerate the official app-server process tree", { cause: result.error });
+		}
 		for (const token of (result.stdout ?? "").trim().split(/\s+/)) {
 			const child = Number(token);
 			if (!Number.isSafeInteger(child) || child <= 1 || child === rootPid || descendants.has(child)) continue;
@@ -301,38 +310,66 @@ function collectDescendants(rootPid: number): Set<number> {
 	return descendants;
 }
 
-async function terminateGroup(proc: ChildProcessWithoutNullStreams | undefined): Promise<void> {
+async function terminateGroup(
+	proc: ChildProcessWithoutNullStreams | undefined,
+	processEnumeratorCommand = "/usr/bin/pgrep",
+): Promise<void> {
 	const pid = proc?.pid;
 	if (!pid) return;
-	const descendants = collectDescendants(pid);
+	const descendants = new Set<number>();
+	const rootWasAlive = processExists(pid);
+	let cleanupError: Error | undefined;
+	const enumerate = (): Set<number> => {
+		try { return collectDescendants(pid, processEnumeratorCommand); }
+		catch (error) {
+			cleanupError ??= error instanceof Error ? error : new Error(String(error));
+			return new Set<number>();
+		}
+	};
+	for (const child of enumerate()) descendants.add(child);
+
+	let rootFrozen = false;
 	try {
-		process.kill(-pid, "SIGTERM");
+		process.kill(-pid, "SIGSTOP");
+		rootFrozen = true;
 	} catch {
-		try { proc.kill("SIGTERM"); } catch { /* already exited */ }
+		try {
+			proc.kill("SIGSTOP");
+			rootFrozen = processExists(pid);
+		} catch { /* already exited */ }
 	}
-	for (let elapsed = 0; elapsed < 1000; elapsed += 50) {
-		if (processExists(pid)) for (const child of collectDescendants(pid)) descendants.add(child);
-		if (!processGroupExists(pid) && [...descendants].every((child) => !processExists(child))) return;
-		await new Promise((resolve) => setTimeout(resolve, 50));
+	if (rootWasAlive && !rootFrozen) cleanupError ??= new Error("Could not freeze the official app-server before cleanup");
+
+	if (rootFrozen && !cleanupError) {
+		let stable = false;
+		for (let pass = 0; pass < 16; pass += 1) {
+			let added = false;
+			for (const child of enumerate()) {
+				if (!descendants.has(child)) {
+					descendants.add(child);
+					added = true;
+				}
+				try { process.kill(child, "SIGSTOP"); }
+				catch { if (processExists(child)) cleanupError ??= new Error("Could not freeze an app-server descendant"); }
+			}
+			if (cleanupError) break;
+			if (!added && pass > 0) { stable = true; break; }
+		}
+		if (!stable && !cleanupError) cleanupError = new Error("Official app-server process tree did not stabilize for cleanup");
 	}
-	try { process.kill(-pid, "SIGKILL"); } catch { try { proc.kill("SIGKILL"); } catch { /* exited */ } }
-	for (const child of descendants) {
-		try { process.kill(child, "SIGTERM"); } catch { /* exited */ }
-	}
-	for (let elapsed = 0; elapsed < 250; elapsed += 25) {
-		if (!processGroupExists(pid) && [...descendants].every((child) => !processExists(child))) return;
-		await new Promise((resolve) => setTimeout(resolve, 25));
-	}
+
 	for (const child of descendants) {
 		try { process.kill(child, "SIGKILL"); } catch { /* exited */ }
 	}
-	for (let elapsed = 0; elapsed < 500; elapsed += 25) {
-		if (!processGroupExists(pid) && [...descendants].every((child) => !processExists(child))) return;
+	try { process.kill(-pid, "SIGKILL"); } catch { try { proc.kill("SIGKILL"); } catch { /* exited */ } }
+	for (let elapsed = 0; elapsed < 1500; elapsed += 25) {
+		if (!processGroupExists(pid) && [...descendants].every((child) => !processExists(child))) break;
 		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
 	if (processGroupExists(pid) || [...descendants].some((child) => processExists(child))) {
-		throw new Error("Official app-server process tree did not terminate");
+		cleanupError ??= new Error("Official app-server process tree did not terminate");
 	}
+	if (cleanupError) throw cleanupError;
 }
 
 export async function callOfficialDirectTool(
@@ -376,7 +413,7 @@ export async function callOfficialDirectTool(
 		pending.clear();
 	};
 	const ensureTerminated = (): Promise<void> => {
-		termination ??= terminateGroup(proc);
+		termination ??= terminateGroup(proc, options.processEnumeratorCommand);
 		return termination;
 	};
 	const fail = (error: Error): void => {
@@ -388,7 +425,7 @@ export async function callOfficialDirectTool(
 		if (!proc?.stdin.writable) throw new Error("Official app-server stdin is unavailable");
 		proc.stdin.write(`${JSON.stringify(message)}\n`, "utf8");
 	};
-	const request = (methodName: string, params: unknown, timeoutMs: number): Promise<unknown> => {
+	const request = (methodName: string, params: unknown, timeoutMs: number, onSent?: () => void): Promise<unknown> => {
 		const id = String(nextId++);
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
@@ -397,7 +434,10 @@ export async function callOfficialDirectTool(
 				void ensureTerminated().catch(() => undefined);
 			}, timeoutMs);
 			pending.set(id, { resolve, reject, timer });
-			try { send({ method: methodName, id, params }); } catch (error) {
+			try {
+				send({ method: methodName, id, params });
+				onSent?.();
+			} catch (error) {
 				clearTimeout(timer);
 				pending.delete(id);
 				reject(error instanceof Error ? error : new Error(String(error)));
@@ -547,11 +587,11 @@ export async function callOfficialDirectTool(
 			45_000,
 		);
 		validateInventory(inventory);
-		directCalls = 1;
 		const raw = await request(
 			"mcpServer/tool/call",
 			{ threadId, server: "computer-use", tool: method, arguments: args },
 			options.timeoutMs ?? 120_000,
+			() => { directCalls = 1; },
 		);
 		if (modelTurnsStarted !== 0) throw new BrokerVerificationError("Model-turn activity was observed during direct dispatch");
 		const result = validateResult(raw);

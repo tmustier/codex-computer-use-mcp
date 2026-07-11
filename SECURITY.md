@@ -25,14 +25,14 @@ This is direct tool dispatch—not model orchestration.
 5. Full-permissions requires explicit acknowledgement but has no wrapper app, intent, task, or action allowlist.
 6. First-party OpenAI/TCC approvals remain authoritative and are never self-accepted.
 7. Target selectors resolve to canonical installed bundle IDs before dispatch.
-8. Same-app work is excluded with a kernel `lockf` lease.
+8. Same-app work is excluded across native Pi, generic MCP, and custom state roots with one fixed per-user kernel `lockf` lease namespace.
 9. Target focus events, periodic samples, watcher health, queued ASN resolution, and final state are checked. This is post-action detection, not a preventive OS sandbox.
 10. One direct request emits one official `mcpServer/tool/call`; no model turn, subagent, shell, web, plugin, prompt, or reachable model transport is available.
-11. Cancellation and timeout terminate the detached app-server plus discovered separately grouped descendants, await stdio closure, and verify exit; delayed UI responses cannot write to a closed broker.
+11. Cleanup freezes the app-server before bounded strict descendant enumeration, freezes descendants to a stable tree, kills every discovered process, awaits stdio closure, and verifies exit. Enumeration/freeze/exit uncertainty is fatal; delayed UI responses cannot write to a closed broker.
 12. Protocol JSONL is bounded before an unterminated line can exceed 8 MB in memory.
 13. Per-call `CODEX_HOME` and work directories are mode-private and recursively removed.
 14. Only validated text/image result blocks cross to the invoking client. No full-result spill file is written.
-15. Audits contain metadata only. Arguments, values, screenshots, app-state text, result content, prompts, approvals, credentials, and tokens are forbidden.
+15. Audits contain metadata only, including separate `brokerCleanupVerified` and `appLeaseReleased` evidence; lease-release failure changes the audited outcome before surfacing. Arguments, values, screenshots, app-state text, result content, prompts, approvals, credentials, and tokens are forbidden.
 16. Policy rejections are audited; audit failure is fatal once a secure state path exists.
 17. Runtime and development dependency tarballs are exact-pinned with integrity in `npm-shrinkwrap.json`.
 

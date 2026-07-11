@@ -53,7 +53,7 @@ The relevant construction difference is the macOS responsible-process chain:
 - unsupported: ad-hoc/no-Team-ID Node parent → signed helper;
 - supported: Node/Pi → strict-valid OpenAI-signed app-bundled Codex (`2DC432GLL2`) → strict-valid OpenAI-signed helper (`2DC432GLL2`).
 
-Process sampling confirmed the helper children were direct descendants of signed app-server; helper processes may create their own process groups, so cleanup discovers and verifies separately grouped descendants rather than assuming one PGID. The app-server has the expected sandbox/application-group entitlement keys; the helper has OpenAI application/team identifiers, application groups, and keychain-access-group entitlements. Ordinary Node has no Team ID or entitlement set. The service's peer audit token is not exposed through the supported MCP layer. No private socket inspection, identity spoofing, copied signing material, re-signing, injection, or TCC change was attempted. The remaining enforcement boundary is therefore OS peer/responsible-process identity, not a missing public JSON field.
+Process sampling confirmed the helper children were direct descendants of signed app-server; helper processes may create their own process groups, so cleanup freezes the root, strictly enumerates and freezes descendants to a stable tree, then kills and verifies every known process rather than assuming one PGID. Enumeration, freeze, or exit uncertainty fails cleanup closed. The app-server has the expected sandbox/application-group entitlement keys; the helper has OpenAI application/team identifiers, application groups, and keychain-access-group entitlements. Ordinary Node has no Team ID or entitlement set. The service's peer audit token is not exposed through the supported MCP layer. No private socket inspection, identity spoofing, copied signing material, re-signing, injection, or TCC change was attempted. The remaining enforcement boundary is therefore OS peer/responsible-process identity, not a missing public JSON field.
 
 Command, environment, cwd, and config differences were also isolated: both paths invoke the same signed helper with `mcp`; the accepted path gives it a signed parent plus a private fixed cwd/config environment. Matching public MCP fields did not alter the raw error, while the signed-parent path succeeds without model credentials.
 
@@ -107,10 +107,10 @@ nested prompts or result summaries
 | macOS TCC | **official-required** | retained; never modified |
 | Exact ten-tool inventory/schema | **security-essential** | retained and checked before each call |
 | Canonical bundle identity | **security-essential** | retained before targeted dispatch |
-| Same-app kernel lock | **security-essential** | retained |
+| Same-app kernel lock | **security-essential** | retained in one fixed per-user namespace shared across Pi/MCP state roots |
 | Automatic background app launch | **accidental** | removed; the official tool owns app behavior |
 | Global focus watcher and final sample | **security-essential detection** | retained |
-| Timeout/cancellation process-group termination | **security-essential** | retained |
+| Timeout/cancellation process-tree termination | **security-essential** | retained with strict enumeration, freeze, kill, stdio-close, and exit verification |
 | Per-call temporary worker cleanup | **security-essential** | retained with isolated `CODEX_HOME` |
 | Codex token usage accounting | **compatibility-only** | removed; no model turn exists |
 | Content-safe private audit | **security-essential** | retained with direct-call fields |

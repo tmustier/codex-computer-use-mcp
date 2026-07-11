@@ -19,7 +19,7 @@ Version 0.2 is a breaking architecture change. It must remain off the live Pi pa
 1. Stop all current aggregate Computer Use calls.
 2. Record the installed package/extension version and permission mode.
 3. Back up the Pi package/config files without copying audit content into tickets or chat.
-4. Confirm no `pi-native-app-worker.*`, `SkyComputerUseClient mcp`, `codex app-server`, `lockf`, or focus-listener process from the old adapter is active.
+4. Confirm no `pi-native-app-worker.*`, `SkyComputerUseClient mcp`, `codex app-server`, `lockf`, or focus-listener process from the old adapter is active. The direct adapter uses one fixed private `/tmp/codex-computer-use-mcp-<uid>` lock namespace across Pi and MCP state roots.
 5. Keep the old and new adapters from registering overlapping tools in one Pi process.
 
 ## Source acceptance without installation
@@ -68,7 +68,7 @@ Do not copy the old full-permissions file into the new state root. Full mode mus
 6. Verify the old status command and installed hash.
 7. Preserve both private audit directories locally; never merge their content or publish it.
 
-Direct state can be removed only after rollback evidence is captured and no process references it. It contains configuration and content-safe metadata, not credentials.
+Direct state can be removed only after rollback evidence is captured and no process references it. The fixed per-user lock directory can likewise be removed only when no direct call or `lockf` process exists. These paths contain configuration/content-safe metadata and hashed lock ownership—not credentials.
 
 ## Generic MCP gateway
 

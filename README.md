@@ -63,7 +63,7 @@ Full mode does **not** bypass:
 - macOS Screen Recording, Accessibility, or TCC controls;
 - strict OpenAI Team ID and code-signature checks;
 - exact upstream ten-tool schema verification;
-- canonical app identity resolution and per-app kernel locks;
+- canonical app identity resolution and per-user/per-app kernel locks shared across Pi and MCP state roots;
 - focus telemetry, timeouts, verified process-tree cleanup, or private audit logging.
 
 ## Why the signed app-server is required
@@ -140,7 +140,7 @@ Each call:
 1. validates typed arguments;
 2. enforces safe/full mode before dispatch;
 3. resolves a target to a canonical installed bundle ID;
-4. acquires a per-app kernel lock;
+4. acquires a fixed per-user/per-app kernel lock shared across all supported clients and state roots;
 5. starts global focus telemetry;
 6. verifies fixed OpenAI-signed broker/client binaries;
 7. starts a credential-free isolated app-server process tree with model transport disabled;
@@ -148,7 +148,7 @@ Each call:
 9. verifies the exact upstream ten-tool inventory and schemas;
 10. issues exactly one `mcpServer/tool/call`;
 11. rejects any model-turn notification, including during teardown;
-12. terminates and verifies the app-server plus separately grouped descendants, removes temporary state, releases the lock, and writes a content-safe audit.
+12. freezes, enumerates, terminates, and verifies the app-server plus separately grouped descendants; then removes temporary state, releases the lock, and writes a content-safe audit with separate broker/lease cleanup evidence.
 
 Focus checks are detection/completion criteria, not a preventive macOS sandbox. If the target becomes frontmost, the call is reported as failed even though an individual official action may already have completed.
 

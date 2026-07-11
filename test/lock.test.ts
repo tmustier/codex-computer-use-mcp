@@ -1,10 +1,25 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { acquireAppLock, AppBusyError } from "../src/lock.ts";
+
+test("app-lock roots must be private current-user directories, never symlinks", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-lock-path-test."));
+	try {
+		const permissive = path.join(root, "permissive");
+		await mkdir(permissive, { mode: 0o755 });
+		await chmod(permissive, 0o755);
+		await assert.rejects(() => acquireAppLock(permissive, "com.apple.calculator", "permissive"), /permissions must be private/);
+		const real = path.join(root, "real");
+		await mkdir(real, { mode: 0o700 });
+		const linked = path.join(root, "linked");
+		await symlink(real, linked);
+		await assert.rejects(() => acquireAppLock(linked, "com.apple.calculator", "linked"), /non-symlink directory/);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
 
 test("same app is exclusively leased while different apps can proceed", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "native-lock-test."));

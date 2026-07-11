@@ -150,6 +150,7 @@ export async function watchTargetFrontmost(
 	};
 	const retryTimer = setInterval(resolvePending, 50);
 	retryTimer.unref();
+	const childRunning = () => proc.exitCode === null && proc.signalCode === null;
 	const markStopped = () => {
 		running = false;
 		clearInterval(retryTimer);
@@ -166,15 +167,15 @@ export async function watchTargetFrontmost(
 	proc.once("error", markStopped);
 	proc.once("close", markStopped);
 	await new Promise((resolve) => setTimeout(resolve, 75));
-	if (!running || proc.exitCode !== null) throw new Error("Target focus-event monitor failed to start");
+	if (!running || !childRunning()) throw new Error("Target focus-event monitor failed to start");
 	return {
 		becameFrontmost: (bundleId) => {
 			resolvePending();
 			return observedBundles.has(bundleId.toLowerCase());
 		},
-		healthy: () => running && proc.exitCode === null,
+		healthy: () => running && childRunning(),
 		stop: async () => {
-			if (proc.exitCode === null) {
+			if (childRunning()) {
 				proc.kill("SIGTERM");
 				await new Promise<void>((resolve) => {
 					const timeout = setTimeout(resolve, 1000);
@@ -183,7 +184,7 @@ export async function watchTargetFrontmost(
 						resolve();
 					});
 				});
-				if (proc.exitCode === null) {
+				if (childRunning()) {
 					proc.kill("SIGKILL");
 					await new Promise<void>((resolve) => {
 						const timeout = setTimeout(resolve, 500);
@@ -192,6 +193,10 @@ export async function watchTargetFrontmost(
 							resolve();
 						});
 					});
+				}
+				if (childRunning()) {
+					clearInterval(retryTimer);
+					throw new Error("Target focus-event monitor did not terminate");
 				}
 			}
 			clearInterval(retryTimer);

@@ -42,7 +42,7 @@ async function handleCli(): Promise<boolean> {
 		app: null, mutating: true, authorization: requested === "full-permissions" ? "full_permissions_config" : "none",
 		inputBytes: 0, outcome: "ok", durationMs: 0, brokerVersion: null, clientBuild: null, directCalls: 0,
 		modelTurnsStarted: 0, ephemeralThread: null, approvalRequests: 0, backgroundPreserved: null,
-		brokerCleanupVerified: true, resultContentTypes: [], resultBytes: 0,
+		brokerCleanupVerified: true, appLeaseReleased: true, resultContentTypes: [], resultBytes: 0,
 	};
 	try { await appendAudit(stateRoot, audit); }
 	catch {

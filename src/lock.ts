@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import path from "node:path";
 
 export interface LockOwner {
@@ -13,7 +13,7 @@ export interface LockOwner {
 export class AppBusyError extends Error {
 	readonly owner?: Partial<LockOwner>;
 	constructor(app: string, owner?: Partial<LockOwner>) {
-		super(`${app} is already leased by another native-app task; concurrent same-app access is blocked`);
+		super(`${app} is already leased by another direct Computer Use task; concurrent same-app access is blocked`);
 		this.name = "AppBusyError";
 		this.owner = owner;
 	}
@@ -23,6 +23,28 @@ export interface AppLock {
 	path: string;
 	owner: LockOwner;
 	release(): Promise<void>;
+}
+
+export function globalAppLockRoot(): string {
+	const uid = process.getuid?.();
+	if (!Number.isSafeInteger(uid)) throw new Error("Could not determine the current user for global app locking");
+	return path.join("/tmp", `codex-computer-use-mcp-${uid}`);
+}
+
+async function ensurePrivateDirectory(directory: string): Promise<void> {
+	try {
+		const info = await lstat(directory);
+		if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("App-lock path must be a non-symlink directory");
+		if (process.getuid && info.uid !== process.getuid()) throw new Error("App-lock path must be owned by the current user");
+		if ((info.mode & 0o077) !== 0) throw new Error("App-lock path permissions must be private");
+	} catch (error: any) {
+		if (error?.code !== "ENOENT") throw error;
+		await mkdir(directory, { recursive: true, mode: 0o700 });
+		const info = await lstat(directory);
+		if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("App-lock path must be a non-symlink directory");
+		if (process.getuid && info.uid !== process.getuid()) throw new Error("App-lock path must be owned by the current user");
+	}
+	await chmod(directory, 0o700);
 }
 
 function lockKey(value: string): string {
@@ -59,8 +81,9 @@ export async function acquireAppLock(
 	runId: string,
 	_staleAfterMs = 10 * 60_000,
 ): Promise<AppLock> {
+	await ensurePrivateDirectory(stateDir);
 	const locksDir = path.join(stateDir, "locks");
-	await mkdir(locksDir, { recursive: true, mode: 0o700 });
+	await ensurePrivateDirectory(locksDir);
 	const key = lockKey(app);
 	const lockPath = path.join(locksDir, `${key}.lock`);
 	const ownerPath = path.join(locksDir, `${key}.owner.json`);

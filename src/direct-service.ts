@@ -11,7 +11,7 @@ import {
 	type DirectBrokerResult,
 	type ElicitationResponse,
 } from "./direct-broker.ts";
-import { acquireAppLock, type AppLock } from "./lock.ts";
+import { acquireAppLock, globalAppLockRoot, type AppLock } from "./lock.ts";
 import {
 	frontmostBundleId,
 	frontmostBundleIdAsync,
@@ -150,6 +150,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			approvalRequests: 0,
 			backgroundPreserved: null,
 			brokerCleanupVerified: true,
+			appLeaseReleased: true,
 			resultContentTypes: [],
 			resultBytes: 0,
 		};
@@ -168,7 +169,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			authorization: authorizationFor(config.permissionMode, request.method), inputBytes: inputByteCount(request.arguments),
 			outcome: "identity_rejected", durationMs: Date.now() - startedAt, brokerVersion: null, clientBuild: null,
 			directCalls: 0, modelTurnsStarted: 0, ephemeralThread: null, approvalRequests: 0,
-			backgroundPreserved: null, brokerCleanupVerified: true, resultContentTypes: [], resultBytes: 0,
+			backgroundPreserved: null, brokerCleanupVerified: true, appLeaseReleased: true, resultContentTypes: [], resultBytes: 0,
 		};
 		try { await appendAudit(stateRoot, audit); }
 		catch { throw new Error("Direct Computer Use identity validation failed, and secure audit logging also failed"); }
@@ -195,7 +196,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 	let thrown: Error | undefined;
 
 	try {
-		if (identity) lock = await (deps.acquireLock ?? acquireAppLock)(stateRoot, identity.leaseId, runId);
+		if (identity) lock = await (deps.acquireLock ?? acquireAppLock)(globalAppLockRoot(), identity.leaseId, runId);
 		if (identity?.bundleId) {
 			frontBefore = (deps.frontmost ?? frontmostBundleId)();
 			if (!frontBefore) throw new DirectPolicyError("Could not observe the frontmost app before direct dispatch");
@@ -287,6 +288,11 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 		}
 		let releaseFailed = false;
 		try { await lock?.release(); } catch { releaseFailed = true; }
+		if (releaseFailed) {
+			outcome = "lease_cleanup_failed";
+			thrown = new Error("Direct Computer Use app lease did not release cleanly");
+			response = undefined;
+		}
 		const metadata = broker ? contentMetadata(broker.content) : { types: [], bytes: 0 };
 		const audit: AuditRecord = {
 			timestamp: new Date().toISOString(),
@@ -307,12 +313,12 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			approvalRequests: broker?.approvalRequests ?? brokerFailure?.approvalRequests ?? 0,
 			backgroundPreserved,
 			brokerCleanupVerified,
+			appLeaseReleased: !releaseFailed,
 			resultContentTypes: metadata.types,
 			resultBytes: metadata.bytes,
 		};
 		try { await appendAudit(stateRoot, audit); }
 		catch { throw new Error(`Direct Computer Use ended with outcome ${outcome}, but secure audit logging failed`); }
-		if (releaseFailed) throw new Error(`Direct Computer Use ended with outcome ${outcome}, but the app lease did not release cleanly`);
 	}
 	if (thrown) throw thrown;
 	if (!response) throw new Error("Direct Computer Use ended without a result");
@@ -346,6 +352,7 @@ export async function getDirectStatus(stateRoot = defaultStateRoot()): Promise<R
 		ephemeralZeroTurnRuntimeContextRequired: true,
 		safeMethods: [...READ_ONLY_METHODS],
 		supportedMethods: [...OFFICIAL_METHODS],
+		appLockRoot: globalAppLockRoot(),
 		auditPath: path.join(stateRoot, "audit", "direct-computer-use.jsonl"),
 	};
 }

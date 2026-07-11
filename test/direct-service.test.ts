@@ -54,6 +54,37 @@ test("safe mode directly permits only read methods and canonicalizes app identit
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("same-app exclusion is global across different supported state roots", async () => {
+	const firstRoot = await mkdtemp(path.join(os.tmpdir(), "direct-service-global-lock-a."));
+	const secondRoot = await mkdtemp(path.join(os.tmpdir(), "direct-service-global-lock-b."));
+	let entered!: () => void;
+	let release!: () => void;
+	const brokerEntered = new Promise<void>((resolve) => { entered = resolve; });
+	const holdBroker = new Promise<void>((resolve) => { release = resolve; });
+	try {
+		const firstDeps = deps(firstRoot, async () => {
+			entered();
+			await holdBroker;
+			return brokerResult("state");
+		});
+		delete firstDeps.acquireLock;
+		const first = executeDirectTool({ method: "get_app_state", arguments: { app: "TextEdit" } }, firstDeps);
+		await brokerEntered;
+		const secondDeps = deps(secondRoot, async () => brokerResult("should-not-dispatch"));
+		delete secondDeps.acquireLock;
+		await assert.rejects(
+			executeDirectTool({ method: "get_app_state", arguments: { app: "TextEdit" } }, secondDeps),
+			/already leased/,
+		);
+		release();
+		assert.equal((await first).ok, true);
+	} finally {
+		release?.();
+		await rm(firstRoot, { recursive: true, force: true });
+		await rm(secondRoot, { recursive: true, force: true });
+	}
+});
+
 test("safe mode rejects mutation before identity resolution or broker dispatch", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-reject-test."));
 	let dispatched = false;
@@ -159,6 +190,27 @@ test("asynchronous focus sampling failures are handled and fail closed", async (
 		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
 		assert.equal(audit.outcome, "focus_violation");
 		assert.equal(audit.backgroundPreserved, false);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("app-lease release failure is audited as failure before surfacing", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-release-failure-test."));
+	try {
+		const testDeps = deps(root, async () => brokerResult("completed"));
+		testDeps.acquireLock = async (_state, app, runId) => ({
+			path: "test",
+			owner: { runId, pid: process.pid, app, startedAt: new Date().toISOString() },
+			release: async () => { throw new Error("release failed"); },
+		});
+		await assert.rejects(
+			executeDirectTool({ method: "get_app_state", arguments: { app: "TextEdit" } }, testDeps),
+			/lease did not release cleanly/,
+		);
+		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
+		assert.equal(audit.outcome, "lease_cleanup_failed");
+		assert.equal(audit.appLeaseReleased, false);
+		assert.equal(audit.brokerCleanupVerified, true);
+		assert.equal(audit.directCalls, 1);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 

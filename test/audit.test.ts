@@ -24,6 +24,7 @@ const record: AuditRecord = {
 	approvalRequests: 0,
 	backgroundPreserved: true,
 	brokerCleanupVerified: true,
+	appLeaseReleased: true,
 	resultContentTypes: ["text"],
 	resultBytes: 42,
 };

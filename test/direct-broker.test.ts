@@ -19,7 +19,6 @@ const log=${JSON.stringify(log)}; const mode=process.argv[2]||"ok"; const invent
 const send=x=>process.stdout.write(JSON.stringify(x)+"\\n");
 const rl=createInterface({input:process.stdin});
 let pendingTool;
-if(mode==="late-model-event") process.on("SIGTERM",()=>{send({method:"turn/started",params:{late:true}}); setTimeout(()=>process.exit(0),20);});
 if(mode==="child-hang"){const child=spawn(process.execPath,["-e","process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{detached:true,stdio:"ignore"});child.unref();appendFileSync(log,JSON.stringify({childPid:child.pid})+"\\n");}
 rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify({method:m.method,id:m.id,result:m.result,codexHome:process.env.CODEX_HOME,home:process.env.HOME,tmpdir:process.env.TMPDIR,hasOpenAIKey:Boolean(process.env.OPENAI_API_KEY)})+"\\n");
  if(m.method==="initialize"){if(mode==="oversized-line"){process.stdout.write("x".repeat(${8 * 1024 * 1024 + 1}));return;} return send({id:m.id,result:{userAgent:"fake",platformFamily:"unix",platformOs:"macos"}});}
@@ -29,6 +28,7 @@ rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify(
  if(m.method==="mcpServer/tool/call"){
    if(mode==="hang"||mode==="child-hang") return;
    if(mode==="elicit"){pendingTool=m.id; return send({id:"approval-1",method:"mcpServer/elicitation/request",params:{mode:"form",message:"Approve?",serverName:"computer-use",requestedSchema:{type:"object",properties:{choice:{type:"string",enum:["allow","deny"]}},required:["choice"]}}});}
+   if(mode==="late-model-event"){send({id:m.id,result:{content:[{type:"text",text:"direct-ok"}],isError:false}});return send({method:"turn/started",params:{late:true}});}
    return send({id:m.id,result:{content:[{type:"text",text:"direct-ok"}],isError:false}});
  }
  if(m.id==="approval-1"&&m.result){return send({id:pendingTool,result:{content:[{type:"text",text:"approval:"+m.result.action}],isError:false}});}
@@ -169,6 +169,25 @@ test("direct broker rejects an oversized unterminated protocol line before buffe
 			callOfficialDirectTool("list_apps", {}, options(script, "oversized-line")),
 			/protocol line exceeded the 8MB safety bound/,
 		);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("process enumeration errors fail cleanup closed after terminating the broker", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-enumerator-test."));
+	try {
+		const { script } = await makeFake(root);
+		const enumerator = path.join(root, "enumerator.sh");
+		await writeFile(enumerator, "#!/bin/sh\necho unavailable >&2\nexit 1\n", { mode: 0o700 });
+		let pid = 0;
+		await assert.rejects(
+			callOfficialDirectTool("list_apps", {}, {
+				...options(script),
+				processEnumeratorCommand: enumerator,
+				onSpawn: (value) => { pid = value; },
+			}),
+			/cleanup failed/,
+		);
+		assert.throws(() => process.kill(pid, 0));
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 

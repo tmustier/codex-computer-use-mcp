@@ -23,6 +23,7 @@ export interface AuditRecord {
 	approvalRequests: number;
 	backgroundPreserved: boolean | null;
 	brokerCleanupVerified: boolean;
+	appLeaseReleased: boolean;
 	resultContentTypes: string[];
 	resultBytes: number;
 }
