@@ -39,3 +39,36 @@ test("unknown operation names are reduced to invalid_request in audits", async (
     await rm(stateRoot, { recursive: true, force: true });
   }
 });
+
+test("cancellation returns structured partial methods and persists them in the audit", async () => {
+  const stateRoot = await mkdtemp(path.join(os.tmpdir(), "computer-use-service-cancel-test."));
+  try {
+    const response = await executeOperation(
+      { mode: "list" },
+      {
+        stateRoot,
+        runCodex: async () => ({
+          exitCode: 130,
+          usage: { input: 10, cachedInput: 4, output: 2 },
+          computerUseMethods: ["list_apps"],
+          approvalRequiredObserved: false,
+          errorKind: "cancelled",
+          errorSummary: "Computer Use request cancelled",
+          codexVersion: "test-codex",
+          durationMs: 12,
+        }),
+      },
+    );
+    assert.equal(response.isError, true);
+    assert.equal(response.details.outcome, "cancelled");
+    assert.equal(response.details.retryAllowed, false);
+    assert.deepEqual(response.details.usedCapabilities, ["list_apps"]);
+    const record = JSON.parse((await readFile(path.join(stateRoot, "audit", "background-computer-use.jsonl"), "utf8")).trim());
+    assert.equal(record.outcome, "cancelled");
+    assert.equal(record.computerUseCalls, 1);
+    assert.deepEqual(record.computerUseMethods, ["list_apps"]);
+    assert.equal(record.cleanupVerified, false);
+  } finally {
+    await rm(stateRoot, { recursive: true, force: true });
+  }
+});

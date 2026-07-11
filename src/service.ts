@@ -30,6 +30,8 @@ export interface OperationDependencies {
   stateRoot?: string;
   signal?: AbortSignal;
   onProgress?: (message: string) => void | Promise<void>;
+  /** Test/integration injection; MCP and Pi adapters never override the verified runner. */
+  runCodex?: typeof runOfficialCodex;
 }
 
 export interface OperationResponse {
@@ -122,6 +124,7 @@ export async function executeOperation(raw: unknown, deps: OperationDependencies
       model: MODEL,
       usage: { input: 0, cachedInput: 0, output: 0 },
       computerUseCalls: 0,
+      computerUseMethods: [],
       backgroundPreserved: null,
       cleanupVerified: null,
     };
@@ -188,7 +191,7 @@ export async function executeOperation(raw: unknown, deps: OperationDependencies
         if (targetBecameFrontmost) throw new PolicyError("The target app became frontmost during background launch; background-only guarantee failed");
       }
       await deps.onProgress?.(`${permissionMode === "full-permissions" ? "FULL PERMISSIONS; " : ""}Leased ${app ?? "app inventory"}; starting signed Codex Computer Use worker…`);
-      runner = await runOfficialCodex(buildPrompt(request, canonicalTargetApp), {
+      runner = await (deps.runCodex ?? runOfficialCodex)(buildPrompt(request, canonicalTargetApp), {
         signal: deps.signal,
         timeoutMs: 300_000,
         allowedTools: allowedToolsForRequest(request),
@@ -231,6 +234,28 @@ export async function executeOperation(raw: unknown, deps: OperationDependencies
           usage: runner.usage,
           model: MODEL,
           durationMs: runner.durationMs,
+          retryAllowed: false,
+        },
+      };
+    }
+    if (runner.errorKind === "cancelled") {
+      outcome = "cancelled";
+      cleanupVerified = false;
+      return {
+        ok: false,
+        isError: true,
+        text: `Computer Use was cancelled. ${runner.computerUseMethods.length ? `Earlier successful calls (${runner.computerUseMethods.join(", ")}) may already have changed state; cleanup is unverified. ` : "No successful Computer Use call was observed. "}Do not retry automatically.`,
+        details: {
+          runId,
+          mode: request.mode,
+          permissionMode,
+          app,
+          outcome,
+          usedCapabilities: runner.computerUseMethods,
+          usage: runner.usage,
+          model: MODEL,
+          durationMs: runner.durationMs,
+          cleanupVerified: false,
           retryAllowed: false,
         },
       };
@@ -338,6 +363,7 @@ export async function executeOperation(raw: unknown, deps: OperationDependencies
       model: MODEL,
       usage: runner?.usage ?? { input: 0, cachedInput: 0, output: 0 },
       computerUseCalls: runner?.computerUseMethods.length ?? 0,
+      computerUseMethods: runner?.computerUseMethods ?? [],
       backgroundPreserved,
       cleanupVerified,
     };

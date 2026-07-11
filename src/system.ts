@@ -204,27 +204,33 @@ export async function watchTargetFrontmost(
 		},
 		healthy: () => running && proc.exitCode === null,
 		stop: async () => {
-			clearInterval(retryTimer);
-			resolvePending();
-			if (proc.exitCode !== null) return;
-			proc.kill("SIGTERM");
-			await new Promise<void>((resolve) => {
-				const timeout = setTimeout(resolve, 1000);
-				proc.once("close", () => {
-					clearTimeout(timeout);
-					resolve();
-				});
-			});
 			if (proc.exitCode === null) {
-				proc.kill("SIGKILL");
+				proc.kill("SIGTERM");
 				await new Promise<void>((resolve) => {
-					const timeout = setTimeout(resolve, 500);
+					const timeout = setTimeout(resolve, 1000);
 					proc.once("close", () => {
 						clearTimeout(timeout);
 						resolve();
 					});
 				});
+				if (proc.exitCode === null) {
+					proc.kill("SIGKILL");
+					await new Promise<void>((resolve) => {
+						const timeout = setTimeout(resolve, 500);
+						proc.once("close", () => {
+							clearTimeout(timeout);
+							resolve();
+						});
+					});
+				}
 			}
+			clearInterval(retryTimer);
+			// Events may arrive only while SIGTERM is draining stdout. Resolve every queued ASN before returning.
+			for (let attempt = 0; unresolvedAsns.size > 0 && attempt < 10; attempt += 1) {
+				resolvePending();
+				if (unresolvedAsns.size > 0) await new Promise((resolve) => setTimeout(resolve, 25));
+			}
+			if (unresolvedAsns.size > 0) throw new Error("Could not resolve all queued focus-event identities");
 		},
 	};
 }

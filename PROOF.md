@@ -37,7 +37,7 @@ The same review found and prompted fixes for:
 - status claiming a healthy boundary without verifying the signed broker;
 - insufficient release provenance guidance.
 
-Regression tests cover each applicable code path.
+A second exact-tree review accepted the P1 architectural remediation and found two further P2 races: shutdown-only focus events could exhaust the single post-stop ASN lookup, and cancellation audits stored only a count rather than ordered methods. The watcher now performs a bounded awaited drain after listener closure and fails closed if any ASN remains unresolved. Cancellation now returns structured non-retryable error details and persists the ordered sanitized method list plus cleanup uncertainty. Combined regressions cover both cases.
 
 ## Test and host evidence
 

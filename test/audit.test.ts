@@ -24,6 +24,7 @@ test("audit is mode-0600 structured metadata without task text", async () => {
 			model: "gpt-5.6-sol",
 			usage: { input: 1, cachedInput: 0, output: 1 },
 			computerUseCalls: 3,
+			computerUseMethods: ["get_app_state", "click", "get_app_state"],
 			backgroundPreserved: true,
 			cleanupVerified: true,
 		});
@@ -33,6 +34,7 @@ test("audit is mode-0600 structured metadata without task text", async () => {
 		assert.equal(record.inputBytes, 3);
 		assert.equal(record.authorization, "full_permissions_config");
 		assert.equal(record.permissionMode, "safe");
+		assert.deepEqual(record.computerUseMethods, ["get_app_state", "click", "get_app_state"]);
 		assert.equal(Object.hasOwn(record, "value"), false);
 		assert.equal(Object.hasOwn(record, "observed"), false);
 	} finally {
@@ -59,6 +61,7 @@ test("audit refuses symlinked state and log targets", async () => {
 		model: "gpt-5.6-sol",
 		usage: { input: 0, cachedInput: 0, output: 0 },
 		computerUseCalls: 0,
+		computerUseMethods: [],
 		backgroundPreserved: null,
 		cleanupVerified: null,
 	};

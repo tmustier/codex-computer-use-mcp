@@ -48,6 +48,7 @@ async function handleCli(): Promise<boolean> {
     model: MODEL,
     usage: { input: 0, cachedInput: 0, output: 0 },
     computerUseCalls: 0,
+    computerUseMethods: [],
     backgroundPreserved: null,
     cleanupVerified: null,
   };

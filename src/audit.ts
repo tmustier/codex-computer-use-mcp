@@ -18,6 +18,7 @@ export interface AuditRecord {
 	model: string;
 	usage: { input: number; cachedInput: number; output: number };
 	computerUseCalls: number;
+	computerUseMethods: string[];
 	backgroundPreserved: boolean | null;
 	cleanupVerified: boolean | null;
 }
