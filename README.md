@@ -20,44 +20,28 @@ It does use OpenAI's signed `codex app-server` as the official host for the bund
 
 Pi registers namespaced tools to avoid collisions with Pi's built-ins. The MCP server exposes the upstream method names.
 
-| Pi tool | MCP method | Safe mode | Purpose |
+| Pi tool | MCP method | No-permissions | Purpose |
 |---|---|---:|---|
 | `computer_use_list_apps` | `list_apps` | yes | List apps known to official Computer Use |
 | `computer_use_get_app_state` | `get_app_state` | yes | Read accessibility state and imagery for one app |
-| `computer_use_click` | `click` | no | Click an element or screenshot coordinates |
-| `computer_use_perform_secondary_action` | `perform_secondary_action` | no | Invoke a named accessibility action |
-| `computer_use_set_value` | `set_value` | no | Assign an accessibility value |
-| `computer_use_select_text` | `select_text` | no | Select text or place the cursor |
-| `computer_use_scroll` | `scroll` | no | Scroll an element |
-| `computer_use_drag` | `drag` | no | Drag between screenshot coordinates |
-| `computer_use_press_key` | `press_key` | no | Send a key or key combination |
-| `computer_use_type_text` | `type_text` | no | Type literal text |
+| `computer_use_click` | `click` | yes | Click an element or screenshot coordinates |
+| `computer_use_perform_secondary_action` | `perform_secondary_action` | yes | Invoke a named accessibility action |
+| `computer_use_set_value` | `set_value` | yes | Assign an accessibility value |
+| `computer_use_select_text` | `select_text` | yes | Select text or place the cursor |
+| `computer_use_scroll` | `scroll` | yes | Scroll an element |
+| `computer_use_drag` | `drag` | yes | Drag between screenshot coordinates |
+| `computer_use_press_key` | `press_key` | yes | Send a key or key combination |
+| `computer_use_type_text` | `type_text` | yes | Type literal text |
 
 Pi—not a nested planner—must call `computer_use_get_app_state`, choose a current element identifier or coordinates, execute one action, and inspect again when needed.
 
-## Authorization modes
+## Authorization policy: durable no-permissions
 
-### Safe mode (default)
+`no-permissions` has one precise meaning here: **the wrapper asks no permission questions and exposes all ten official actions**. It is the only mode and the durable default. There is no safe/full selector, config file, environment override, slash command, CLI switch, per-call elevation, app allowlist, intent classifier, task schema, per-action confirmation, special-case app policy, or method gate.
 
-Safe mode permits only the two read methods: `list_apps` and `get_app_state`. The other eight tools are rejected and metadata-audited before target resolution, process spawn, or official dispatch.
+The app-server runtime is also created with `approvalPolicy: "never"`. The client does not advertise an elicitation UI. If the official downstream service unexpectedly requests elicitation, the bridge silently declines it; it never opens a prompt and never self-accepts. Any persistent first-party access required by Computer Use must therefore already be configured in the official ChatGPT app.
 
-### Full-permissions mode
-
-Full mode enables the complete official ten-tool surface with arbitrary resolvable app targets and typed official actions. It adds no wrapper app allowlist, intent classifier, task schema, per-action confirmation, special-case app policy, or method gate.
-
-Enable only with explicit acknowledgement:
-
-```bash
-codex-computer-use-mcp --configure full-permissions --acknowledge-full-permissions
-```
-
-Return to safe mode:
-
-```bash
-codex-computer-use-mcp --configure safe
-```
-
-Full mode does **not** bypass:
+No-permissions does **not** bypass:
 
 - first-party OpenAI app approvals or sensitive-action prompts;
 - macOS Screen Recording, Accessibility, or TCC controls;
@@ -97,15 +81,13 @@ npm run build
 pi -ne -e /absolute/path/to/codex-computer-use-mcp/integrations/pi/index.ts
 ```
 
-Commands:
+Command:
 
 ```text
 /computer-use-status
-/computer-use-mode safe
-/computer-use-mode full-permissions
 ```
 
-The native Pi adapter is the primary product path. It registers all ten typed tools directly and can present supported first-party elicitation forms in Pi's UI. It never self-accepts them; unsupported or headless elicitations are declined.
+The native Pi adapter is the primary product path. It always registers all ten typed tools directly. It exposes no mode-changing command and no approval UI.
 
 ## MCP server
 
@@ -131,14 +113,14 @@ For Pi's generic MCP gateway, keep `directTools: false` so this powerful surface
 }
 ```
 
-The generic MCP server cannot render Pi's native approval UI. It declines downstream elicitations; configure persistent first-party app approvals only in the official ChatGPT Computer Use settings.
+The generic MCP server exposes the same no-permissions behavior: no wrapper approval UI and all ten methods. Unexpected downstream elicitations are silently declined; configure persistent first-party app access only in official ChatGPT Computer Use settings.
 
 ## Security and privacy
 
 Each call:
 
 1. validates typed arguments;
-2. enforces safe/full mode before dispatch;
+2. applies the single durable no-permissions policy with no mode or prompt branch;
 3. resolves a target to a canonical installed bundle ID;
 4. acquires a fixed per-user/per-app kernel lock shared across all supported clients and state roots;
 5. starts global focus telemetry;
@@ -156,7 +138,7 @@ Tool results may contain visible target-app text or screenshots because that is 
 
 ## State and migration
 
-Direct state defaults to `~/.direct-computer-use`; override with `CODEX_COMPUTER_USE_HOME`. Direct mode does not silently reuse the released nested wrapper's state.
+Audit state defaults to `~/.direct-computer-use`; override with `CODEX_COMPUTER_USE_HOME`. Permission policy is not read from that agent-writable path: no-permissions is compiled as the only interface. Legacy `config.json` files are ignored.
 
 See [`MIGRATION.md`](MIGRATION.md) for the immutable-review gate, exact-head opt-in migration, rollback, and conflict avoidance.
 

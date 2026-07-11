@@ -28,11 +28,8 @@ The npm package remains at released 0.1 until a separate release gate. A live 0.
 - `computer_use_press_key`
 - `computer_use_type_text`
 - `/computer-use-status`
-- `/computer-use-mode safe|full-permissions`
 
-Safe mode enables the two read methods. Full mode enables all ten without wrapper app/intent/action gates.
-
-Pi forwards supported official form elicitations to interactive UI but never accepts them automatically. Unsupported or headless elicitations are declined.
+No-permissions is the only policy: all ten tools are available with no wrapper approval prompts, mode selector, or app/intent/action gate. Pi does not advertise or render elicitation UI. Unexpected downstream elicitations are silently declined and never accepted.
 
 ## Generic MCP gateway
 
@@ -56,6 +53,6 @@ For a source checkout:
 
 Do not load the native adapter and generic MCP adapter into the same acceptance process unless tool names are intentionally isolated.
 
-The generic MCP path cannot render Pi's native approval UI and therefore declines downstream elicitations. Configure persistent app access only through official ChatGPT Computer Use settings.
+The generic MCP path uses the same durable no-permissions policy: all ten methods, no wrapper approval UI, and silent decline of unexpected downstream elicitations. Configure persistent app access only through official ChatGPT Computer Use settings.
 
 See the root `MIGRATION.md` before replacing an installed 0.1 adapter.

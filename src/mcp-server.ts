@@ -1,11 +1,8 @@
 #!/usr/bin/env node
-import crypto from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult, ContentBlock } from "@modelcontextprotocol/sdk/types.js";
-import { appendAudit, type AuditRecord } from "./audit.ts";
-import { loadConfig, saveConfig, type PermissionMode } from "./config.ts";
-import { executeDirectTool, getDirectStatus, defaultStateRoot } from "./direct-service.ts";
+import { executeDirectTool, getDirectStatus } from "./direct-service.ts";
 import {
 	DIRECT_TOOL_SCHEMAS,
 	MUTATING_METHODS,
@@ -23,34 +20,7 @@ async function handleCli(): Promise<boolean> {
 		console.log(JSON.stringify(await getDirectStatus(), null, 2));
 		return true;
 	}
-	if (args[0] !== "--configure" || (args[1] !== "safe" && args[1] !== "full-permissions")) {
-		throw new Error("Usage: codex-computer-use-mcp [--status | --configure safe | --configure full-permissions --acknowledge-full-permissions]");
-	}
-	const requested = args[1] as PermissionMode;
-	if (requested === "full-permissions" && !args.includes("--acknowledge-full-permissions")) {
-		throw new Error("Refusing to enable full-permissions without --acknowledge-full-permissions. This enables all eight state-changing official Computer Use tools without wrapper app/action confirmation; first-party approvals and technical controls remain.");
-	}
-	const stateRoot = defaultStateRoot();
-	const previous = await loadConfig(stateRoot);
-	if (previous.permissionMode === requested) {
-		console.log(`Permission mode is already ${requested}.`);
-		return true;
-	}
-	await saveConfig(stateRoot, { version: 1, permissionMode: requested });
-	const audit: AuditRecord = {
-		timestamp: new Date().toISOString(), runId: crypto.randomUUID(), method: "configure", permissionMode: requested,
-		app: null, mutating: true, authorization: requested === "full-permissions" ? "full_permissions_config" : "none",
-		inputBytes: 0, outcome: "ok", durationMs: 0, brokerVersion: null, clientBuild: null, directCalls: 0,
-		modelTurnsStarted: 0, ephemeralThread: null, approvalRequests: 0, backgroundPreserved: null,
-		brokerCleanupVerified: true, appLeaseReleased: true, resultContentTypes: [], resultBytes: 0,
-	};
-	try { await appendAudit(stateRoot, audit); }
-	catch {
-		await saveConfig(stateRoot, previous);
-		throw new Error("Permission mode change was rolled back because secure audit logging failed");
-	}
-	console.log(`Permission mode set to ${requested}.`);
-	return true;
+	throw new Error("Usage: codex-computer-use-mcp [--status]. The durable no-permissions interface has no alternate mode or configuration command.");
 }
 
 try {
@@ -70,10 +40,7 @@ function titleFor(method: DirectMethod): string {
 }
 
 function descriptionFor(method: DirectMethod): string {
-	const authorization = READ_ONLY_METHODS.has(method)
-		? "Available in safe mode."
-		: "Requires explicitly acknowledged full-permissions mode.";
-	return `Call the official signed Computer Use ${method} capability directly. Pi/the MCP client supplies the typed arguments; no nested model, prompt, planner, or model-token usage is involved. ${authorization}`;
+	return `Call the official signed Computer Use ${method} capability directly through the unrestricted no-permissions interface. Pi/the MCP client supplies the typed arguments; no wrapper approval prompt, mode gate, nested model, prompt, planner, or model-token usage is involved.`;
 }
 
 for (const method of OFFICIAL_METHODS) {

@@ -17,19 +17,6 @@ const OPENAI_TEAM_ID = "2DC432GLL2";
 const MAX_PROTOCOL_LINE_BYTES = 8 * 1024 * 1024;
 const MAX_RESULT_BYTES = 25 * 1024 * 1024;
 
-export interface ElicitationRequest {
-	mode?: string;
-	message?: string;
-	requestedSchema?: unknown;
-	serverName?: string;
-}
-
-export interface ElicitationResponse {
-	action: "accept" | "decline" | "cancel";
-	content?: unknown;
-	_meta?: unknown;
-}
-
 export interface DirectBrokerResult {
 	content: Array<Record<string, unknown>>;
 	structuredContent?: unknown;
@@ -43,24 +30,9 @@ export interface DirectBrokerResult {
 	brokerCleanupVerified: true;
 }
 
-function boundedElicitationResponse(value: unknown): ElicitationResponse {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return { action: "cancel" };
-	const response = value as ElicitationResponse;
-	if (response.action !== "accept" && response.action !== "decline" && response.action !== "cancel") {
-		return { action: "cancel" };
-	}
-	try {
-		if (Buffer.byteLength(JSON.stringify(response), "utf8") > 64 * 1024) return { action: "cancel" };
-	} catch {
-		return { action: "cancel" };
-	}
-	return response;
-}
-
 export interface DirectBrokerOptions {
 	timeoutMs?: number;
 	signal?: AbortSignal;
-	onElicitation?: (request: ElicitationRequest) => Promise<ElicitationResponse>;
 	/** Test-only executable override. Production callers never set this. */
 	appServerCommand?: string;
 	/** Test-only argument override. */
@@ -458,7 +430,6 @@ export async function callOfficialDirectTool(
 	let stderr = "";
 	let nextId = 1;
 	let approvalRequests = 0;
-	let elicitationPending = false;
 	let modelTurnsStarted = 0;
 	let directCalls = 0;
 	let ephemeralThread = false;
@@ -556,23 +527,14 @@ export async function callOfficialDirectTool(
 						send({ id: message.id, error: { code: -32601, message: "Unsupported server request" } });
 						return;
 					}
-					if (elicitationPending || approvalRequests >= 8) {
-						fail(new Error("Official app-server emitted overlapping or excessive elicitation requests"));
+					if (approvalRequests >= 8) {
+						fail(new Error("Official app-server emitted excessive elicitation requests"));
 						return;
 					}
 					approvalRequests += 1;
-					elicitationPending = true;
-					void (async () => {
-						let response: ElicitationResponse = { action: "decline" };
-						if (options.onElicitation) {
-							try { response = boundedElicitationResponse(await options.onElicitation(message.params as ElicitationRequest)); }
-							catch { response = { action: "cancel" }; }
-						}
-						if (!proc?.stdin.writable || fatalError) return;
-						send({ id: message.id, result: response });
-					})().catch((error) => {
-						if (!fatalError) fail(error instanceof Error ? error : new Error(String(error)));
-					}).finally(() => { elicitationPending = false; });
+					// The durable no-permissions interface never opens an approval UI and never
+					// self-accepts a first-party request. Unexpected elicitations are declined.
+					send({ id: message.id, result: { action: "decline" } });
 					return;
 				}
 			} catch (error) {
@@ -618,7 +580,7 @@ export async function callOfficialDirectTool(
 			"initialize",
 			{
 				clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: "0.2.0" },
-				capabilities: { mcpServerOpenaiFormElicitation: options.onElicitation !== undefined },
+				capabilities: { mcpServerOpenaiFormElicitation: false },
 			},
 			15_000,
 		);

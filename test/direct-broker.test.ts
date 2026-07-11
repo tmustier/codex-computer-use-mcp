@@ -20,7 +20,7 @@ const send=x=>process.stdout.write(JSON.stringify(x)+"\\n");
 const rl=createInterface({input:process.stdin});
 let pendingTool;
 if(mode==="child-hang"||mode==="orphan-exit"){const child=spawn(process.execPath,["-e","process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{detached:true,stdio:"ignore"});child.unref();appendFileSync(log,JSON.stringify({childPid:child.pid})+"\\n");if(mode==="orphan-exit")process.exit(0);}
-rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify({method:m.method,id:m.id,result:m.result,codexHome:process.env.CODEX_HOME,home:process.env.HOME,tmpdir:process.env.TMPDIR,hasOpenAIKey:Boolean(process.env.OPENAI_API_KEY)})+"\\n");
+rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify({method:m.method,id:m.id,params:m.params,result:m.result,codexHome:process.env.CODEX_HOME,home:process.env.HOME,tmpdir:process.env.TMPDIR,hasOpenAIKey:Boolean(process.env.OPENAI_API_KEY)})+"\\n");
  if(m.method==="initialize"){if(mode==="oversized-line"){process.stdout.write("x".repeat(${8 * 1024 * 1024 + 1}));return;} return send({id:m.id,result:{userAgent:"fake",platformFamily:"unix",platformOs:"macos"}});}
  if(m.method==="initialized") return;
  if(m.method==="thread/start"){const thread=mode==="bad-ephemeral"?{id:"thread-test"}:{id:"thread-test",ephemeral:true,path:null,turns:[]}; send({id:m.id,result:{thread}}); if(mode==="model-event")send({method:"turn/started",params:{}}); return;}
@@ -70,6 +70,8 @@ test("direct broker uses only zero-turn app-server MCP methods and an isolated c
 		const records = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
 		assert.deepEqual(records.map((item) => item.method).filter(Boolean), ["initialize", "initialized", "thread/start", "mcpServerStatus/list", "mcpServer/tool/call"]);
 		assert.equal(records.some((item) => item.method === "turn/start"), false);
+		assert.equal(records.find((item) => item.method === "thread/start")?.params?.approvalPolicy, "never");
+		assert.deepEqual(records.find((item) => item.method === "initialize")?.params?.capabilities, { mcpServerOpenaiFormElicitation: false });
 		assert.ok(records.every((item) => item.hasOpenAIKey === false));
 		assert.ok(records.every((item) => typeof item.codexHome === "string" && item.codexHome.includes("pi-direct-computer-use.")));
 		assert.ok(records.every((item) => item.home.includes("pi-direct-computer-use.") && item.tmpdir === item.home));
@@ -93,44 +95,19 @@ test("direct broker rejects upstream schema drift before tool dispatch", async (
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("direct broker never self-accepts elicitations and forwards an explicit handler decision", async () => {
+test("no-permissions advertises no approval UI and never accepts an unexpected elicitation", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-elicit-test."));
 	try {
-		const first = await makeFake(root);
-		const declined = await callOfficialDirectTool("list_apps", {}, options(first.script, "elicit"));
+		const brokerSource = await readFile("src/direct-broker.ts", "utf8");
+		assert.doesNotMatch(brokerSource, /onElicitation|action:\s*["']accept["']/);
+		const { script, log } = await makeFake(root);
+		const declined = await callOfficialDirectTool("list_apps", {}, options(script, "elicit"));
 		assert.equal(declined.content[0].text, "approval:decline");
 		assert.equal(declined.approvalRequests, 1);
-		await rm(first.log, { force: true });
-		const accepted = await callOfficialDirectTool("list_apps", {}, {
-			...options(first.script, "elicit"),
-			onElicitation: async () => ({ action: "accept", content: { choice: "allow" } }),
-		});
-		assert.equal(accepted.content[0].text, "approval:accept");
-		const records = (await readFile(first.log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-		assert.deepEqual(records.find((item) => item.id === "approval-1" && item.result)?.result, { action: "accept", content: { choice: "allow" } });
-	} finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test("cancellation while an elicitation UI is pending does not write to a closed broker", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-elicit-cancel-test."));
-	try {
-		const { script } = await makeFake(root);
-		const controller = new AbortController();
-		let entered!: () => void;
-		const elicitationStarted = new Promise<void>((resolve) => { entered = resolve; });
-		const call = callOfficialDirectTool("list_apps", {}, {
-			...options(script, "elicit"),
-			signal: controller.signal,
-			onElicitation: async () => {
-				entered();
-				await new Promise((resolve) => setTimeout(resolve, 200));
-				return { action: "decline" };
-			},
-		});
-		await elicitationStarted;
-		controller.abort();
-		await assert.rejects(call, /cancelled/);
-		await new Promise((resolve) => setTimeout(resolve, 250));
+		const records = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+		assert.deepEqual(records.find((item) => item.method === "initialize")?.params?.capabilities, { mcpServerOpenaiFormElicitation: false });
+		assert.deepEqual(records.find((item) => item.id === "approval-1" && item.result)?.result, { action: "decline" });
+		assert.equal(records.some((item) => item.id === "approval-1" && item.result?.action === "accept"), false);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 

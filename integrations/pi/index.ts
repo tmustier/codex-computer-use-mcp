@@ -1,13 +1,10 @@
-import crypto from "node:crypto";
 import path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
-import { getAgentDir, truncateHead, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, truncateHead, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "typebox";
-import { appendAudit, type AuditRecord } from "../../dist/audit.js";
-import { ConfigError, loadConfig, saveConfig } from "../../dist/config.js";
-import { executeDirectTool, getDirectStatus, type ElicitationResponse } from "../../dist/direct-service.js";
-import { MUTATING_METHODS, READ_ONLY_METHODS, type DirectMethod } from "../../dist/tools.js";
+import { executeDirectTool, getDirectStatus } from "../../dist/direct-service.js";
+import type { DirectMethod } from "../../dist/tools.js";
 
 const App = Type.String({ minLength: 1, maxLength: 500, description: "App name, full app path, or unambiguous bundle identifier" });
 const Element = Type.String({ minLength: 1, maxLength: 200, description: "Element identifier from computer_use_get_app_state" });
@@ -46,123 +43,11 @@ const ToolParameters: Record<DirectMethod, TSchema> = {
 };
 
 function toolDescription(method: DirectMethod): string {
-  const mode = READ_ONLY_METHODS.has(method)
-    ? "Available in safe mode."
-    : "Requires explicitly acknowledged full-permissions mode.";
-  return `Call the official signed Computer Use ${method} capability directly. Pi supplies the typed arguments itself; there is no nested model, planner, prompt, or separate model-token usage. ${mode}`;
+  return `Call the official signed Computer Use ${method} capability directly through the unrestricted no-permissions interface. Pi supplies the typed arguments itself; there is no wrapper approval prompt, mode gate, nested model, planner, prompt, or separate model-token usage.`;
 }
 
 function titleFor(method: DirectMethod): string {
   return method.split("_").map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`).join(" ");
-}
-
-function safePromptText(value: unknown): string {
-  return String(value ?? "Official Computer Use requests confirmation.")
-    .replace(/[\u0000-\u001f\u007f]+/g, " ")
-    .slice(0, 4_000);
-}
-
-async function explicitTimedConfirmation(
-  ctx: ExtensionContext,
-  title: string,
-  message: string,
-): Promise<boolean | undefined> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 60_000);
-  try {
-    const answer = await ctx.ui.confirm(title, message, { signal: controller.signal });
-    return controller.signal.aborted ? undefined : answer;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function handleElicitation(request: any, ctx: ExtensionContext): Promise<ElicitationResponse> {
-  if (!ctx.hasUI) return { action: "decline" };
-  const mode = request?.mode;
-  if (mode !== "form") {
-    ctx.ui.notify("Official Computer Use requested an unsupported approval form; it was declined.", "warning");
-    return { action: "decline" };
-  }
-  const schema = request?.requestedSchema;
-  const properties = schema?.properties;
-  const propertiesValid = properties && typeof properties === "object" && !Array.isArray(properties);
-  const entries = propertiesValid ? Object.entries(properties as Record<string, unknown>) : [];
-  const requiredValues = schema?.required === undefined ? [] : schema.required;
-  if (
-    schema?.type !== "object"
-    || !propertiesValid
-    || entries.length > 8
-    || entries.some(([key, field]) => key.length === 0 || key.length > 100 || !field || typeof field !== "object" || Array.isArray(field))
-    || !Array.isArray(requiredValues)
-    || requiredValues.length > 8
-    || requiredValues.some((item: unknown) => typeof item !== "string" || item.length > 100 || !Object.prototype.hasOwnProperty.call(properties, item))
-  ) {
-    ctx.ui.notify("Official Computer Use requested an invalid approval form; it was declined.", "warning");
-    return { action: "decline" };
-  }
-  const required = new Set(requiredValues as string[]);
-  const content: Record<string, unknown> = {};
-  const message = safePromptText(request.message);
-  for (const [key, rawField] of entries) {
-    const field = rawField as Record<string, unknown>;
-    const title = safePromptText(field.title ?? key);
-    if (Array.isArray(field.enum)) {
-      const choices = field.enum;
-      if (
-        field.type !== "string"
-        || choices.length === 0
-        || choices.length > 50
-        || !choices.every((item: unknown) => typeof item === "string" && item.length <= 256)
-        || choices.reduce((total: number, item: unknown) => total + String(item).length, 0) > 4_096
-      ) return { action: "decline" };
-      const choice = await ctx.ui.select(`${message}\n${title}`, choices as string[], { timeout: 60_000 });
-      if (choice === undefined) return { action: "cancel" };
-      content[key] = choice;
-      continue;
-    }
-    if (field.type === "boolean") {
-      const answer = await explicitTimedConfirmation(ctx, title, message);
-      if (answer === undefined) return { action: "cancel" };
-      content[key] = answer;
-      continue;
-    }
-    if (field.type === "string") {
-      const minLength = field.minLength === undefined ? (required.has(key) ? 1 : 0) : field.minLength;
-      const maxLength = field.maxLength === undefined ? 10_000 : field.maxLength;
-      if (!Number.isInteger(minLength) || !Number.isInteger(maxLength) || Number(minLength) < 0 || Number(maxLength) > 10_000 || Number(minLength) > Number(maxLength)) {
-        return { action: "decline" };
-      }
-      const value = await ctx.ui.input(`${message}\n${title}`, safePromptText(field.description ?? ""), { timeout: 60_000 });
-      if (value === undefined) return { action: "cancel" };
-      if (value.length < Number(minLength) || value.length > Number(maxLength)) return { action: "decline" };
-      content[key] = value;
-      continue;
-    }
-    if (field.type === "number" || field.type === "integer") {
-      const bounds = [field.minimum, field.maximum, field.exclusiveMinimum, field.exclusiveMaximum]
-        .filter((value) => value !== undefined);
-      if (bounds.some((value) => typeof value !== "number" || !Number.isFinite(value))) return { action: "decline" };
-      const value = await ctx.ui.input(`${message}\n${title}`, "number", { timeout: 60_000 });
-      if (value === undefined) return { action: "cancel" };
-      const parsed = Number(value);
-      if (
-        !Number.isFinite(parsed)
-        || Math.abs(parsed) > 1_000_000_000
-        || (field.type === "integer" && !Number.isInteger(parsed))
-        || (typeof field.minimum === "number" && parsed < field.minimum)
-        || (typeof field.maximum === "number" && parsed > field.maximum)
-        || (typeof field.exclusiveMinimum === "number" && parsed <= field.exclusiveMinimum)
-        || (typeof field.exclusiveMaximum === "number" && parsed >= field.exclusiveMaximum)
-      ) return { action: "decline" };
-      content[key] = parsed;
-      continue;
-    }
-    ctx.ui.notify("Official Computer Use requested an unsupported approval field; it was declined.", "warning");
-    return { action: "decline" };
-  }
-  const accepted = await explicitTimedConfirmation(ctx, "Send approval response to official Computer Use?", message);
-  return accepted === true ? { action: "accept", content } : { action: "decline" };
 }
 
 function toPiContent(content: Array<Record<string, unknown>>): Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> {
@@ -194,50 +79,10 @@ export default function directComputerUse(pi: ExtensionAPI) {
   const stateRoot = process.env.CODEX_COMPUTER_USE_HOME || path.join(getAgentDir(), "direct-computer-use");
 
   pi.registerCommand("computer-use-status", {
-    description: "Show the direct-call architecture, permissions, signed broker, and private audit path",
+    description: "Show the direct-call architecture, durable no-permissions policy, signed broker, and private audit path",
     handler: async (_args, ctx) => {
       const status = await getDirectStatus(stateRoot);
-      ctx.ui.notify(JSON.stringify(status, null, 2), status.permissionMode === "full-permissions" ? "warning" : "info");
-    },
-  });
-
-  pi.registerCommand("computer-use-mode", {
-    description: "Show or explicitly change safe read-only vs full-permissions mode",
-    handler: async (args, ctx) => {
-      const requested = args.trim();
-      const current = await loadConfig(stateRoot);
-      if (!requested) {
-        ctx.ui.notify(`Current direct Computer Use permission mode: ${current.permissionMode}`, "info");
-        return;
-      }
-      if (requested !== "safe" && requested !== "full-permissions") throw new ConfigError("Usage: /computer-use-mode safe|full-permissions");
-      if (requested === current.permissionMode) {
-        ctx.ui.notify(`Direct Computer Use permission mode is already ${requested}.`, "info");
-        return;
-      }
-      if (requested === "full-permissions") {
-        if (!ctx.hasUI) throw new ConfigError("Enabling full-permissions requires an interactive Pi UI");
-        const confirmed = await ctx.ui.confirm(
-          "Enable FULL direct Computer Use permissions?",
-          "This enables Pi to call all eight state-changing official Computer Use methods without wrapper app/action confirmations. Official first-party approvals, signing, typed schemas, locks, focus telemetry, timeouts, cleanup, and private audits remain.",
-          { timeout: 60_000 },
-        );
-        if (!confirmed) return;
-      }
-      await saveConfig(stateRoot, { version: 1, permissionMode: requested });
-      const audit: AuditRecord = {
-        timestamp: new Date().toISOString(), runId: crypto.randomUUID(), method: "configure", permissionMode: requested,
-        app: null, mutating: true, authorization: requested === "full-permissions" ? "full_permissions_config" : "none",
-        inputBytes: 0, outcome: "ok", durationMs: 0, brokerVersion: null, clientBuild: null, directCalls: 0,
-        modelTurnsStarted: 0, ephemeralThread: null, approvalRequests: 0, backgroundPreserved: null,
-        brokerCleanupVerified: true, appLeaseReleased: true, resultContentTypes: [], resultBytes: 0,
-      };
-      try { await appendAudit(stateRoot, audit); }
-      catch {
-        await saveConfig(stateRoot, current);
-        throw new ConfigError("Permission mode change was rolled back because secure audit logging failed");
-      }
-      ctx.ui.notify(`Direct Computer Use permission mode set to ${requested}.`, requested === "full-permissions" ? "warning" : "info");
+      ctx.ui.notify(JSON.stringify(status, null, 2), "info");
     },
   });
 
@@ -252,17 +97,16 @@ export default function directComputerUse(pi: ExtensionAPI) {
       promptGuidelines: [
         `${piName} is a direct typed tool: choose its arguments yourself; it does not invoke a nested planner or model.`,
         `${piName} must use current element identifiers from computer_use_get_app_state; inspect again after UI state changes.`,
-        `${piName} must not be used for credentials, authentication, payments, external messages, or destructive actions without the user's explicit request and any first-party approval.`,
+        `${piName} must not be used for credentials, authentication, payments, external messages, or destructive actions without the user's explicit request; this wrapper will not open a permission prompt.`,
       ],
       parameters: ToolParameters[method] as any,
-      async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      async execute(_toolCallId, params, signal, onUpdate) {
         const response = await executeDirectTool(
           { method, arguments: params as Record<string, unknown> },
           {
             stateRoot,
             signal,
             onProgress: (message) => onUpdate?.({ content: [{ type: "text", text: message }], details: { status: "running" } }),
-            onElicitation: (request) => handleElicitation(request, ctx),
           },
         );
         if (response.isError) throw new Error(errorText(response.content));

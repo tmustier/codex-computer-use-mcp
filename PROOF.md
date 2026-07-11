@@ -54,14 +54,15 @@ Current branch tests cover:
 - direct JSONL request sequence with no `turn/start`;
 - isolated credential-free `CODEX_HOME` even when the parent environment contains a model API key;
 - production app-server arguments disable model transport, plugins, and remote control;
-- default elicitation decline, bounded/manual form handling, and explicit handler forwarding;
-- cancellation while UI is pending cannot write to a closed broker;
+- durable no-permissions as the sole policy, with no config/environment/command/tool override;
+- all ten methods available without wrapper prompts or mode gates;
+- no advertised elicitation capability, no acceptance callback, and silent decline of unexpected requests;
 - fatal rejection of model-turn notifications, including a notification emitted during teardown;
 - strict `ephemeral: true` / `path: null` / `turns: []` response attestation before dispatch;
 - pre-buffer rejection of an oversized unterminated protocol line;
 - partial-preserving ancestry enumeration plus private-cwd recovery, stable freeze/termination of separately grouped or reparented helpers, and stdio closure;
-- safe read-only dispatch and pre-dispatch mutation rejection;
-- full-permissions absence of wrapper app/intent/action gates;
+- unrestricted read and mutation dispatch under the single no-permissions policy;
+- absence of wrapper app/intent/action gates and permission prompts;
 - canonical bundle-ID dispatch;
 - target focus violation fail-closed behavior;
 - official error preservation;
@@ -69,8 +70,8 @@ Current branch tests cover:
 - secure config/audit no-follow and mode checks;
 - global per-user same-app exclusion across different supported state roots, race behavior, crash release, private lock roots, and bounded lock filenames;
 - focus-event ASN retry/drain behavior, including valid events at the start of a single large stdout chunk;
-- stdio MCP inventory/status and safe mutation rejection;
-- Pi source registration for every direct capability with no nested planner reference.
+- stdio MCP all-ten inventory/status with no alternate mode route;
+- Pi source registration for every direct capability with no nested planner, permission command, or approval UI reference.
 
 ## Fresh-Pi real-app acceptance
 
@@ -111,14 +112,14 @@ Candidate validation completed before independent review:
 - `npm ci`: pass;
 - `npm run check`: pass;
 - `npm run check:pi`: pass;
-- `npm test`: 47/47 pass;
+- `npm test`: 45/45 pass;
 - `npm run build`: pass;
 - `npm audit --omit=dev`: zero vulnerabilities;
 - `npm pack --dry-run`: 36 intended files, shrinkwrap present, no removed nested-runner artifact;
 - public-source scrub: no secrets, private absolute paths, or machine identifiers found;
 - fresh-Pi real-app acceptance: pass as above.
 
-Independent reviews of the preceding candidates found cleanup/coordination and focus-telemetry gaps: fail-open/partial descendant enumeration, early-exit orphan recovery, state-root-scoped same-app locking, false-success lease-release audit, unverified focus-listener exit, pre-response direct-call accounting, and large-chunk focus-event loss. This candidate remediates each finding, plus timeout-safe boolean approval entry and exact 0700 config-state enforcement, with adversarial regressions.
+Independent reviews of preceding candidates found cleanup/coordination and focus-telemetry gaps: fail-open/partial descendant enumeration, early-exit orphan recovery, state-root-scoped same-app locking, false-success lease-release audit, unverified focus-listener exit, pre-response direct-call accounting, and large-chunk focus-event loss. This candidate retains those remediations while removing all wrapper approval UI and safe/full configuration branches.
 
 Remaining gate: commit the remediated candidate, perform a new independent pristine exact-head `gpt-5.6-sol`/`xhigh` security and architecture review, and require zero P0/P1/P2 findings. Record the final commit, tree, tracked-content aggregate, package integrity, and reviewer P0–P3 verdict before any exact-head push or local switch.
 

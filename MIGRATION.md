@@ -8,8 +8,8 @@ Version 0.2 is a breaking architecture change. It must remain off the live Pi pa
 |---|---|
 | `background_computer_use` aggregate task | ten `computer_use_<method>` Pi tools |
 | `background_computer_use_status` | `/computer-use-status` and MCP `computer_use_status` |
-| `/background-computer-use-mode` | `/computer-use-mode` |
-| safe mode: list only | safe mode: list + app-state read |
+| `/background-computer-use-mode` | removed; `/computer-use-status` is read-only |
+| safe/full wrapper modes | one durable no-permissions interface: all ten methods, no wrapper prompts |
 | nested model plans and summarizes | Pi calls one official typed method per tool call |
 | separate Codex model usage | no nested model/token usage |
 | state under wrapper-specific old path | isolated direct state under `~/.direct-computer-use` or Pi agent direct state |
@@ -35,7 +35,7 @@ CODEX_COMPUTER_USE_HOME="$(mktemp -d)" \
 
 `-ne` suppresses auto-discovered extensions so the live 0.1 adapter is not loaded. This does not change live Pi configuration.
 
-Start in safe mode. Use only benign real apps and official first-party approvals. Do not use disposable harnesses as acceptance evidence.
+The source adapter starts only in no-permissions mode: all ten methods are available and the wrapper opens no approval UI. Use only benign real apps whose persistent first-party access is already configured. Do not use disposable harnesses as acceptance evidence.
 
 ## Reviewed exact-head migration
 
@@ -45,18 +45,20 @@ Only after the independent no-blocker review, and only while `main` still identi
 2. Record the reviewed commit/tree and verify the pushed `main` commit matches byte-for-byte.
 3. Remove or disable the 0.1 aggregate adapter and generic MCP registration.
 4. Install the reviewed 0.2 source from the exact pushed commit without publishing a new npm version.
-5. Leave direct state in safe mode initially.
+5. Remove any legacy direct `config.json`; the new build ignores it and has no mode selector.
 6. Start a fresh Pi process; do not rely on hot-reloading a security-boundary change.
 7. Verify `/computer-use-status` reports:
+   - `permissionMode: "no-permissions"`;
+   - `approvalPrompts: false`;
+   - all ten `availableMethods`;
    - `brokerVerified: true`;
    - `nestedModel: false`;
    - `modelUsage: false`;
    - `ephemeralZeroTurnRuntimeContextRequired: true`.
-8. Run read-only `computer_use_list_apps` and `computer_use_get_app_state` against a benign real app with external focus sampling.
-9. Enable full-permissions only through the explicit interactive command if approved.
-10. Exercise mutating methods on benign disposable content, restore app state, then check audits and process cleanup.
+8. Run `computer_use_list_apps` and `computer_use_get_app_state` against a benign real app with external focus sampling.
+9. Exercise mutating methods on benign disposable content, restore app state, then check audits and process cleanup.
 
-Do not copy the old full-permissions file into the new state root. Full mode must be re-acknowledged for the direct surface.
+Do not copy old safe/full configuration into the new state root. No-permissions is compiled as the sole unrestricted, no-wrapper-prompt interface.
 
 ## Rollback
 

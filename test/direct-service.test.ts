@@ -3,8 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { saveConfig } from "../src/config.ts";
-import { executeDirectTool, DirectPolicyError, type DirectServiceDependencies } from "../src/direct-service.ts";
+import { executeDirectTool, type DirectServiceDependencies } from "../src/direct-service.ts";
 import { DirectBrokerCallError, type DirectBrokerResult } from "../src/direct-broker.ts";
 
 function brokerResult(content = "ok", isError = false): DirectBrokerResult {
@@ -33,7 +32,7 @@ function deps(root: string, callTool: DirectServiceDependencies["callTool"], bec
 	};
 }
 
-test("safe mode directly permits only read methods and canonicalizes app identity", async () => {
+test("no-permissions directly permits read methods and canonicalizes app identity", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-safe-test."));
 	const calls: Array<{ method: string; args: Record<string, unknown> }> = [];
 	try {
@@ -85,29 +84,27 @@ test("same-app exclusion is global across different supported state roots", asyn
 	}
 });
 
-test("safe mode rejects mutation before identity resolution or broker dispatch", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-reject-test."));
-	let dispatched = false;
+test("no-permissions dispatches mutating methods without a wrapper gate or prompt", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-mutation-test."));
+	let observed: unknown;
 	try {
-		await assert.rejects(
-			executeDirectTool(
-				{ method: "click", arguments: { app: "TextEdit", element_index: "button-1" } },
-				{ stateRoot: root, callTool: async () => { dispatched = true; return brokerResult(); } },
-			),
-			DirectPolicyError,
+		const response = await executeDirectTool(
+			{ method: "click", arguments: { app: "TextEdit", element_index: "button-1" } },
+			deps(root, async (method, args) => { observed = { method, args }; return brokerResult("clicked"); }),
 		);
-		assert.equal(dispatched, false);
+		assert.equal(response.ok, true);
+		assert.deepEqual(observed, { method: "click", args: { app: "com.apple.TextEdit", element_index: "button-1" } });
 		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
-		assert.equal(audit.outcome, "policy_rejected");
-		assert.equal(audit.directCalls, 0);
+		assert.equal(audit.permissionMode, "no-permissions");
+		assert.equal(audit.authorization, "no_permissions_unrestricted");
+		assert.equal(audit.directCalls, 1);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("full-permissions has no wrapper app, intent, or action gate", async () => {
+test("no-permissions has no wrapper app, intent, or action gate", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-full-test."));
 	let observed: unknown;
 	try {
-		await saveConfig(root, { version: 1, permissionMode: "full-permissions" });
 		const response = await executeDirectTool(
 			{ method: "type_text", arguments: { app: "TextEdit", text: "arbitrary direct action" } },
 			deps(root, async (method, args) => { observed = { method, args }; return brokerResult("typed"); }),
@@ -117,7 +114,7 @@ test("full-permissions has no wrapper app, intent, or action gate", async () => 
 		const auditText = await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8");
 		assert.doesNotMatch(auditText, /arbitrary direct action/);
 		const audit = JSON.parse(auditText.trim());
-		assert.equal(audit.authorization, "full_permissions_config");
+		assert.equal(audit.authorization, "no_permissions_unrestricted");
 		assert.equal(audit.modelTurnsStarted, 0);
 		assert.equal(audit.directCalls, 1);
 		assert.equal(audit.backgroundPreserved, true);
@@ -127,7 +124,6 @@ test("full-permissions has no wrapper app, intent, or action gate", async () => 
 test("focus telemetry fails closed after a completed direct action", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-focus-test."));
 	try {
-		await saveConfig(root, { version: 1, permissionMode: "full-permissions" });
 		await assert.rejects(
 			executeDirectTool(
 				{ method: "press_key", arguments: { app: "TextEdit", key: "ESC" } },
@@ -174,7 +170,6 @@ test("broker failures preserve content-safe architecture evidence in audit", asy
 test("asynchronous focus sampling failures are handled and fail closed", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-sample-test."));
 	try {
-		await saveConfig(root, { version: 1, permissionMode: "full-permissions" });
 		const testDeps = deps(root, async () => {
 			await new Promise((resolve) => setTimeout(resolve, 150));
 			return brokerResult("pressed");

@@ -101,9 +101,9 @@ nested prompts or result summaries
 | Task text, cleanup instructions, required-capabilities fields | **compatibility-only** | removed |
 | Dictionary-only special policy | **accidental** | removed |
 | Wrapper app/intent allowlists in full mode | **accidental** | absent |
-| Safe mode list-only | **compatibility-only** | cleanly evolved to two read methods |
-| Explicit full-permissions acknowledgement | **security-essential user boundary** | retained |
-| Official first-party app/sensitive approvals | **official-required** | retained and never auto-accepted |
+| Safe/full wrapper modes | **compatibility-only** | removed; one durable no-permissions interface exposes all ten methods |
+| Wrapper approval prompts/configuration | **compatibility-only** | removed; no command, config, environment, or per-call selector remains |
+| Official first-party app access | **official-required** | remains external to this wrapper; unexpected elicitations are silently declined and never auto-accepted |
 | macOS TCC | **official-required** | retained; never modified |
 | Exact ten-tool inventory/schema | **security-essential** | retained and checked before each call |
 | Canonical bundle identity | **security-essential** | retained before targeted dispatch |
@@ -117,19 +117,11 @@ nested prompts or result summaries
 | Full-result spill files | **unsafe/accidental** | prohibited; truncation is in-memory only |
 | Browser-host integration | **out of scope** | unchanged |
 
-## Elicitation boundary
+## No-permissions and elicitation boundary
 
-The native Pi adapter advertises supported form elicitation and renders each official field through Pi UI. A human must provide the response and confirm submission. The adapter:
+No-permissions is the sole interface and means unrestricted wrapper dispatch with no wrapper approval prompt. All ten methods are registered. No config file, environment value, slash command, CLI mode switch, or tool argument selects another route.
 
-- defaults to decline;
-- caps field count, key length, enum cardinality/bytes, string/number values, and each UI wait;
-- distinguishes boolean/final-confirmation timeout from a human-entered `false` via `AbortSignal`;
-- enforces supported declared string/numeric bounds;
-- declines headless, URL, proprietary, oversized, malformed, or unsupported forms;
-- never selects `Always allow` or any other option automatically;
-- does not write elicitation content to audits.
-
-The generic stdio MCP wrapper has no native Pi UI and declines downstream elicitations. Users configure persistent app approval in official ChatGPT Computer Use settings.
+Both Pi and generic stdio MCP omit elicitation capability. App-server is created with `approvalPolicy: "never"`. If the official downstream server nevertheless sends an elicitation request, the bridge counts and silently declines it; there is no UI path and no acceptance callback. Users configure any persistent first-party app access externally in official ChatGPT Computer Use settings.
 
 ## Output boundary
 
