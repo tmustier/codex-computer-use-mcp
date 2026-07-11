@@ -2,33 +2,37 @@
 
 ## Reporting a vulnerability
 
-Please do not open a public issue for a vulnerability that could weaken code-signing checks, approval boundaries, target isolation, focus guarantees, audit integrity, or cleanup behavior.
+Do not open a public issue for a vulnerability that could weaken code-signing checks, safe-mode dispatch restrictions, approval boundaries, focus guarantees, audit integrity, or cleanup behavior.
 
-Use GitHub's private vulnerability reporting for this repository. Include:
+Use GitHub's private vulnerability reporting. Include affected versions, the smallest non-sensitive reproduction, expected versus observed behavior, and whether app state changed or cleanup was unverified.
 
-- affected version and ChatGPT macOS app version;
-- macOS and Node.js versions;
-- the smallest non-sensitive reproduction;
-- expected versus observed policy behavior;
-- whether any app state changed or cleanup was unverified.
+Never include credentials, tokens, private/customer content, sensitive screenshots, raw app-state payloads, or private audit files.
 
-Never include credentials, tokens, private/customer content, screenshots containing sensitive data, raw app-state payloads, or private audit files.
+## Authorization model
+
+The signed official client authenticates its parent. An unsigned wrapper cannot synchronously proxy each Computer Use call without breaking that official sender-authentication chain. Streamed target, method, argument, call-budget, focus, and cleanup checks therefore occur after dispatch.
+
+For that reason:
+
+- safe mode is list-only and rejects targeted work before starting Codex;
+- full-permissions mode is broad wrapper authorization, not a preventive per-app sandbox;
+- post-dispatch validation can fail completion and surface cleanup risk, but cannot undo a mutation;
+- official OpenAI app approvals, sensitive-action prompts, and macOS privacy controls remain authoritative.
 
 ## Security invariants
 
-A fix must preserve all of these invariants:
-
 1. Only the fixed OpenAI app-bundled Codex and Computer Use client paths may broker a run.
 2. Both binaries must pass strict code-signing verification and OpenAI Team ID checks.
-3. First-party OpenAI and macOS approvals remain authoritative and are never self-accepted.
-4. Safe mode fails closed for blocked apps/intents, unresolved identity risk, and missing user-elicitation support.
-5. The target app must not become frontmost.
-6. Calls must stay inside the mode-specific Computer Use allowlist, target lease, argument constraints, and call budget.
-7. Same-app work must remain kernel-excluded.
-8. Timeout and cancellation must terminate the full worker process group.
-9. Audit records must remain private and content-safe; audit failure is fatal.
-10. Full-permissions mode must remain explicit and must not disable technical or first-party controls.
+3. First-party OpenAI and macOS approvals are never self-accepted.
+4. Safe mode dispatches only `list_apps`; every targeted mode fails before worker launch.
+5. Full-permissions mode requires explicit acknowledgement and never claims preventive target isolation.
+6. The target app must not become frontmost; watcher health, queued events, in-flight samples, and final state are checked.
+7. Streamed calls must match the mode allowlist, requested target aliases, argument constraints, and call budget before completion is trusted.
+8. Same-app work remains kernel-excluded.
+9. Timeout and cancellation terminate the full worker process group and retain available partial metadata.
+10. Audits remain private and content-safe; policy rejections are audited, and audit failure is fatal once a secure state path exists.
+11. Runtime dependencies are exact-pinned and published with `npm-shrinkwrap.json`.
 
 ## Supported versions
 
-Only the latest release is supported. Because the project depends on bundled app internals, compatibility is evaluated against current ChatGPT macOS releases rather than guaranteed indefinitely.
+Only the latest release is supported. Compatibility is evaluated against current ChatGPT macOS releases rather than guaranteed indefinitely.

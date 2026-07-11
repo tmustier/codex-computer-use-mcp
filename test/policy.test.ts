@@ -24,14 +24,14 @@ test("list is read-only and exposes only list_apps", () => {
 	assert.throws(() => validateRequest({ mode: "list", required_capabilities: ["click"] }), PolicyError);
 });
 
-test("inspect targets a non-sensitive app and cannot mutate", () => {
-	const request = validateRequest({ mode: "inspect", app: "com.example.Harness" });
+test("full-permissions inspect targets one app and cannot mutate", () => {
+	const request = validateRequest({ mode: "inspect", app: "com.example.Harness" }, "full-permissions");
 	assert.equal(request.app, "com.example.Harness");
 	validateObservedMethods(request, ["list_apps", "get_app_state"]);
 	assert.throws(() => validateObservedMethods(request, ["get_app_state", "click"]), PolicyError);
-	assert.throws(() => validateRequest({ mode: "inspect", app: "com.example.Harness", cleanup: true }), PolicyError);
+	assert.throws(() => validateRequest({ mode: "inspect", app: "com.example.Harness", cleanup: true }, "full-permissions"), PolicyError);
 	assert.throws(
-		() => validateRequest({ mode: "inspect", app: "com.example.Harness", required_capabilities: ["click"] }),
+		() => validateRequest({ mode: "inspect", app: "com.example.Harness", required_capabilities: ["click"] }, "full-permissions"),
 		PolicyError,
 	);
 });
@@ -51,7 +51,7 @@ test("full action surface is available for confirmed act tasks", () => {
 			"press_key",
 			"type_text",
 		],
-	});
+	}, "full-permissions");
 	assert.deepEqual(allowedToolsForRequest(request), [...COMPUTER_USE_TOOLS]);
 	const methods = [
 		"get_app_state",
@@ -70,28 +70,16 @@ test("full action surface is available for confirmed act tasks", () => {
 	validateObservedMethods(request, methods);
 });
 
-test("Dictionary is always allowed only for identity-checked inspect and narrow lookup", () => {
-	const inspect = validateRequest({ mode: "inspect", app: "Dictionary" });
-	const lookup = validateRequest({ mode: "dictionary_lookup", query: "dragon" });
-	assert.equal(isDictionaryAlwaysAllowed(inspect, DICTIONARY_BUNDLE_ID, true), true);
-	assert.equal(isDictionaryAlwaysAllowed(lookup, DICTIONARY_BUNDLE_ID, true), true);
+test("full-permissions Dictionary profile remains identity-checked and argument-constrained", () => {
+	const inspect = validateRequest({ mode: "inspect", app: "Dictionary" }, "full-permissions");
+	const lookup = validateRequest({ mode: "dictionary_lookup", query: "dragon" }, "full-permissions");
+	assert.equal(isDictionaryAlwaysAllowed(inspect, DICTIONARY_BUNDLE_ID, true), false);
+	assert.equal(isDictionaryAlwaysAllowed(lookup, DICTIONARY_BUNDLE_ID, true), false);
 	assert.equal(requiresPiConfirmation(inspect, DICTIONARY_BUNDLE_ID, true), false);
 	assert.equal(requiresPiConfirmation(lookup, DICTIONARY_BUNDLE_ID, true), false);
 	assert.equal(isDictionaryAlwaysAllowed(inspect, DICTIONARY_BUNDLE_ID, false), false);
 	assert.equal(isDictionaryAlwaysAllowed(inspect, "com.example.Dictionary", true), false);
-	assert.equal(requiresPiConfirmation(inspect, "com.example.Dictionary", false), true);
-	assert.equal(
-		requiresPiConfirmation(validateRequest({ mode: "inspect", app: "Calculator" }), "com.apple.calculator", false),
-		true,
-	);
-	assert.equal(
-		requiresPiConfirmation(
-			validateRequest({ mode: "act", app: "TextEdit", task: "Type transient text and restore" }),
-			"com.apple.TextEdit",
-			false,
-		),
-		true,
-	);
+	assert.equal(requiresPiConfirmation(inspect, "com.example.Dictionary", false), false);
 	assert.equal(
 		requiresPiConfirmation(
 			validateRequest({ mode: "act", app: "TextEdit", task: "Type without asking" }, "full-permissions"),
@@ -112,14 +100,12 @@ test("Dictionary is always allowed only for identity-checked inspect and narrow 
 	);
 	assert.throws(() => validateRequest({ mode: "act", app: "Dictionary", task: "Click a result" }), PolicyError);
 	assert.throws(() => validateRequest({ mode: "dictionary_lookup", query: "dragon", app: "Dictionary" }), PolicyError);
-	assert.throws(
-		() =>
-			validateResolvedAppIdentity(
-				validateRequest({ mode: "act", app: "Oxford Lexicon", task: "Change a control" }),
-				DICTIONARY_BUNDLE_ID,
-				true,
-			),
-		PolicyError,
+	assert.doesNotThrow(() =>
+		validateResolvedAppIdentity(
+			validateRequest({ mode: "act", app: "Oxford Lexicon", task: "Change a control" }, "full-permissions"),
+			DICTIONARY_BUNDLE_ID,
+			true,
+		),
 	);
 	assert.throws(() => validateResolvedAppIdentity(lookup, DICTIONARY_BUNDLE_ID, false), PolicyError);
 	assert.doesNotThrow(() => validateResolvedAppIdentity(lookup, DICTIONARY_BUNDLE_ID, true));
@@ -155,13 +141,13 @@ test("Dictionary is always allowed only for identity-checked inspect and narrow 
 });
 
 test("act requires pre-state, mutation, post-state, and separate cleanup verification", () => {
-	const request = validateRequest({ mode: "act", app: "Calculator", task: "Enter 2+2, verify 4, then clear" });
+	const request = validateRequest({ mode: "act", app: "Calculator", task: "Enter 2+2, verify 4, then clear", cleanup: true }, "full-permissions");
 	assert.throws(() => validateObservedMethods(request, ["click", "get_app_state", "click", "get_app_state"]), PolicyError);
 	assert.throws(() => validateObservedMethods(request, ["get_app_state", "click", "get_app_state"]), PolicyError);
 	validateObservedMethods(request, ["get_app_state", "click", "get_app_state", "click", "get_app_state"]);
 });
 
-test("high-risk apps and canonical bundle aliases fail closed without narrowing benign action methods", () => {
+test("standalone safe mode is list-only and rejects every targeted operation before dispatch", () => {
 	for (const app of [
 		"Terminal",
 		"iTerm2",
@@ -205,25 +191,11 @@ test("high-risk apps and canonical bundle aliases fail closed without narrowing 
 	]) {
 		assert.throws(() => validateRequest({ mode: "inspect", app }), PolicyError);
 	}
-	const benignAlias = validateRequest({ mode: "inspect", app: "Friendly Alias" });
-	for (const resolvedBundleId of [
-		"com.apple.MobileSMS",
-		"com.tinyspeck.slackmacgap",
-		"com.apple.Passwords",
-		"com.apple.systempreferences",
-	]) {
-		assert.throws(() => validateResolvedAppIdentity(benignAlias, resolvedBundleId, false), PolicyError);
+	for (const app of ["Calculator", "TextEdit", "Friendly Alias", "Dictionary"]) {
+		assert.throws(() => validateRequest({ mode: "inspect", app }, "safe"), PolicyError);
+		assert.throws(() => validateRequest({ mode: "act", app, task: "Perform a benign action" }, "safe"), PolicyError);
 	}
-	for (const task of ["send a message", "buy the item", "enter the password", "approve the privacy prompt", "delete the file"]) {
-		assert.throws(() => validateRequest({ mode: "act", app: "Harness", task }), PolicyError);
-	}
-	assert.doesNotThrow(() =>
-		validateRequest({
-			mode: "act",
-			app: "Harness",
-			task: "Click the button, drag the slider, type test text, select it, scroll, press Escape, then reset",
-		}),
-	);
+	assert.throws(() => validateRequest({ mode: "dictionary_lookup", query: "dragon" }, "safe"), PolicyError);
 });
 
 test("full-permissions removes wrapper app, intent, confirmation, and cleanup-default gates", () => {

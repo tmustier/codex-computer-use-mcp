@@ -11,7 +11,7 @@ import { executeOperation, getStatus } from "../../dist/service.js";
 
 const Params = Type.Object({
   mode: StringEnum(["list", "inspect", "act", "dictionary_lookup"] as const, {
-    description: "list apps, inspect one app, perform an app task, or run a constrained local Dictionary lookup",
+    description: "safe mode permits only list; targeted modes require explicitly acknowledged broad full-permissions",
   }),
   app: Type.Optional(Type.String({ maxLength: 500, description: "App name, bundle identifier, or app-bundle path" })),
   task: Type.Optional(Type.String({ maxLength: 4000, description: "Concrete target-app task for act mode" })),
@@ -57,7 +57,7 @@ export default function codexComputerUse(pi: ExtensionAPI) {
         if (!ctx.hasUI) throw new ConfigError("Enabling full-permissions requires an interactive Pi UI");
         const confirmed = await ctx.ui.confirm(
           "Enable FULL Computer Use permissions?",
-          "This disables wrapper app, intent, and per-operation confirmation gates for the complete official ten-tool surface. Official OpenAI/macOS approvals and signing, lock, focus, timeout, cleanup, and audit controls remain.",
+          "This broadly enables targeted operations that safe mode refuses. Official OpenAI/macOS approvals and signing, post-dispatch validation, lock, focus, timeout, cleanup, and audit controls remain.",
           { timeout: 60_000 },
         );
         if (!confirmed) {
@@ -99,7 +99,7 @@ export default function codexComputerUse(pi: ExtensionAPI) {
     name: "background_computer_use",
     label: "Background Computer Use",
     description:
-      "Inspect or operate native macOS apps in the background through the official signed Codex Computer Use broker. Safe mode applies policy and Pi confirmation; explicit full-permissions removes wrapper gates but never bypasses first-party approvals or technical controls. Calls consume separate Codex usage.",
+      "Use the official signed Codex Computer Use broker for native macOS apps. Safe mode is list-only; explicit full-permissions broadly authorizes targeted operations but never bypasses first-party approvals or technical controls. Calls consume separate Codex usage.",
     promptSnippet: "Inspect or operate a native macOS app in the background through signed Codex Computer Use",
     promptGuidelines: [
       "Use background_computer_use when the user asks to inspect or operate a native macOS app in the background.",
@@ -108,13 +108,10 @@ export default function codexComputerUse(pi: ExtensionAPI) {
       "Disclose that background_computer_use starts a nested Codex model call and consumes separate Codex usage.",
     ],
     parameters: Params,
-    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, onUpdate, _ctx) {
       const response = await executeOperation(params, {
         stateRoot,
         signal,
-        confirm: ctx.hasUI
-          ? ({ title, body }) => ctx.ui.confirm(title, body, { timeout: 60_000, signal })
-          : undefined,
         onProgress: (message) =>
           onUpdate?.({ content: [{ type: "text", text: message }], details: { status: "running" } }),
       });

@@ -9,7 +9,7 @@ test("prompt names only the fully-qualified Computer Use tools enabled for each 
 	assert.doesNotMatch(listPrompt, /computer-use\/get_app_state/);
 
 	const inspectPrompt = buildPrompt(
-		validateRequest({ mode: "inspect", app: "CUA Harness A" }),
+		validateRequest({ mode: "inspect", app: "CUA Harness A" }, "full-permissions"),
 		"dev.codexcomputeruse.cua-harness-a",
 	);
 	assert.match(inspectPrompt, /computer-use\/list_apps, computer-use\/get_app_state/);
@@ -17,7 +17,7 @@ test("prompt names only the fully-qualified Computer Use tools enabled for each 
 	assert.match(inspectPrompt, /set app="CUA Harness A"/);
 	assert.doesNotMatch(inspectPrompt, /computer-use\/click/);
 
-	const lookupPrompt = buildPrompt(validateRequest({ mode: "dictionary_lookup", query: "dragon" }), "com.apple.Dictionary");
+	const lookupPrompt = buildPrompt(validateRequest({ mode: "dictionary_lookup", query: "dragon" }, "full-permissions"), "com.apple.Dictionary");
 	for (const tool of ["get_app_state", "set_value", "scroll"]) {
 		assert.match(lookupPrompt, new RegExp(`computer-use/${tool}`));
 	}
@@ -27,11 +27,11 @@ test("prompt names only the fully-qualified Computer Use tools enabled for each 
 	assert.match(lookupPrompt, /fixed neutral value "dictionary"/);
 	assert.match(lookupPrompt, /Do not click, type, press keys/);
 
-	const actPrompt = buildPrompt(validateRequest({ mode: "act", app: "CUA Harness A", task: "Exercise the harness controls" }));
+	const actPrompt = buildPrompt(validateRequest({ mode: "act", app: "CUA Harness A", task: "Exercise the harness controls" }, "full-permissions"));
 	const fullPrompt = buildPrompt(
 		validateRequest({ mode: "act", app: "Terminal", task: "Perform the explicitly requested action" }, "full-permissions"),
 	);
-	assert.match(fullPrompt, /configured full-permissions mode authorizes/);
+	assert.match(fullPrompt, /configured full-permissions mode broadly authorizes/);
 	assert.match(fullPrompt, /complete official typed Computer Use methods/);
 	assert.doesNotMatch(fullPrompt, /without saving, sending, deleting/);
 

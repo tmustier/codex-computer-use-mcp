@@ -57,6 +57,36 @@ test("event-driven global focus watcher resolves ASN notifications to bundle IDs
 	}
 });
 
+test("focus watcher retries an ASN whose first bundle lookup fails", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "focus-watcher-retry-test."));
+	const listener = path.join(root, "listener.mjs");
+	const info = path.join(root, "info.mjs");
+	const counter = path.join(root, "counter");
+	const asn = "ASN:0x123-0x456";
+	const bundleId = "dev.codexcomputeruse.focus-retry";
+	let watcher: Awaited<ReturnType<typeof watchTargetFrontmost>> | undefined;
+	try {
+		await writeFile(listener, `#!/usr/bin/env node\nconsole.log(${JSON.stringify(asn)}); setInterval(() => {}, 1000);\n`, "utf8");
+		await writeFile(
+			info,
+			`#!/usr/bin/env node\nimport fs from 'node:fs'; const file=${JSON.stringify(counter)}; const n=fs.existsSync(file)?Number(fs.readFileSync(file,'utf8')):0; fs.writeFileSync(file,String(n+1)); if(n===0) process.exit(1); console.log('"CFBundleIdentifier"="${bundleId}"');\n`,
+			"utf8",
+		);
+		await chmod(listener, 0o700);
+		await chmod(info, 0o700);
+		watcher = await watchTargetFrontmost(listener, info);
+		for (let attempt = 0; attempt < 20 && !watcher.becameFrontmost(bundleId); attempt += 1) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		assert.equal(watcher.becameFrontmost(bundleId), true);
+		await watcher.stop();
+		watcher = undefined;
+	} finally {
+		await watcher?.stop().catch(() => {});
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("focus watcher drains queued events before final query", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "focus-watcher-drain-test."));
 	const listener = path.join(root, "listener.mjs");

@@ -23,7 +23,7 @@ async function handleCli(): Promise<boolean> {
   }
   const requested = args[1] as PermissionMode;
   if (requested === "full-permissions" && !args.includes("--acknowledge-full-permissions")) {
-    throw new Error("Refusing to enable full-permissions without --acknowledge-full-permissions. This removes wrapper app, intent, and per-operation confirmation gates; official OpenAI approvals and technical controls remain.");
+    throw new Error("Refusing to enable full-permissions without --acknowledge-full-permissions. This broadly enables targeted operations that safe mode refuses; official OpenAI approvals and technical controls remain.");
   }
   const stateRoot = defaultStateRoot();
   const previous = await loadConfig(stateRoot);
@@ -75,7 +75,7 @@ const server = new McpServer(
 
 const operationSchema = {
   mode: z.enum(["list", "inspect", "act", "dictionary_lookup"]).describe(
-    "list discovers apps; inspect reads one app; act performs a task; dictionary_lookup is a constrained local Dictionary lookup",
+    "safe mode permits only list; inspect, act, and dictionary_lookup require explicitly acknowledged broad full-permissions mode",
   ),
   app: z.string().max(500).optional().describe("App name, bundle identifier, or app-bundle path"),
   task: z.string().max(4000).optional().describe("Concrete target-app task for act mode"),
@@ -92,7 +92,7 @@ server.registerTool(
   {
     title: "Background Computer Use",
     description:
-      "Inspect or operate a native macOS app in the background through the official signed Codex Computer Use broker. Safe mode blocks high-risk apps/intents and requires user elicitation for app work except narrow Dictionary lookup. Explicit full-permissions mode removes wrapper gates but never bypasses first-party OpenAI app approvals, sensitive-action prompts, macOS privacy controls, signing checks, focus telemetry, locks, timeouts, cleanup verification, or sanitized audit logging. Calls consume separate Codex usage.",
+      "Use the official signed Codex Computer Use broker for native macOS apps. Safe mode is deliberately list-only because target checks are observable only after signed-client dispatch. Explicit full-permissions enables inspect/act/dictionary operations with broad wrapper authorization; it never bypasses first-party OpenAI app approvals, sensitive-action prompts, macOS privacy controls, signing checks, focus telemetry, locks, timeouts, cleanup verification, or sanitized audit logging. Calls consume separate Codex usage.",
     inputSchema: operationSchema,
     annotations: {
       readOnlyHint: false,
@@ -103,35 +103,7 @@ server.registerTool(
   },
   async (args, extra): Promise<CallToolResult> => {
     try {
-      const response = await executeOperation(args, {
-        signal: extra.signal,
-        confirm: async ({ title, body }) => {
-          let elicited;
-          try {
-            elicited = await server.server.elicitInput({
-              mode: "form",
-              message: `${title}\n\n${body}`,
-              requestedSchema: {
-                type: "object",
-                properties: {
-                  confirm: {
-                    type: "boolean",
-                    title: "Confirm this exact background Computer Use operation",
-                    description: "Enable only if the app, task, capabilities, cleanup, and separate Codex usage are intended.",
-                    default: false,
-                  },
-                },
-                required: ["confirm"],
-              },
-            });
-          } catch {
-            throw new Error(
-              "Safe mode requires interactive MCP form elicitation for this app operation, but the connected client does not support it.",
-            );
-          }
-          return elicited.action === "accept" && elicited.content?.confirm === true;
-        },
-      });
+      const response = await executeOperation(args, { signal: extra.signal });
       return {
         content: [{ type: "text", text: response.text }],
         structuredContent: response.details,

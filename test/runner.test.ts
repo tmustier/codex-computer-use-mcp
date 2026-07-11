@@ -137,21 +137,47 @@ test("runner handles an already-aborted signal without EPIPE or temp leakage", a
 		await chmod(fake, 0o700);
 		const controller = new AbortController();
 		controller.abort();
-		await assert.rejects(
-			() =>
-				runOfficialCodex("test", {
-					codexPath: fake,
-					skipSignatureVerification: true,
-					timeoutMs: 5000,
-					allowedTools: ["list_apps"],
-					signal: controller.signal,
-				}),
-			/aborted/,
-		);
+		const result = await runOfficialCodex("test", {
+			codexPath: fake,
+			skipSignatureVerification: true,
+			timeoutMs: 5000,
+			allowedTools: ["list_apps"],
+			signal: controller.signal,
+		});
+		assert.equal(result.errorKind, "cancelled");
+		assert.equal(result.exitCode, 130);
+		assert.deepEqual(result.computerUseMethods, []);
 		const leaked = (await readdir(os.tmpdir())).filter(
 			(name) => name.startsWith("pi-native-app-worker.") && !before.has(name),
 		);
 		assert.deepEqual(leaked, []);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("runner preserves completed-call evidence when cancellation interrupts a turn", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "native-runner-partial-cancel-test."));
+	const fake = path.join(root, "partial-codex.mjs");
+	try {
+		await writeFile(
+			fake,
+			`#!/usr/bin/env node\nconsole.log(JSON.stringify({type:'item.completed',item:{type:'mcp_tool_call',server:'computer-use',tool:'list_apps',status:'completed',arguments:{},result:{ok:true}}})); setInterval(()=>{},1000);\n`,
+			{ mode: 0o700 },
+		);
+		await chmod(fake, 0o700);
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), 1000);
+		const result = await runOfficialCodex("test", {
+			codexPath: fake,
+			skipSignatureVerification: true,
+			timeoutMs: 5000,
+			allowedTools: ["list_apps"],
+			signal: controller.signal,
+		});
+		clearTimeout(timer);
+		assert.equal(result.errorKind, "cancelled");
+		assert.deepEqual(result.computerUseMethods, ["list_apps"]);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

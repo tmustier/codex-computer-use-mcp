@@ -1,95 +1,81 @@
 # Proof and acceptance record
 
-This document records the release-candidate evidence for the original implementation and its extraction into this standalone MCP server. It is not a claim that future ChatGPT app versions will remain compatible.
+This records evidence for the standalone MCP extraction. It does not guarantee compatibility with future ChatGPT macOS versions.
 
-## Security boundary
-
-The supported path is:
+## Supported path
 
 ```text
-MCP client → standalone wrapper → app-bundled Codex CLI → signed SkyComputerUseClient → official Computer Use service
+MCP client → wrapper → app-bundled signed Codex CLI → signed SkyComputerUseClient → official Computer Use service
 ```
 
-Direct, unsigned access to the native service was rejected with sender-authentication failures. The implementation does not bypass that boundary. It verifies the fixed app-bundled Codex and Computer Use client binaries with `codesign --verify --strict` and checks OpenAI Team ID `2DC432GLL2` before each broker run.
+Direct unsigned access was rejected by sender authentication. The wrapper does not bypass that boundary. It verifies the fixed app-bundled Codex and Computer Use client with `codesign --verify --strict` and OpenAI Team ID `2DC432GLL2` before each run.
 
-The implementation also preserves:
+## Preventive-boundary finding
 
-- official OpenAI app approval and sensitive-action elicitation;
-- macOS privacy controls;
-- target-specific typed tool allowlists and exact output schema;
-- target lease/alias validation;
-- kernel-backed same-app exclusion;
-- focus-event monitoring plus sampled frontmost verification;
-- process-group timeout/cancellation cleanup;
-- mode-`0600`, content-safe audits.
+An independent `gpt-5.6-sol`/`xhigh` review of the first standalone candidate found that streamed target and argument checks occur after official-client dispatch. A model deviation could therefore reach a different already-approved app before the wrapper killed the worker.
 
-## Independent exact-head review
+A local MCP proxy was prototyped and proved capable of rejecting a wrong target before forwarding. It was not adopted: making the unsigned proxy the official client's parent breaks the signed-parent sender-authentication chain and caused live Computer Use to fail. Injection, re-signing, credential extraction, and authentication bypass were rejected as out of bounds.
 
-The final pre-install runtime was reviewed through the official app-bundled Codex CLI with:
+The public authorization model was changed instead:
 
-- model: `gpt-5.6-sol`
-- reasoning effort: `xhigh`
-- verdict: `P0=0, P1=0, P2=0, P3=0`
-- disposition: `NO BLOCKER / MERGE-READY`
+- safe mode is list-only;
+- all targeted modes are rejected and audited before worker launch;
+- full-permissions mode is explicitly acknowledged broad authorization;
+- streamed target/method/argument/focus/cleanup checks are documented as post-dispatch detection and completion criteria, not a preventive sandbox.
 
-An earlier independent review caught a real safe-mode bypass: category blocking covered display names but not canonical bundle identifiers and alias-resolved identities. The release candidate added canonical bundle-ID patterns, exact opaque-ID blocking, post-resolution policy revalidation, and regression tests for Messages, Slack, Passwords, System Settings, browsers, terminals, and editors. Full-permissions behavior remained explicit and unchanged.
+## Other review remediation
 
-## Core test evidence
+The same review found and prompted fixes for:
 
-The reviewed core completed:
+- incomplete operations returning a non-error tool status;
+- policy-validation failures missing audits;
+- lease-release failure suppressing the audit attempt;
+- cancellation losing available runner metadata;
+- ASN lookup failures being permanently deduplicated;
+- final focus sampling not draining an in-flight sample;
+- caret-ranged published dependencies without a shrinkwrap;
+- status claiming a healthy boundary without verifying the signed broker;
+- insufficient release provenance guidance.
 
-- 33/33 tests passing outside a sandbox;
+Regression tests cover each applicable code path.
+
+## Test and host evidence
+
+The original reviewed core demonstrated:
+
 - strict TypeScript compilation;
-- signed broker and typed Computer Use schema verification;
-- crash-release and long-selector hashed lock tests;
-- streamed final-event parsing and failed-status regressions;
-- global focus watcher drain-before-final-query regression;
-- config/audit no-follow, mode, and fsync checks.
+- signed broker and ten-method schema verification;
+- crash-release and bounded hashed-lock tests;
+- streamed event, failed-status, call-budget, timeout, and cancellation tests;
+- focus watcher drain/final-query tests;
+- secure config/audit no-follow, mode, and fsync checks;
+- fresh stopped-Calculator background action with `2 + 2 = 4`, `AC → 0`, cleanup verified, and zero Calculator-frontmost samples;
+- all ten official methods, different-app concurrency, same-app exclusion, and cancellation cleanup in earlier benign harness acceptance.
 
-The standalone extraction adds an MCP protocol test covering:
+The standalone MCP server additionally demonstrated a real stdio client handshake and safe-mode `list` call:
 
-- stdio initialization and tool discovery;
-- exact public tool names and required input schema;
-- safe default status;
-- fail-closed behavior when a client lacks form elicitation.
+- result `ok`;
+- 39 apps;
+- one successful `list_apps` method;
+- background preserved;
+- separate Codex usage reported;
+- private sanitized audit written.
 
-## Live acceptance
-
-### Original installed extension
-
-A fresh host session proved:
-
-- `list`: 39 apps through exactly one signed `list_apps` call;
-- stopped Calculator: background launch, `2 + 2 = 4`, `AC → 0`, required `click` capability satisfied, cleanup verified;
-- external 100 ms focus sampling: 871 samples, zero Calculator-frontmost samples;
-- post-run: zero worker directories, focus listeners, `lockf` holders, owner files, or harness processes.
-
-Earlier live acceptance also exercised all ten official typed methods, different-app concurrency, same-app exclusion, and cancellation/process cleanup.
-
-### Standalone MCP server
-
-A real stdio MCP client called `background_computer_use` with `mode=list` against the extracted server in default safe mode:
-
-- result: `ok`
-- apps: 39
-- successful official methods: `list_apps` only
-- background preserved: `true`
-- usage: reported by the nested Codex turn
-- sanitized audit: written to a private temporary state directory
-
-No Pi-specific runtime was involved in that call.
+After remediation, release validation must rerun the exact current test count, build, dependency audit, package inspection, read-only list acceptance, Pi adapter smoke, and independent exact-head review. The GitHub release should bind the final commit, tracked-tree aggregate hash, package integrity, host versions, and reviewer verdict.
 
 ## Release gate
 
-Before publishing a release:
+Before publishing:
 
-1. Run `npm ci`, `npm run check`, `npm test`, and `npm run build`.
-2. Verify the ChatGPT app and embedded client signatures on the target host.
-3. Run a fresh stdio MCP `list` acceptance.
-4. Run one stopped benign-app action with external focus sampling and cleanup verification.
-5. Check for leaked workers, listeners, lock holders, owner records, and harness apps.
-6. Independently review the exact release tree; do not publish with an unresolved P0/P1/P2 finding.
+1. Run `npm ci`, `npm run check`, `npm test`, `npm run build`, and `npm audit --omit=dev`.
+2. Inspect `npm pack --dry-run`; verify `npm-shrinkwrap.json` and exact runtime dependency versions are included.
+3. Verify ChatGPT/Codex/client signatures and Team ID on the acceptance host.
+4. Run fresh stdio MCP `list` acceptance in safe mode.
+5. Run one benign stopped-app action only after explicitly enabling full-permissions, with external focus sampling and cleanup verification.
+6. Check for leaked workers, listeners, lock holders, owner records, and harness apps.
+7. Independently review the exact release tree. Do not publish with unresolved P0/P1/P2 findings.
+8. Record commit, aggregate hash, package integrity, host versions, test count, and review verdict in the release.
 
 ## Non-goals
 
-This project does not provide a direct Sky/Computer Use protocol clone, browser-host integration, credential extraction, TCC automation, app injection, code-signing bypass, or automatic approval acceptance.
+This project does not provide a Sky protocol clone, browser-host integration, credential extraction, TCC automation, app injection, re-signing, sender-authentication bypass, or automatic approval acceptance.

@@ -101,7 +101,7 @@ function operationInstructions(request: ValidatedRequest, targetApp = request.ap
 					: "Choose the least disruptive Computer Use actions that complete the task.";
 			const authorization =
 				request.permissionMode === "full-permissions"
-					? "The configured full-permissions mode authorizes this wrapper to execute the requested official-service action without a Pi confirmation."
+					? "The configured full-permissions mode broadly authorizes this wrapper to execute official-service actions without a wrapper per-operation confirmation."
 					: "The task has been confirmed in Pi safe mode.";
 			return `Target only ${JSON.stringify(targetApp)}. ${authorization} The requested task is: ${JSON.stringify(request.task)}. First call get_app_state, then perform the task using the typed Computer Use tools, then call get_app_state to verify the result. ${required} Cleanup requirement: ${cleanup} ${request.cleanup ? "After observing the task result, perform cleanup and call get_app_state again to verify the cleaned state." : "Do not invent cleanup."} Return apps=[].`;
 		}

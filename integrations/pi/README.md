@@ -8,13 +8,13 @@ Choose **one** integration path. Do not load both under the same tool name.
 pi install npm:codex-computer-use-mcp@0.1.0
 ```
 
-The package manifest loads `integrations/pi/index.ts`. It registers:
+The package manifest loads `integrations/pi/index.ts` and registers:
 
 - `background_computer_use`
 - `/background-computer-use-status`
 - `/background-computer-use-mode`
 
-This is the best Pi experience because safe-mode confirmation uses Pi's native `ctx.ui.confirm` dialog. The adapter imports the same compiled service used by the MCP server; it does not fork the security-critical runner or policy.
+The adapter imports the same compiled service used by the MCP server; it does not fork the security-critical runner or policy.
 
 For a local checkout:
 
@@ -27,7 +27,7 @@ pi -ne -e /absolute/path/to/codex-computer-use-mcp/integrations/pi/index.ts
 
 ## Pi MCP gateway
 
-Merge the `codex-computer-use` entry from [`mcp.json.example`](mcp.json.example) into `~/.pi/agent/mcp.json`, then reload Pi.
+Merge [`mcp.json.example`](mcp.json.example) into `~/.pi/agent/mcp.json`, then reload Pi.
 
 `directTools: false` is intentional. It keeps this powerful capability behind Pi's MCP gateway instead of injecting it into every agent turn as an always-on direct tool.
 
@@ -43,6 +43,8 @@ For a local checkout, replace the command and arguments with:
 }
 ```
 
-The stdio server defaults to safe mode. The MCP path needs form-elicitation support for safe-mode `inspect` and `act`; otherwise those calls fail closed. `list` and constrained `dictionary_lookup` remain available. Full-permissions mode must be enabled separately and explicitly with the CLI described in the repository README.
+## Permission warning
 
-Do not register the app-bundled Codex broker itself as a direct tool. This wrapper is the policy, focus, lock, cleanup, and audit boundary.
+Standalone safe mode is list-only. `inspect`, `act`, and `dictionary_lookup` require explicitly acknowledged full-permissions mode. Full mode broadly authorizes wrapper use of official Computer Use because target checks cannot be placed before signed-client dispatch without breaking official sender authentication. Read the root README before enabling it.
+
+Do not register the app-bundled Codex broker itself as a direct tool. This wrapper provides signing checks, post-dispatch validation, focus monitoring, locking, cleanup criteria, and private audits.

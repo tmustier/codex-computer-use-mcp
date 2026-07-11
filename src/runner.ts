@@ -505,7 +505,6 @@ export async function runOfficialCodex(prompt: string, options: RunnerOptions): 
 		if (timeout) clearTimeout(timeout);
 		if (abortHandler && options.signal) options.signal.removeEventListener("abort", abortHandler);
 		if (terminationPromise) await terminationPromise;
-		if (aborted) throw new Error("Native app task was aborted");
 
 		let result: NativeResult | undefined;
 		if (!policyViolation && !timedOut && exitCode === 0) {
@@ -519,7 +518,7 @@ export async function runOfficialCodex(prompt: string, options: RunnerOptions): 
 		}
 		const failureText = `${stderr}\n${observedErrorText}`;
 		return {
-			exitCode: timedOut ? 124 : exitCode,
+			exitCode: aborted ? 130 : timedOut ? 124 : exitCode,
 			result,
 			usage,
 			computerUseMethods: methods,
@@ -528,12 +527,14 @@ export async function runOfficialCodex(prompt: string, options: RunnerOptions): 
 			policyViolation,
 			errorKind: policyViolation
 				? "policy_violation"
-				: timedOut
-					? "timeout"
-					: exitCode === 0
+				: aborted
+					? "cancelled"
+					: timedOut
+						? "timeout"
+						: exitCode === 0
 						? undefined
 						: classifyFailure(failureText, exitCode),
-			errorSummary: exitCode === 0 ? undefined : safeErrorSummary(failureText),
+			errorSummary: aborted ? "Computer Use request cancelled" : exitCode === 0 ? undefined : safeErrorSummary(failureText),
 			codexVersion,
 			durationMs: Date.now() - started,
 		};

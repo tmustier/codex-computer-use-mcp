@@ -17,6 +17,7 @@
   "files": [
     "dist",
     "integrations/pi",
+    "npm-shrinkwrap.json",
     "README.md",
     "PROOF.md",
     "SECURITY.md",
@@ -24,15 +25,15 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist && tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.ts",
     "prepare": "npm run build",
     "prepublishOnly": "npm run check && npm test && npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "zod": "^4.4.3"
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "4.4.3"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",

@@ -147,8 +147,8 @@ export interface TargetFrontmostWatcher {
 	stop(): Promise<void>;
 }
 
-function bundleIdForAsn(asn: string): string | undefined {
-	const info = spawnSync("/usr/bin/lsappinfo", ["info", "-only", "bundleID", asn], {
+function bundleIdForAsn(asn: string, infoPath = "/usr/bin/lsappinfo"): string | undefined {
+	const info = spawnSync(infoPath, ["info", "-only", "bundleID", asn], {
 		encoding: "utf8",
 		timeout: 3000,
 	});
@@ -156,38 +156,56 @@ function bundleIdForAsn(asn: string): string | undefined {
 	return (info.stdout ?? "").match(/"CFBundleIdentifier"="([^"]+)"/)?.[1];
 }
 
-export async function watchTargetFrontmost(listenerPath = "/usr/bin/lsappinfo"): Promise<TargetFrontmostWatcher> {
+export async function watchTargetFrontmost(
+	listenerPath = "/usr/bin/lsappinfo",
+	infoPath = "/usr/bin/lsappinfo",
+): Promise<TargetFrontmostWatcher> {
 	// Listen globally so a stopped/display-name target is covered before background launch and canonical resolution.
 	const proc = spawn(listenerPath, ["listen", "+becameFrontmost", "forever"], {
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 	const observedBundles = new Set<string>();
 	const observedAsns = new Set<string>();
+	const unresolvedAsns = new Set<string>();
 	let running = true;
 	let buffer = "";
+	const resolvePending = () => {
+		for (const asn of unresolvedAsns) {
+			const bundleId = bundleIdForAsn(asn, infoPath);
+			if (!bundleId) continue;
+			observedBundles.add(bundleId.toLowerCase());
+			observedAsns.add(asn);
+			unresolvedAsns.delete(asn);
+		}
+	};
+	const retryTimer = setInterval(resolvePending, 50);
+	retryTimer.unref();
+	const markStopped = () => {
+		running = false;
+		clearInterval(retryTimer);
+	};
 	proc.stdout.setEncoding("utf8");
 	proc.stdout.on("data", (chunk: string) => {
 		buffer = `${buffer}${chunk}`.slice(-16_384);
 		for (const match of buffer.matchAll(/ASN:0x[0-9a-f]+-0x[0-9a-f]+/gi)) {
 			const asn = match[0];
-			if (observedAsns.has(asn)) continue;
-			observedAsns.add(asn);
-			const bundleId = bundleIdForAsn(asn);
-			if (bundleId) observedBundles.add(bundleId.toLowerCase());
+			if (!observedAsns.has(asn)) unresolvedAsns.add(asn);
 		}
+		resolvePending();
 	});
-	proc.once("error", () => {
-		running = false;
-	});
-	proc.once("close", () => {
-		running = false;
-	});
+	proc.once("error", markStopped);
+	proc.once("close", markStopped);
 	await new Promise((resolve) => setTimeout(resolve, 75));
 	if (!running || proc.exitCode !== null) throw new Error("Target focus-event monitor failed to start");
 	return {
-		becameFrontmost: (bundleId) => observedBundles.has(bundleId.toLowerCase()),
+		becameFrontmost: (bundleId) => {
+			resolvePending();
+			return observedBundles.has(bundleId.toLowerCase());
+		},
 		healthy: () => running && proc.exitCode === null,
 		stop: async () => {
+			clearInterval(retryTimer);
+			resolvePending();
 			if (proc.exitCode !== null) return;
 			proc.kill("SIGTERM");
 			await new Promise<void>((resolve) => {

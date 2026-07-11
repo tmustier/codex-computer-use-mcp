@@ -17,7 +17,7 @@ test("audit is mode-0600 structured metadata without task text", async () => {
 			mutating: true,
 			cleanupRequested: true,
 			userConfirmed: true,
-			authorization: "explicit_pi_confirmation",
+			authorization: "full_permissions_config",
 			inputBytes: 3,
 			outcome: "ok",
 			durationMs: 1,
@@ -31,7 +31,7 @@ test("audit is mode-0600 structured metadata without task text", async () => {
 		assert.equal(mode, 0o600);
 		const record = JSON.parse((await readFile(auditPath, "utf8")).trim());
 		assert.equal(record.inputBytes, 3);
-		assert.equal(record.authorization, "explicit_pi_confirmation");
+		assert.equal(record.authorization, "full_permissions_config");
 		assert.equal(record.permissionMode, "safe");
 		assert.equal(Object.hasOwn(record, "value"), false);
 		assert.equal(Object.hasOwn(record, "observed"), false);

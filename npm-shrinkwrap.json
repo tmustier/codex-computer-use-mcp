@@ -8,9 +8,12 @@
       "name": "codex-computer-use-mcp",
       "version": "0.1.0",
       "license": "MIT",
+      "os": [
+        "darwin"
+      ],
       "dependencies": {
-        "@modelcontextprotocol/sdk": "^1.29.0",
-        "zod": "^4.4.3"
+        "@modelcontextprotocol/sdk": "1.29.0",
+        "zod": "4.4.3"
       },
       "bin": {
         "codex-computer-use-mcp": "dist/mcp-server.js"
@@ -21,6 +24,26 @@
       },
       "engines": {
         "node": ">=22"
+      },
+      "peerDependencies": {
+        "@earendil-works/pi-ai": "*",
+        "@earendil-works/pi-coding-agent": "*",
+        "@earendil-works/pi-tui": "*",
+        "typebox": "*"
+      },
+      "peerDependenciesMeta": {
+        "@earendil-works/pi-ai": {
+          "optional": true
+        },
+        "@earendil-works/pi-coding-agent": {
+          "optional": true
+        },
+        "@earendil-works/pi-tui": {
+          "optional": true
+        },
+        "typebox": {
+          "optional": true
+        }
       }
     },
     "node_modules/@hono/node-server": {

@@ -1,19 +1,31 @@
 # Codex Computer Use MCP
 
-A local MCP server that lets compatible agents inspect and operate native macOS apps **in the background** through the official, signed Computer Use broker bundled with the OpenAI ChatGPT app.
+A local MCP server that lets compatible agents use the official, signed Computer Use broker bundled with the OpenAI ChatGPT macOS app.
 
-It exposes the full typed Computer Use surface while preserving the controls that matter:
+It exposes all ten typed Computer Use methods while preserving:
 
 - official OpenAI code-signing checks;
 - first-party app approvals and sensitive-action prompts;
 - macOS Screen Recording and Accessibility permissions;
-- safe-by-default policy and interactive MCP elicitation;
+- a deliberately list-only safe default;
+- explicit acknowledgement before broad full-permissions mode;
 - per-app kernel locks;
 - foreground/focus telemetry with fail-closed background guarantees;
-- exact tool schemas, call budgets, timeout and process-group cleanup;
+- output schemas, call budgets, timeout and process-group cleanup;
 - sanitized, mode-`0600` metadata audits.
 
 > **Independent project.** This is not an OpenAI product and is not endorsed by OpenAI. It depends on implementation details in the macOS ChatGPT app and may need updates when that app changes.
+
+## Important authorization model
+
+The official Computer Use client authenticates its signed parent process. Putting an unsigned local MCP proxy between app-bundled Codex and that client breaks the official sender-authentication boundary. Therefore wrapper checks of a nested model's target and arguments can only observe events **after** the signed client has dispatched them.
+
+This project does not pretend that post-dispatch observation is a preventive sandbox:
+
+- **Safe mode permits only `list`.** No target app or mutation is dispatched.
+- **Full-permissions mode broadly authorizes the wrapper to use official Computer Use.** It retains first-party OpenAI/macOS controls and detects target, method, argument, call-budget, focus, and cleanup drift, but detection cannot undo an action already dispatched.
+
+Do not enable full-permissions if you need the wrapper itself to provide a preventive per-app security boundary.
 
 ## Requirements
 
@@ -21,7 +33,7 @@ It exposes the full typed Computer Use surface while preserving the controls tha
 - Node.js 22 or newer
 - the official ChatGPT macOS app at `/Applications/ChatGPT.app`
 - a Codex account/session available to the app-bundled Codex CLI
-- any required first-party OpenAI app approvals and macOS privacy permissions, completed in their official UI
+- required first-party OpenAI app approvals and macOS privacy permissions, completed in their official UI
 
 The server never extracts credentials, re-signs or injects into an app, changes TCC permissions, forges sender authentication, or self-accepts first-party approvals.
 
@@ -51,36 +63,32 @@ Running `codex-computer-use-mcp` with no arguments starts the stdio MCP server.
 
 ### `background_computer_use`
 
-Input modes:
+| Mode | Purpose | Permission mode |
+|---|---|---|
+| `list` | List apps visible to official Computer Use | Safe or full |
+| `inspect` | Read one app | Full only |
+| `act` | Perform a concrete app task | Full only |
+| `dictionary_lookup` | Constrained local Apple Dictionary workflow | Full only |
 
-| Mode | Purpose |
-|---|---|
-| `list` | List apps visible to official Computer Use |
-| `inspect` | Read the state of one app |
-| `act` | Perform a concrete task in one app |
-| `dictionary_lookup` | Narrow local Apple Dictionary lookup |
-
-Optional fields include `cleanup`, `cleanup_instructions`, and `required_capabilities`. The latter can require genuine use of one or more official methods:
+Optional fields include `cleanup`, `cleanup_instructions`, and `required_capabilities`. The latter can require observed successful use of official methods:
 
 `list_apps`, `get_app_state`, `click`, `perform_secondary_action`, `set_value`, `select_text`, `scroll`, `drag`, `press_key`, `type_text`.
 
 ### `background_computer_use_status`
 
-Returns the permission mode, state and audit locations, model, approval boundary, and supported methods.
+Returns the permission mode, state/audit locations, broker verification and version, model, approval boundary, and supported methods.
 
 ## Permission modes
 
 ### Safe mode (default)
 
-Safe mode blocks high-risk apps and intents. App inspection/actions require a user confirmation through MCP **form elicitation**, except the constrained Dictionary profile. A client without form-elicitation support fails closed for those operations.
-
-List mode and constrained Dictionary lookup do not require wrapper confirmation. Official OpenAI and macOS prompts remain authoritative for every mode.
+Safe mode is intentionally list-only. Targeted requests are rejected and audited before a Codex worker starts.
 
 ### Full-permissions mode
 
-This intentionally removes the wrapper's app, intent, and per-operation confirmation gates. It does **not** bypass official OpenAI approvals, sensitive-action prompts, macOS privacy controls, signing checks, focus monitoring, locks, call budgets, timeout cleanup, or audit logging.
+This broadly authorizes targeted official Computer Use operations. It does **not** bypass official OpenAI approvals, sensitive-action prompts, macOS privacy controls, signing checks, focus monitoring, locks, call budgets, timeout cleanup, or audit logging.
 
-Enable it only with an explicit acknowledgement:
+Enable it only with explicit acknowledgement:
 
 ```bash
 codex-computer-use-mcp --configure full-permissions --acknowledge-full-permissions
@@ -92,21 +100,21 @@ Return to safe mode:
 codex-computer-use-mcp --configure safe
 ```
 
-State defaults to `~/.codex-computer-use-mcp`. Override it with `CODEX_COMPUTER_USE_HOME`. Configuration changes are written mode `0600` and audited; an audit failure rolls the change back.
+State defaults to `~/.codex-computer-use-mcp`. Override it with `CODEX_COMPUTER_USE_HOME`. Configuration is mode `0600` and audited; an audit failure rolls a mode change back.
 
 ## MCP client configuration
 
-### Pi
-
-For Pi's native confirmation UI, install the included Pi package adapter:
+### Pi native adapter
 
 ```bash
 pi install npm:codex-computer-use-mcp@0.1.0
 ```
 
-This registers `background_computer_use`, `/background-computer-use-status`, and `/background-computer-use-mode`. Pi supplies the confirmation dialog in safe mode.
+This registers `background_computer_use`, `/background-computer-use-status`, and `/background-computer-use-mode`.
 
-Alternatively, use the stdio server through Pi's MCP gateway. Add it to `~/.pi/agent/mcp.json`. Keep `directTools: false` so its capability remains intentional rather than an always-on direct tool:
+### Pi MCP gateway
+
+Alternatively add this to `~/.pi/agent/mcp.json`. `directTools: false` keeps the capability intentional instead of injecting it into every turn:
 
 ```json
 {
@@ -122,7 +130,7 @@ Alternatively, use the stdio server through Pi's MCP gateway. Add it to `~/.pi/a
 }
 ```
 
-See [`integrations/pi/`](integrations/pi/) for both adapter options. Do not install the native Pi adapter and MCP registration simultaneously under the same tool name.
+See [`integrations/pi/`](integrations/pi/). Do not load both Pi adapters under the same tool name.
 
 ### Claude Desktop
 
@@ -150,23 +158,24 @@ MCP client
   → target macOS app
 ```
 
-The nested Codex turn is pinned to `gpt-5.6-sol` at `xhigh` reasoning, receives a mode-specific allowlist, runs with shell/web/remote plugins disabled, and emits a constrained result schema. Every successful event is checked against the target lease and requested capability set.
+The nested Codex turn is pinned to `gpt-5.6-sol` at `xhigh` reasoning, receives a mode-specific tool allowlist, runs with shell/web/remote plugins disabled, and emits a constrained result schema. Streamed events are checked against the requested target, method set, argument constraints, and call budget. These checks are detection and fail-closed completion criteria, not pre-dispatch mediation.
 
-The target app is background-launched with `open -g`; the server samples frontmost state and consumes global focus notifications. If the target becomes frontmost, the operation fails closed. Unrelated user focus changes are recorded but do not invalidate the operation.
+Target apps are background-launched with `open -g`. The server samples frontmost state and consumes global focus notifications. If the target becomes frontmost, completion fails. Unrelated user focus changes are recorded but do not invalidate the operation.
 
 ## Usage, privacy, and audits
 
-Each operation starts a separate Codex turn and consumes separate Codex plan/API usage. The tool result reports token usage.
+Each operation starts a separate Codex turn and consumes separate Codex plan/API usage. Results report token usage.
 
-Audit records include timestamps, operation/mode, canonical or hashed app identity, byte counts, outcome, methods used, usage, and cleanup/focus results. They do **not** include task text, typed content, screenshots, app-state payloads, or model output.
+Audits include timestamps, operation/mode, canonical or hashed app identity, byte counts, outcome, methods, usage, and cleanup/focus results. They do **not** include task text, typed content, screenshots, app-state payloads, or model output. Policy-rejected requests are also audited once a secure state directory is available.
 
 ## Known limitations
 
-- The integration currently targets fixed bundle paths inside the ChatGPT macOS app.
+- The integration targets fixed bundle paths inside the ChatGPT macOS app.
 - App updates may change bundled paths, CLI flags, plugin schemas, or signing layout.
-- First-party approvals may need to be completed in an official interactive OpenAI session before a background retry.
+- First-party approvals may need completion in an official interactive OpenAI session.
 - Browser-host Computer Use is not exposed; this project targets native macOS apps.
-- A foreground-preservation failure aborts the operation, but a mutating call may already have changed app state; inspect and restore manually before retrying.
+- In full-permissions mode, a target/method/focus/cleanup failure is detected after streamed events; mutations may already have occurred. Inspect and restore manually before retrying.
+- Secure config-path failures may prevent audit creation because the server refuses to write through an untrusted path.
 
 ## Development
 
@@ -177,9 +186,9 @@ npm test
 npm run build
 ```
 
-The test suite covers policy, canonical identity blocking, signed broker/schema presence, streamed event validation, argument drift, call budgets, cancellation/timeouts, locks, focus monitoring, secure config/audit handling, native harnesses, and the stdio MCP handshake.
+Runtime dependencies are exact-pinned and the published graph is bound by `npm-shrinkwrap.json`.
 
-See [`PROOF.md`](PROOF.md) for acceptance evidence and [`SECURITY.md`](SECURITY.md) for reporting guidance.
+See [`PROOF.md`](PROOF.md), [`SECURITY.md`](SECURITY.md), and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 

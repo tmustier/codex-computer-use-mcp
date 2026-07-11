@@ -10,15 +10,13 @@ import {
   PolicyError,
   allowedToolsForRequest,
   createDictionaryArgumentValidator,
-  isDictionaryAlwaysAllowed,
-  requiresPiConfirmation,
   validateObservedMethods,
   validateResolvedAppIdentity,
   validateRequest,
   type NativeAppInput,
 } from "./policy.ts";
 import { buildPrompt } from "./prompt.ts";
-import { runOfficialCodex, type FirstPartyInterruption, type RunnerResult } from "./runner.ts";
+import { runOfficialCodex, verifyOfficialBroker, type FirstPartyInterruption, type RunnerResult } from "./runner.ts";
 import {
   ensureAppRunningInBackground,
   frontmostBundleId,
@@ -28,15 +26,9 @@ import {
   watchTargetFrontmost,
 } from "./system.ts";
 
-export interface ConfirmationRequest {
-  title: string;
-  body: string;
-}
-
 export interface OperationDependencies {
   stateRoot?: string;
   signal?: AbortSignal;
-  confirm?: (request: ConfirmationRequest) => Promise<boolean>;
   onProgress?: (message: string) => void | Promise<void>;
 }
 
@@ -56,16 +48,6 @@ function usageText(result: RunnerResult): string {
   return `Codex usage: ${usage.input} input (${usage.cachedInput} cached), ${usage.output} output tokens`;
 }
 
-function confirmationText(request: ReturnType<typeof validateRequest>): string {
-  if (request.mode === "inspect") {
-    return `Read the Computer Use state of ${request.app}. App state is sent to a separate ${MODEL} Codex turn for interpretation.`;
-  }
-  const required = request.requiredCapabilities.length
-    ? `\nRequired capabilities: ${request.requiredCapabilities.join(", ")}`
-    : "";
-  return `${request.task}\n\nTarget: ${request.app}${required}\nBackground-only: yes\nCleanup: ${request.cleanup ? request.cleanupInstructions ?? "restore transient state and verify" : "disabled by request"}\nUsage: separate ${MODEL} Codex turn.`;
-}
-
 function safeDisplay(value: string, maxLength: number): string {
   return value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, maxLength);
 }
@@ -74,6 +56,27 @@ function auditAppIdentifier(app: string | undefined, canonicalBundleId: string |
   if (!app) return null;
   if (canonicalBundleId) return canonicalBundleId;
   return `target-sha256:${crypto.createHash("sha256").update(app).digest("hex").slice(0, 16)}`;
+}
+
+function rejectedInputMetadata(raw: unknown): { operation: string; app: string | null; mutating: boolean; cleanup: boolean; inputBytes: number } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { operation: "invalid_request", app: null, mutating: false, cleanup: false, inputBytes: 0 };
+  }
+  const value = raw as Record<string, unknown>;
+  const operation = typeof value.mode === "string" && ["list", "inspect", "act", "dictionary_lookup", "configure"].includes(value.mode)
+    ? value.mode
+    : "invalid_request";
+  const app = typeof value.app === "string" ? auditAppIdentifier(value.app, undefined) : null;
+  const input = [value.task, value.query, value.cleanup_instructions]
+    .filter((item): item is string => typeof item === "string")
+    .join("");
+  return {
+    operation,
+    app,
+    mutating: operation === "act" || operation === "dictionary_lookup" || operation === "configure",
+    cleanup: value.cleanup === true,
+    inputBytes: Buffer.byteLength(input, "utf8"),
+  };
 }
 
 function interruptionMessage(kind: FirstPartyInterruption, app: string, methods: string[]): string {
@@ -102,6 +105,31 @@ export async function executeOperation(raw: unknown, deps: OperationDependencies
   try {
     request = validateRequest(raw as NativeAppInput, permissionMode);
   } catch (error) {
+    const rejected = rejectedInputMetadata(raw);
+    const audit: AuditRecord = {
+      timestamp: new Date().toISOString(),
+      runId,
+      operation: rejected.operation,
+      permissionMode,
+      app: rejected.app,
+      mutating: rejected.mutating,
+      cleanupRequested: rejected.cleanup,
+      userConfirmed: false,
+      authorization: permissionMode === "full-permissions" ? "full_permissions_config" : "none",
+      inputBytes: rejected.inputBytes,
+      outcome: "policy_rejected",
+      durationMs: Date.now() - startedAt,
+      model: MODEL,
+      usage: { input: 0, cachedInput: 0, output: 0 },
+      computerUseCalls: 0,
+      backgroundPreserved: null,
+      cleanupVerified: null,
+    };
+    try {
+      await appendAudit(stateDir, audit, "background-computer-use.jsonl");
+    } catch {
+      throw new Error("Computer Use request was rejected, but secure audit logging failed");
+    }
     if (error instanceof PolicyError) throw error;
     throw new PolicyError("Request did not pass the Computer Use policy");
   }
@@ -129,45 +157,20 @@ export async function executeOperation(raw: unknown, deps: OperationDependencies
     validateResolvedAppIdentity(request, targetIdentity?.bundleId, targetIdentity?.verifiedSystemDictionary === true);
     if (initialTargetLeaseId) locks.push(await acquireAppLock(stateDir, initialTargetLeaseId, runId));
 
-    const dictionaryAlwaysAllowed = isDictionaryAlwaysAllowed(
-      request,
-      canonicalTargetApp,
-      targetIdentity?.verifiedSystemDictionary === true,
-    );
-    if (requiresPiConfirmation(request, canonicalTargetApp, targetIdentity?.verifiedSystemDictionary === true)) {
-      if (!deps.confirm) throw new PolicyError("App inspection/actions are blocked without an interactive user approval channel");
-      userConfirmed = await deps.confirm({
-        title: request.mutating ? `Allow background work in ${app}?` : `Allow reading ${app} state?`,
-        body: confirmationText(request),
-      });
-      if (!userConfirmed) {
-        outcome = "user_cancelled";
-        return {
-          ok: false,
-          isError: false,
-          text: "Computer Use task cancelled by the user; no Codex worker was started.",
-          details: { runId, mode: request.mode, permissionMode, app, outcome, model: MODEL },
-        };
-      }
-      authorization = "explicit_pi_confirmation";
-    } else if (dictionaryAlwaysAllowed) {
-      authorization = "dictionary_always_allowed";
-    }
-
     frontBefore = frontmostBundleId();
     if (!frontBefore) throw new PolicyError("Could not observe the frontmost app; refusing to spend Codex quota without background verification");
-    let focusSampleInFlight = false;
-    const sampleFocus = async (): Promise<void> => {
-      if (focusSampleInFlight) return;
-      focusSampleInFlight = true;
-      try {
+    let focusSamplePromise: Promise<void> | undefined;
+    const sampleFocus = (): Promise<void> => {
+      if (focusSamplePromise) return focusSamplePromise;
+      focusSamplePromise = (async () => {
         const current = await frontmostBundleIdAsync();
         if (!current) return;
         if (canonicalTargetApp && current.toLowerCase() === canonicalTargetApp.toLowerCase()) targetBecameFrontmost = true;
         else if (current !== frontBefore) unrelatedFocusChanges = true;
-      } finally {
-        focusSampleInFlight = false;
-      }
+      })().finally(() => {
+        focusSamplePromise = undefined;
+      });
+      return focusSamplePromise;
     };
     if (app) focusWatcher = await watchTargetFrontmost();
     const focusMonitor = setInterval(() => void sampleFocus(), 250);
@@ -214,7 +217,7 @@ export async function executeOperation(raw: unknown, deps: OperationDependencies
       outcome = `first_party_${runner.firstPartyInterruption}`;
       return {
         ok: false,
-        isError: false,
+        isError: true,
         text: `[${permissionMode}] ${interruptionMessage(runner.firstPartyInterruption, app ?? "the target app", runner.computerUseMethods)} Do not retry automatically. ${usageText(runner)}`,
         details: {
           runId,
@@ -228,6 +231,7 @@ export async function executeOperation(raw: unknown, deps: OperationDependencies
           usage: runner.usage,
           model: MODEL,
           durationMs: runner.durationMs,
+          retryAllowed: false,
         },
       };
     }
@@ -310,7 +314,14 @@ export async function executeOperation(raw: unknown, deps: OperationDependencies
       },
     };
   } finally {
-    for (const held of locks.reverse()) await held.release();
+    let releaseFailure = false;
+    for (const held of locks.reverse()) {
+      try {
+        await held.release();
+      } catch {
+        releaseFailure = true;
+      }
+    }
     const audit: AuditRecord = {
       timestamp: new Date().toISOString(),
       runId,
@@ -335,15 +346,28 @@ export async function executeOperation(raw: unknown, deps: OperationDependencies
     } catch {
       throw new Error(`Computer Use ended with outcome ${outcome}, but secure audit logging failed${request.mutating ? "; prior mutations and cleanup state may require manual inspection" : ""}`);
     }
+    if (releaseFailure) {
+      throw new Error(`Computer Use ended with outcome ${outcome}, but one or more app leases did not release cleanly`);
+    }
   }
 }
 
 export async function getStatus(stateRoot = defaultStateRoot()): Promise<Record<string, unknown>> {
   const config: ExtensionConfig = await loadConfig(stateRoot);
+  let brokerVerified = false;
+  let brokerVersion: string | undefined;
+  try {
+    brokerVersion = verifyOfficialBroker();
+    brokerVerified = true;
+  } catch {
+    // Status remains readable on incompatible hosts without exposing local verification details.
+  }
   return {
     stateRoot,
     permissionMode: config.permissionMode,
     model: MODEL,
+    brokerVerified,
+    ...(brokerVersion ? { brokerVersion } : {}),
     officialApprovalAuthoritative: true,
     supportedMethods: [...COMPUTER_USE_TOOLS],
     auditPath: path.join(stateRoot, "audit", "background-computer-use.jsonl"),

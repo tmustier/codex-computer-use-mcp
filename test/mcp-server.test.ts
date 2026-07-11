@@ -31,13 +31,15 @@ test("stdio MCP server advertises the public tools and safe default status", asy
     assert.equal(status.isError, undefined);
     assert.equal((status.structuredContent as Record<string, unknown>).permissionMode, "safe");
     assert.equal((status.structuredContent as Record<string, unknown>).officialApprovalAuthoritative, true);
+    assert.equal((status.structuredContent as Record<string, unknown>).brokerVerified, true);
+    assert.match(String((status.structuredContent as Record<string, unknown>).brokerVersion), /^codex-cli /);
 
     const unconfirmed = await client.callTool({
       name: "background_computer_use",
       arguments: { mode: "inspect", app: "TextEdit" },
     });
     assert.equal(unconfirmed.isError, true);
-    assert.match(String(unconfirmed.content[0] && "text" in unconfirmed.content[0] ? unconfirmed.content[0].text : ""), /does not support/i);
+    assert.match(String(unconfirmed.content[0] && "text" in unconfirmed.content[0] ? unconfirmed.content[0].text : ""), /safe mode permits only list/i);
   } finally {
     await client.close().catch(() => {});
     await rm(stateRoot, { recursive: true, force: true });

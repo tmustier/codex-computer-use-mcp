@@ -209,6 +209,11 @@ function validateRequiredCapabilities(value: unknown): ComputerUseTool[] {
 export function validateRequest(input: NativeAppInput, permissionMode: PermissionMode = "safe"): ValidatedRequest {
 	if (!input || typeof input !== "object") throw new PolicyError("Request must be an object");
 	if (permissionMode !== "safe" && permissionMode !== "full-permissions") throw new PolicyError("Invalid permission mode");
+	if (permissionMode === "safe" && input.mode !== "list") {
+		throw new PolicyError(
+			"Standalone safe mode permits only list: target and argument checks are observable only after the signed official client dispatches a call. Enable explicit full-permissions only if that broad authorization is acceptable.",
+		);
+	}
 
 	switch (input.mode) {
 		case "list":

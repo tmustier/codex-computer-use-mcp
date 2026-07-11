@@ -11,7 +11,7 @@ export interface AuditRecord {
 	mutating: boolean;
 	cleanupRequested: boolean;
 	userConfirmed: boolean;
-	authorization: "none" | "explicit_pi_confirmation" | "dictionary_always_allowed" | "full_permissions_config";
+	authorization: "none" | "full_permissions_config";
 	inputBytes: number;
 	outcome: string;
 	durationMs: number;
