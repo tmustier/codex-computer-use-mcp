@@ -38,7 +38,8 @@ async function inspectStateDirectory(stateDir: string, create: boolean): Promise
 	try {
 		const info = await lstat(stateDir);
 		if (info.isSymbolicLink() || !info.isDirectory()) throw new ConfigError("Computer Use state must be a non-symlink directory");
-		if ((info.mode & 0o022) !== 0) throw new ConfigError("Computer Use state directory must not be group/world writable");
+		if ((info.mode & 0o777) !== 0o700) throw new ConfigError("Computer Use state directory must have mode 0700");
+		if (process.getuid && info.uid !== process.getuid()) throw new ConfigError("Computer Use state directory must be owned by the current user");
 		return true;
 	} catch (error: any) {
 		if (error?.code !== "ENOENT") throw error;
@@ -46,6 +47,7 @@ async function inspectStateDirectory(stateDir: string, create: boolean): Promise
 		await mkdir(stateDir, { recursive: true, mode: 0o700 });
 		const info = await lstat(stateDir);
 		if (info.isSymbolicLink() || !info.isDirectory()) throw new ConfigError("Computer Use state must be a non-symlink directory");
+		if (process.getuid && info.uid !== process.getuid()) throw new ConfigError("Computer Use state directory must be owned by the current user");
 		await chmod(stateDir, 0o700);
 		return true;
 	}

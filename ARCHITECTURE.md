@@ -53,7 +53,7 @@ The relevant construction difference is the macOS responsible-process chain:
 - unsupported: ad-hoc/no-Team-ID Node parent → signed helper;
 - supported: Node/Pi → strict-valid OpenAI-signed app-bundled Codex (`2DC432GLL2`) → strict-valid OpenAI-signed helper (`2DC432GLL2`).
 
-Process sampling confirmed the helper children were direct descendants of signed app-server; helper processes may create their own process groups, so cleanup freezes the root, strictly enumerates and freezes descendants to a stable tree, then kills and verifies every known process rather than assuming one PGID. Enumeration, freeze, or exit uncertainty fails cleanup closed. The app-server has the expected sandbox/application-group entitlement keys; the helper has OpenAI application/team identifiers, application groups, and keychain-access-group entitlements. Ordinary Node has no Team ID or entitlement set. The service's peer audit token is not exposed through the supported MCP layer. No private socket inspection, identity spoofing, copied signing material, re-signing, injection, or TCC change was attempted. The remaining enforcement boundary is therefore OS peer/responsible-process identity, not a missing public JSON field.
+Process sampling confirmed the helper children were direct descendants of signed app-server; helper processes may create their own process groups. App-server and helper therefore share one private per-call cwd. Cleanup preserves partial ancestry results, recovers any reparented process by that unique cwd, freezes the owned set to stability, then kills and verifies every process rather than assuming one PGID. Enumeration, freeze, or exit uncertainty fails cleanup closed. The app-server has the expected sandbox/application-group entitlement keys; the helper has OpenAI application/team identifiers, application groups, and keychain-access-group entitlements. Ordinary Node has no Team ID or entitlement set. The service's peer audit token is not exposed through the supported MCP layer. No private socket inspection, identity spoofing, copied signing material, re-signing, injection, or TCC change was attempted. The remaining enforcement boundary is therefore OS peer/responsible-process identity, not a missing public JSON field.
 
 Command, environment, cwd, and config differences were also isolated: both paths invoke the same signed helper with `mcp`; the accepted path gives it a signed parent plus a private fixed cwd/config environment. Matching public MCP fields did not alter the raw error, while the signed-parent path succeeds without model credentials.
 
@@ -123,6 +123,7 @@ The native Pi adapter advertises supported form elicitation and renders each off
 
 - defaults to decline;
 - caps field count, key length, enum cardinality/bytes, string/number values, and each UI wait;
+- distinguishes boolean/final-confirmation timeout from a human-entered `false` via `AbortSignal`;
 - enforces supported declared string/numeric bounds;
 - declines headless, URL, proprietary, oversized, malformed, or unsupported forms;
 - never selects `Always allow` or any other option automatically;

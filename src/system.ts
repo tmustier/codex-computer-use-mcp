@@ -157,11 +157,13 @@ export async function watchTargetFrontmost(
 	};
 	proc.stdout.setEncoding("utf8");
 	proc.stdout.on("data", (chunk: string) => {
-		buffer = `${buffer}${chunk}`.slice(-16_384);
+		buffer += chunk;
 		for (const match of buffer.matchAll(/ASN:0x[0-9a-f]+-0x[0-9a-f]+/gi)) {
 			const asn = match[0];
 			if (!observedAsns.has(asn)) unresolvedAsns.add(asn);
 		}
+		// Every complete ASN above has been consumed; retain only enough overlap for a token split across chunks.
+		buffer = buffer.slice(-128);
 		resolvePending();
 	});
 	proc.once("error", markStopped);

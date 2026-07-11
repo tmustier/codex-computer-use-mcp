@@ -59,7 +59,7 @@ Current branch tests cover:
 - fatal rejection of model-turn notifications, including a notification emitted during teardown;
 - strict `ephemeral: true` / `path: null` / `turns: []` response attestation before dispatch;
 - pre-buffer rejection of an oversized unterminated protocol line;
-- fail-closed process enumeration plus stable freeze/termination of separately grouped descendants and stdio closure;
+- partial-preserving ancestry enumeration plus private-cwd recovery, stable freeze/termination of separately grouped or reparented helpers, and stdio closure;
 - safe read-only dispatch and pre-dispatch mutation rejection;
 - full-permissions absence of wrapper app/intent/action gates;
 - canonical bundle-ID dispatch;
@@ -68,7 +68,7 @@ Current branch tests cover:
 - private metadata-only audits with no arguments/results and truthful separate broker/lease cleanup evidence;
 - secure config/audit no-follow and mode checks;
 - global per-user same-app exclusion across different supported state roots, race behavior, crash release, private lock roots, and bounded lock filenames;
-- focus-event ASN retry/drain behavior;
+- focus-event ASN retry/drain behavior, including valid events at the start of a single large stdout chunk;
 - stdio MCP inventory/status and safe mutation rejection;
 - Pi source registration for every direct capability with no nested planner reference.
 
@@ -111,14 +111,14 @@ Candidate validation completed before independent review:
 - `npm ci`: pass;
 - `npm run check`: pass;
 - `npm run check:pi`: pass;
-- `npm test`: 43/43 pass;
+- `npm test`: 47/47 pass;
 - `npm run build`: pass;
 - `npm audit --omit=dev`: zero vulnerabilities;
 - `npm pack --dry-run`: 36 intended files, shrinkwrap present, no removed nested-runner artifact;
 - public-source scrub: no secrets, private absolute paths, or machine identifiers found;
 - fresh-Pi real-app acceptance: pass as above.
 
-An independent review of the preceding candidate found three activation-blocking cleanup/coordination issues: fail-open descendant enumeration, state-root-scoped same-app locking, and a false-success audit on lease release failure. This candidate remediates all three, plus unverified focus-listener exit and pre-write direct-call accounting, with adversarial regressions.
+Independent reviews of the preceding candidates found cleanup/coordination and focus-telemetry gaps: fail-open/partial descendant enumeration, early-exit orphan recovery, state-root-scoped same-app locking, false-success lease-release audit, unverified focus-listener exit, pre-response direct-call accounting, and large-chunk focus-event loss. This candidate remediates each finding, plus timeout-safe boolean approval entry and exact 0700 config-state enforcement, with adversarial regressions.
 
 Remaining gate: commit the remediated candidate, perform a new independent pristine exact-head `gpt-5.6-sol`/`xhigh` security and architecture review, and require zero P0/P1/P2 findings. Record the final commit, tree, tracked-content aggregate, package integrity, and reviewer P0–P3 verdict before any exact-head push or local switch.
 

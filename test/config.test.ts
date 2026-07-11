@@ -38,6 +38,18 @@ test("config rejects unknown values, permissive files, and symlinks", async () =
 	}
 });
 
+test("config requires an existing state directory to have exact mode 0700", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "bcu-config-state-mode-test."));
+	try {
+		await chmod(root, 0o755);
+		await assert.rejects(() => loadConfig(root), /mode 0700/);
+		await assert.rejects(() => saveConfig(root, { version: 1, permissionMode: "safe" }), /mode 0700/);
+	} finally {
+		await chmod(root, 0o700);
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("config refuses a symlinked state directory", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "bcu-config-state-symlink-test."));
 	const realState = path.join(root, "real-state");

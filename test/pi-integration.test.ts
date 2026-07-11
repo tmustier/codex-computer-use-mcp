@@ -16,6 +16,8 @@ test("Pi adapter registers every official capability as a direct typed tool with
 	assert.match(source, /choices\.length > 50/);
 	assert.match(source, /value\.length > Number\(maxLength\)/);
 	assert.match(source, /Math\.abs\(parsed\) > 1_000_000_000/);
-	assert.ok((source.match(/timeout: 60_000/g) ?? []).length >= 5);
+	assert.ok((source.match(/timeout: 60_000/g) ?? []).length >= 3);
+	assert.match(source, /explicitTimedConfirmation/);
+	assert.match(source, /controller\.signal\.aborted \? undefined : answer/);
 	assert.match(source, /computer_use_get_app_state/);
 });

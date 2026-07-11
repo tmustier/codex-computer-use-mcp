@@ -62,6 +62,21 @@ function safePromptText(value: unknown): string {
     .slice(0, 4_000);
 }
 
+async function explicitTimedConfirmation(
+  ctx: ExtensionContext,
+  title: string,
+  message: string,
+): Promise<boolean | undefined> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
+  try {
+    const answer = await ctx.ui.confirm(title, message, { signal: controller.signal });
+    return controller.signal.aborted ? undefined : answer;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function handleElicitation(request: any, ctx: ExtensionContext): Promise<ElicitationResponse> {
   if (!ctx.hasUI) return { action: "decline" };
   const mode = request?.mode;
@@ -107,7 +122,9 @@ async function handleElicitation(request: any, ctx: ExtensionContext): Promise<E
       continue;
     }
     if (field.type === "boolean") {
-      content[key] = await ctx.ui.confirm(title, message, { timeout: 60_000 });
+      const answer = await explicitTimedConfirmation(ctx, title, message);
+      if (answer === undefined) return { action: "cancel" };
+      content[key] = answer;
       continue;
     }
     if (field.type === "string") {
@@ -144,8 +161,8 @@ async function handleElicitation(request: any, ctx: ExtensionContext): Promise<E
     ctx.ui.notify("Official Computer Use requested an unsupported approval field; it was declined.", "warning");
     return { action: "decline" };
   }
-  const accepted = await ctx.ui.confirm("Send approval response to official Computer Use?", message, { timeout: 60_000 });
-  return accepted ? { action: "accept", content } : { action: "decline" };
+  const accepted = await explicitTimedConfirmation(ctx, "Send approval response to official Computer Use?", message);
+  return accepted === true ? { action: "accept", content } : { action: "decline" };
 }
 
 function toPiContent(content: Array<Record<string, unknown>>): Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> {

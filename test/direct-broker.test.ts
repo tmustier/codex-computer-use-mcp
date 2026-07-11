@@ -19,12 +19,12 @@ const log=${JSON.stringify(log)}; const mode=process.argv[2]||"ok"; const invent
 const send=x=>process.stdout.write(JSON.stringify(x)+"\\n");
 const rl=createInterface({input:process.stdin});
 let pendingTool;
-if(mode==="child-hang"){const child=spawn(process.execPath,["-e","process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{detached:true,stdio:"ignore"});child.unref();appendFileSync(log,JSON.stringify({childPid:child.pid})+"\\n");}
+if(mode==="child-hang"||mode==="orphan-exit"){const child=spawn(process.execPath,["-e","process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{detached:true,stdio:"ignore"});child.unref();appendFileSync(log,JSON.stringify({childPid:child.pid})+"\\n");if(mode==="orphan-exit")process.exit(0);}
 rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify({method:m.method,id:m.id,result:m.result,codexHome:process.env.CODEX_HOME,home:process.env.HOME,tmpdir:process.env.TMPDIR,hasOpenAIKey:Boolean(process.env.OPENAI_API_KEY)})+"\\n");
  if(m.method==="initialize"){if(mode==="oversized-line"){process.stdout.write("x".repeat(${8 * 1024 * 1024 + 1}));return;} return send({id:m.id,result:{userAgent:"fake",platformFamily:"unix",platformOs:"macos"}});}
  if(m.method==="initialized") return;
  if(m.method==="thread/start"){const thread=mode==="bad-ephemeral"?{id:"thread-test"}:{id:"thread-test",ephemeral:true,path:null,turns:[]}; send({id:m.id,result:{thread}}); if(mode==="model-event")send({method:"turn/started",params:{}}); return;}
- if(m.method==="mcpServerStatus/list"){const tools=JSON.parse(JSON.stringify(inventory)); if(mode==="schema-drift")tools.list_apps.inputSchema.properties={drift:{type:"string"}}; return send({id:m.id,result:{data:[{name:"computer-use",tools}]}});}
+ if(m.method==="mcpServerStatus/list"){const tools=JSON.parse(JSON.stringify(inventory)); if(mode==="schema-drift")tools.list_apps.inputSchema.properties={drift:{type:"string"}}; send({id:m.id,result:{data:[{name:"computer-use",tools}]}});if(mode==="close-before-tool"){process.stdin.destroy();setTimeout(()=>process.exit(0),100);}return;}
  if(m.method==="mcpServer/tool/call"){
    if(mode==="hang"||mode==="child-hang") return;
    if(mode==="elicit"){pendingTool=m.id; return send({id:"approval-1",method:"mcpServer/elicitation/request",params:{mode:"form",message:"Approve?",serverName:"computer-use",requestedSchema:{type:"object",properties:{choice:{type:"string",enum:["allow","deny"]}},required:["choice"]}}});}
@@ -54,6 +54,7 @@ test("production app-server args disable model transport, plugins, and remote co
 	assert.match(serialized, /features\.remote_control=false/);
 	assert.match(serialized, /app-server --stdio$/);
 	assert.doesNotMatch(serialized, /\bexec\b/);
+	assert.match(buildDirectAppServerArgs("\/tmp\/private-broker-work").join(" "), /cwd = "\/tmp\/private-broker-work"/);
 });
 
 test("direct broker uses only zero-turn app-server MCP methods and an isolated credential-free CODEX_HOME", async () => {
@@ -172,22 +173,42 @@ test("direct broker rejects an oversized unterminated protocol line before buffe
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("process enumeration errors fail cleanup closed after terminating the broker", async () => {
+test("partial process enumeration errors fail closed but still kill already discovered descendants", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-enumerator-test."));
 	try {
-		const { script } = await makeFake(root);
+		const { script, log } = await makeFake(root);
 		const enumerator = path.join(root, "enumerator.sh");
-		await writeFile(enumerator, "#!/bin/sh\necho unavailable >&2\nexit 1\n", { mode: 0o700 });
-		let pid = 0;
-		await assert.rejects(
-			callOfficialDirectTool("list_apps", {}, {
-				...options(script),
-				processEnumeratorCommand: enumerator,
-				onSpawn: (value) => { pid = value; },
-			}),
-			/cleanup failed/,
-		);
-		assert.throws(() => process.kill(pid, 0));
+		const counter = path.join(root, "enumerator.count");
+		await writeFile(enumerator, `#!/bin/sh\nn=0\n[ ! -f ${JSON.stringify(counter)} ] || n=$(cat ${JSON.stringify(counter)})\nn=$((n+1))\nprintf '%s' "$n" > ${JSON.stringify(counter)}\n[ "$n" -ne 1 ] || exec /usr/bin/pgrep "$@"\necho unavailable >&2\nexit 1\n`, { mode: 0o700 });
+		const controller = new AbortController();
+		const call = callOfficialDirectTool("list_apps", {}, {
+			...options(script, "child-hang"),
+			processEnumeratorCommand: enumerator,
+			signal: controller.signal,
+			timeoutMs: 60_000,
+		});
+		for (let attempt = 0; attempt < 50; attempt += 1) {
+			try { if ((await readFile(log, "utf8")).includes("childPid")) break; } catch { /* not written yet */ }
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		}
+		const childPid = JSON.parse((await readFile(log, "utf8")).split("\n").find((line) => line.includes("childPid"))!).childPid;
+		controller.abort();
+		await assert.rejects(call, /cleanup failed/);
+		assert.throws(() => process.kill(childPid, 0));
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("an app-server that exits immediately cannot orphan a private-workdir child", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-orphan-test."));
+	try {
+		const { script, log } = await makeFake(root);
+		let observed: any;
+		try { await callOfficialDirectTool("list_apps", {}, options(script, "orphan-exit")); }
+		catch (error) { observed = error; }
+		assert.match(observed?.message ?? "", /exited before completing/);
+		assert.equal(observed?.cleanupVerified, true);
+		const childPid = JSON.parse((await readFile(log, "utf8")).split("\n").find((line) => line.includes("childPid"))!).childPid;
+		assert.throws(() => process.kill(childPid, 0));
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -216,6 +237,18 @@ test("direct broker cancellation terminates separately-grouped descendants", asy
 			await new Promise((resolve) => setTimeout(resolve, 25));
 		}
 		assert.equal(gone, true);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("directCalls remains zero when no tool-call response confirms dispatch", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-call-count-test."));
+	try {
+		const { script } = await makeFake(root);
+		let observed: any;
+		try { await callOfficialDirectTool("list_apps", {}, options(script, "close-before-tool")); }
+		catch (error) { observed = error; }
+		assert.equal(observed?.directCalls, 0);
+		assert.equal(observed?.cleanupVerified, true);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 

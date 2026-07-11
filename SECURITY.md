@@ -28,7 +28,7 @@ This is direct tool dispatch—not model orchestration.
 8. Same-app work is excluded across native Pi, generic MCP, and custom state roots with one fixed per-user kernel `lockf` lease namespace.
 9. Target focus events, periodic samples, watcher health, queued ASN resolution, and final state are checked. This is post-action detection, not a preventive OS sandbox.
 10. One direct request emits one official `mcpServer/tool/call`; no model turn, subagent, shell, web, plugin, prompt, or reachable model transport is available.
-11. Cleanup freezes the app-server before bounded strict descendant enumeration, freezes descendants to a stable tree, kills every discovered process, awaits stdio closure, and verifies exit. Enumeration/freeze/exit uncertainty is fatal; delayed UI responses cannot write to a closed broker.
+11. App-server and helper share one private per-call working directory. Cleanup combines strict ancestry enumeration (preserving partial results) with working-directory ownership recovery, freezes processes to a stable set, kills every owned process, awaits stdio closure, and verifies exit. This still finds a helper reparented by an early app-server exit; enumeration/freeze/exit uncertainty is fatal.
 12. Protocol JSONL is bounded before an unterminated line can exceed 8 MB in memory.
 13. Per-call `CODEX_HOME` and work directories are mode-private and recursively removed.
 14. Only validated text/image result blocks cross to the invoking client. No full-result spill file is written.
@@ -48,7 +48,7 @@ All ten official methods and arbitrary resolvable app targets. Full mode is broa
 
 ## Elicitations
 
-The Pi adapter forwards only bounded standard form fields to interactive Pi UI. Field count, keys, enum cardinality/bytes, strings, numbers, and local UI duration are capped; declared string/numeric bounds are enforced. It defaults to decline and declines unsupported, URL, headless, proprietary, oversized, or malformed forms. A human must select/input values and confirm submission.
+The Pi adapter forwards only bounded standard form fields to interactive Pi UI. Field count, keys, enum cardinality/bytes, strings, numbers, and local UI duration are capped; declared string/numeric bounds are enforced. Boolean and final confirmations use an explicit abort signal so timeout cannot be mistaken for a human-entered `false`. It defaults to decline and declines unsupported, URL, headless, proprietary, oversized, or malformed forms. A human must select/input values and confirm submission.
 
 The stdio MCP wrapper cannot present Pi UI and declines first-party elicitations. Persistent approvals belong in official ChatGPT Computer Use settings.
 

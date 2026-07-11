@@ -148,7 +148,7 @@ Each call:
 9. verifies the exact upstream ten-tool inventory and schemas;
 10. issues exactly one `mcpServer/tool/call`;
 11. rejects any model-turn notification, including during teardown;
-12. freezes, enumerates, terminates, and verifies the app-server plus separately grouped descendants; then removes temporary state, releases the lock, and writes a content-safe audit with separate broker/lease cleanup evidence.
+12. combines partial-preserving ancestry enumeration with private-working-directory ownership recovery, then freezes, terminates, and verifies the app-server plus separately grouped or reparented helpers; finally it removes temporary state, releases the lock, and writes a content-safe audit with separate broker/lease cleanup evidence.
 
 Focus checks are detection/completion criteria, not a preventive macOS sandbox. If the target becomes frontmost, the call is reported as failed even though an individual official action may already have completed.
 

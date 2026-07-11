@@ -69,6 +69,8 @@ export interface DirectBrokerOptions {
 	skipSignatureVerification?: boolean;
 	/** Test-only process-enumerator override. */
 	processEnumeratorCommand?: string;
+	/** Test-only working-directory process-enumerator override. */
+	cwdEnumeratorCommand?: string;
 	onSpawn?: (pid: number) => void;
 }
 
@@ -170,8 +172,8 @@ function buildBrokerEnv(codexHome: string, tempRoot: string): NodeJS.ProcessEnv 
 	return env;
 }
 
-export function buildDirectAppServerArgs(): string[] {
-	const mcpTable = `{"computer-use" = { command = ${JSON.stringify(COMPUTER_USE_CLIENT_PATH)}, args = ["mcp"], cwd = ${JSON.stringify(COMPUTER_USE_PLUGIN_ROOT)}, enabled = true, startup_timeout_sec = 30, tool_timeout_sec = 120 }}`;
+export function buildDirectAppServerArgs(mcpCwd = COMPUTER_USE_PLUGIN_ROOT): string[] {
+	const mcpTable = `{"computer-use" = { command = ${JSON.stringify(COMPUTER_USE_CLIENT_PATH)}, args = ["mcp"], cwd = ${JSON.stringify(mcpCwd)}, enabled = true, startup_timeout_sec = 30, tool_timeout_sec = 120 }}`;
 	const disabledProvider = '{ name = "Direct dispatch disabled provider", base_url = "http://127.0.0.1:9/v1", wire_api = "responses", request_max_retries = 0, stream_max_retries = 0, supports_websockets = false, requires_openai_auth = false }';
 	return [
 		"-c", 'model_provider="direct_disabled"',
@@ -286,11 +288,22 @@ function processGroupExists(pid: number): boolean {
 	}
 }
 
+class ProcessEnumerationError extends Error {
+	readonly partialPids: Set<number>;
+	constructor(message: string, partialPids: Set<number>, cause?: unknown) {
+		super(message, { cause });
+		this.name = "ProcessEnumerationError";
+		this.partialPids = new Set(partialPids);
+	}
+}
+
 function collectDescendants(rootPid: number, processEnumeratorCommand = "/usr/bin/pgrep"): Set<number> {
 	const descendants = new Set<number>();
 	const queue = [rootPid];
 	while (queue.length > 0) {
-		if (descendants.size >= 256) throw new Error("Official app-server process tree exceeded the cleanup bound");
+		if (descendants.size >= 256) {
+			throw new ProcessEnumerationError("Official app-server process tree exceeded the cleanup bound", descendants);
+		}
 		const parent = queue.shift()!;
 		const result = spawnSync(processEnumeratorCommand, ["-P", String(parent)], { encoding: "utf8", timeout: 2000 });
 		if (
@@ -298,7 +311,7 @@ function collectDescendants(rootPid: number, processEnumeratorCommand = "/usr/bi
 			|| (result.status !== 0 && result.status !== 1)
 			|| (result.status === 1 && (result.stderr ?? "").trim().length > 0)
 		) {
-			throw new Error("Could not enumerate the official app-server process tree", { cause: result.error });
+			throw new ProcessEnumerationError("Could not enumerate the official app-server process tree", descendants, result.error);
 		}
 		for (const token of (result.stdout ?? "").trim().split(/\s+/)) {
 			const child = Number(token);
@@ -310,9 +323,33 @@ function collectDescendants(rootPid: number, processEnumeratorCommand = "/usr/bi
 	return descendants;
 }
 
+function collectProcessesWithCwd(workDir: string, cwdEnumeratorCommand = "/usr/sbin/lsof"): Set<number> {
+	const result = spawnSync(cwdEnumeratorCommand, ["-a", "-d", "cwd", "+d", workDir, "-Fp"], {
+		encoding: "utf8",
+		timeout: 3000,
+	});
+	if (
+		result.error
+		|| (result.status !== 0 && result.status !== 1)
+		|| (result.status === 1 && (result.stderr ?? "").trim().length > 0)
+	) {
+		throw new ProcessEnumerationError("Could not enumerate processes owned by the private broker working directory", new Set(), result.error);
+	}
+	const pids = new Set<number>();
+	for (const line of (result.stdout ?? "").split("\n")) {
+		const match = line.match(/^p(\d+)$/);
+		if (!match) continue;
+		const pid = Number(match[1]);
+		if (Number.isSafeInteger(pid) && pid > 1 && pid !== process.pid) pids.add(pid);
+	}
+	return pids;
+}
+
 async function terminateGroup(
 	proc: ChildProcessWithoutNullStreams | undefined,
+	workDir: string,
 	processEnumeratorCommand = "/usr/bin/pgrep",
+	cwdEnumeratorCommand = "/usr/sbin/lsof",
 ): Promise<void> {
 	const pid = proc?.pid;
 	if (!pid) return;
@@ -320,11 +357,24 @@ async function terminateGroup(
 	const rootWasAlive = processExists(pid);
 	let cleanupError: Error | undefined;
 	const enumerate = (): Set<number> => {
-		try { return collectDescendants(pid, processEnumeratorCommand); }
-		catch (error) {
+		const found = new Set<number>();
+		try {
+			for (const child of collectDescendants(pid, processEnumeratorCommand)) found.add(child);
+		} catch (error) {
+			if (error instanceof ProcessEnumerationError) {
+				for (const child of error.partialPids) found.add(child);
+			}
 			cleanupError ??= error instanceof Error ? error : new Error(String(error));
-			return new Set<number>();
 		}
+		try {
+			for (const owned of collectProcessesWithCwd(workDir, cwdEnumeratorCommand)) found.add(owned);
+		} catch (error) {
+			if (error instanceof ProcessEnumerationError) {
+				for (const owned of error.partialPids) found.add(owned);
+			}
+			cleanupError ??= error instanceof Error ? error : new Error(String(error));
+		}
+		return found;
 	};
 	for (const child of enumerate()) descendants.add(child);
 
@@ -340,33 +390,44 @@ async function terminateGroup(
 	}
 	if (rootWasAlive && !rootFrozen) cleanupError ??= new Error("Could not freeze the official app-server before cleanup");
 
-	if (rootFrozen && !cleanupError) {
-		let stable = false;
-		for (let pass = 0; pass < 16; pass += 1) {
-			let added = false;
-			for (const child of enumerate()) {
-				if (!descendants.has(child)) {
-					descendants.add(child);
-					added = true;
-				}
-				try { process.kill(child, "SIGSTOP"); }
-				catch { if (processExists(child)) cleanupError ??= new Error("Could not freeze an app-server descendant"); }
+	let stable = false;
+	for (let pass = 0; pass < 16; pass += 1) {
+		let added = false;
+		for (const child of enumerate()) {
+			if (!descendants.has(child)) {
+				descendants.add(child);
+				added = true;
 			}
-			if (cleanupError) break;
-			if (!added && pass > 0) { stable = true; break; }
+			try { process.kill(child, "SIGSTOP"); }
+			catch { if (processExists(child)) cleanupError ??= new Error("Could not freeze an app-server-owned process"); }
 		}
-		if (!stable && !cleanupError) cleanupError = new Error("Official app-server process tree did not stabilize for cleanup");
+		if (!added && pass > 0) { stable = true; break; }
+		await new Promise((resolve) => setTimeout(resolve, 10));
 	}
+	if (!stable) cleanupError ??= new Error("Official app-server process tree did not stabilize for cleanup");
 
 	for (const child of descendants) {
 		try { process.kill(child, "SIGKILL"); } catch { /* exited */ }
 	}
 	try { process.kill(-pid, "SIGKILL"); } catch { try { proc.kill("SIGKILL"); } catch { /* exited */ } }
+	for (let pass = 0; pass < 2; pass += 1) {
+		await new Promise((resolve) => setTimeout(resolve, 25));
+		for (const owned of enumerate()) {
+			descendants.add(owned);
+			try { process.kill(owned, "SIGKILL"); } catch { /* exited */ }
+		}
+	}
 	for (let elapsed = 0; elapsed < 1500; elapsed += 25) {
 		if (!processGroupExists(pid) && [...descendants].every((child) => !processExists(child))) break;
 		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
-	if (processGroupExists(pid) || [...descendants].some((child) => processExists(child))) {
+	let cwdSurvivors = new Set<number>();
+	try { cwdSurvivors = collectProcessesWithCwd(workDir, cwdEnumeratorCommand); }
+	catch (error) { cleanupError ??= error instanceof Error ? error : new Error(String(error)); }
+	for (const survivor of cwdSurvivors) {
+		try { process.kill(survivor, "SIGKILL"); } catch { /* exited */ }
+	}
+	if (processGroupExists(pid) || [...descendants, ...cwdSurvivors].some((child) => processExists(child))) {
 		cleanupError ??= new Error("Official app-server process tree did not terminate");
 	}
 	if (cleanupError) throw cleanupError;
@@ -413,7 +474,7 @@ export async function callOfficialDirectTool(
 		pending.clear();
 	};
 	const ensureTerminated = (): Promise<void> => {
-		termination ??= terminateGroup(proc, options.processEnumeratorCommand);
+		termination ??= terminateGroup(proc, workDir, options.processEnumeratorCommand, options.cwdEnumeratorCommand);
 		return termination;
 	};
 	const fail = (error: Error): void => {
@@ -425,7 +486,7 @@ export async function callOfficialDirectTool(
 		if (!proc?.stdin.writable) throw new Error("Official app-server stdin is unavailable");
 		proc.stdin.write(`${JSON.stringify(message)}\n`, "utf8");
 	};
-	const request = (methodName: string, params: unknown, timeoutMs: number, onSent?: () => void): Promise<unknown> => {
+	const request = (methodName: string, params: unknown, timeoutMs: number): Promise<unknown> => {
 		const id = String(nextId++);
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
@@ -436,7 +497,6 @@ export async function callOfficialDirectTool(
 			pending.set(id, { resolve, reject, timer });
 			try {
 				send({ method: methodName, id, params });
-				onSent?.();
 			} catch (error) {
 				clearTimeout(timer);
 				pending.delete(id);
@@ -447,7 +507,7 @@ export async function callOfficialDirectTool(
 
 	try {
 		const command = options.appServerCommand ?? CODEX_PATH;
-		const commandArgs = options.appServerArgs ?? buildDirectAppServerArgs();
+		const commandArgs = options.appServerArgs ?? buildDirectAppServerArgs(workDir);
 		proc = spawn(command, commandArgs, {
 			cwd: workDir,
 			detached: true,
@@ -591,8 +651,8 @@ export async function callOfficialDirectTool(
 			"mcpServer/tool/call",
 			{ threadId, server: "computer-use", tool: method, arguments: args },
 			options.timeoutMs ?? 120_000,
-			() => { directCalls = 1; },
 		);
+		directCalls = 1;
 		if (modelTurnsStarted !== 0) throw new BrokerVerificationError("Model-turn activity was observed during direct dispatch");
 		const result = validateResult(raw);
 		finalResult = {
