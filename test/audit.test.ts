@@ -3,68 +3,52 @@ import { mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promise
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { appendAudit } from "../src/audit.ts";
+import { appendAudit, type AuditRecord } from "../src/audit.ts";
 
-test("audit is mode-0600 structured metadata without task text", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "native-audit-test."));
+const record: AuditRecord = {
+	timestamp: "2026-07-11T00:00:00.000Z",
+	runId: "run",
+	method: "type_text",
+	permissionMode: "full-permissions",
+	app: "com.apple.TextEdit",
+	mutating: true,
+	authorization: "full_permissions_config",
+	inputBytes: 19,
+	outcome: "ok",
+	durationMs: 20,
+	brokerVersion: "codex-cli 0.144.0-alpha.4",
+	clientBuild: "1000366",
+	directCalls: 1,
+	modelTurnsStarted: 0,
+	ephemeralThread: true,
+	approvalRequests: 0,
+	backgroundPreserved: true,
+	brokerCleanupVerified: true,
+	resultContentTypes: ["text"],
+	resultBytes: 42,
+};
+
+test("audit is mode-0600 metadata without arguments, output, or secrets", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-audit-test."));
 	try {
-		const auditPath = await appendAudit(root, {
-			timestamp: "2026-07-10T00:00:00.000Z",
-			runId: "run",
-			operation: "calculate",
-			permissionMode: "safe",
-			app: "Calculator",
-			mutating: true,
-			cleanupRequested: true,
-			userConfirmed: true,
-			authorization: "full_permissions_config",
-			inputBytes: 3,
-			outcome: "ok",
-			durationMs: 1,
-			model: "gpt-5.6-sol",
-			usage: { input: 1, cachedInput: 0, output: 1 },
-			computerUseCalls: 3,
-			computerUseMethods: ["get_app_state", "click", "get_app_state"],
-			backgroundPreserved: true,
-			cleanupVerified: true,
-		});
-		const mode = (await stat(auditPath)).mode & 0o777;
-		assert.equal(mode, 0o600);
-		const record = JSON.parse((await readFile(auditPath, "utf8")).trim());
-		assert.equal(record.inputBytes, 3);
-		assert.equal(record.authorization, "full_permissions_config");
-		assert.equal(record.permissionMode, "safe");
-		assert.deepEqual(record.computerUseMethods, ["get_app_state", "click", "get_app_state"]);
-		assert.equal(Object.hasOwn(record, "value"), false);
-		assert.equal(Object.hasOwn(record, "observed"), false);
+		const auditPath = await appendAudit(root, record);
+		assert.equal((await stat(auditPath)).mode & 0o777, 0o600);
+		const parsed = JSON.parse((await readFile(auditPath, "utf8")).trim());
+		assert.equal(parsed.method, "type_text");
+		assert.equal(parsed.modelTurnsStarted, 0);
+		assert.equal(parsed.directCalls, 1);
+		assert.equal(parsed.inputBytes, 19);
+		for (const forbidden of ["arguments", "text", "value", "content", "structuredContent", "token", "prompt", "modelUsage"]) {
+			assert.equal(Object.hasOwn(parsed, forbidden), false, forbidden);
+		}
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
 });
 
 test("audit refuses symlinked state and log targets", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "native-audit-symlink-test."));
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-audit-symlink-test."));
 	const outside = path.join(root, "outside.txt");
-	const record = {
-		timestamp: "2026-07-10T00:00:00.000Z",
-		runId: "run",
-		operation: "inspect",
-		permissionMode: "safe" as const,
-		app: null,
-		mutating: false,
-		cleanupRequested: true,
-		userConfirmed: false,
-		authorization: "none" as const,
-		inputBytes: 0,
-		outcome: "failed",
-		durationMs: 1,
-		model: "gpt-5.6-sol",
-		usage: { input: 0, cachedInput: 0, output: 0 },
-		computerUseCalls: 0,
-		computerUseMethods: [],
-		backgroundPreserved: null,
-		cleanupVerified: null,
-	};
 	try {
 		await writeFile(outside, "untouched\n", { mode: 0o600 });
 		await symlink(outside, path.join(root, "state-link"));

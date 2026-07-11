@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open, rename, rm } from "node:fs/promises";
 import path from "node:path";
-import type { PermissionMode } from "./policy.ts";
+export type PermissionMode = "safe" | "full-permissions";
 
 export interface ExtensionConfig {
 	version: 1;

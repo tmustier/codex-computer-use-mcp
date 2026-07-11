@@ -1,50 +1,65 @@
-# Pi adapters
+# Pi integration
 
-Choose **one** integration path. Do not load both under the same tool name.
+The native Pi adapter is the primary 0.2 path. It registers ten namespaced typed tools so Pi itself chooses each official Computer Use method and argument.
 
-## Native Pi package adapter
-
-```bash
-pi install npm:codex-computer-use-mcp@0.1.0
-```
-
-The package manifest loads `integrations/pi/index.ts` and registers:
-
-- `background_computer_use`
-- `/background-computer-use-status`
-- `/background-computer-use-mode`
-
-The adapter imports the same compiled service used by the MCP server; it does not fork the security-critical runner or policy. Pi signals tool failures by thrown error, so cancellation text carries observed methods and non-retry guidance while the complete structured method list remains in the private audit.
-
-For a local checkout:
+## Source checkout acceptance
 
 ```bash
-npm ci && npm run build
-pi -ne -e /absolute/path/to/codex-computer-use-mcp/integrations/pi/index.ts
+npm ci
+npm run build
+CODEX_COMPUTER_USE_HOME="$(mktemp -d)" \
+  pi -ne -e /absolute/path/to/codex-computer-use-mcp/integrations/pi/index.ts
 ```
 
-`-ne` avoids a duplicate-tool conflict if another copy is already installed.
+`-ne` prevents an installed 0.1 adapter from loading at the same time. This source workflow does not install or switch live Pi configuration.
 
-## Pi MCP gateway
+After a separately approved release:
 
-Merge [`mcp.json.example`](mcp.json.example) into `~/.pi/agent/mcp.json`, then reload Pi.
+```bash
+pi install npm:codex-computer-use-mcp@0.2.0
+```
 
-`directTools: false` is intentional. It keeps this powerful capability behind Pi's MCP gateway instead of injecting it into every agent turn as an always-on direct tool.
+## Registered surface
 
-For a local checkout, replace the command and arguments with:
+- `computer_use_list_apps`
+- `computer_use_get_app_state`
+- `computer_use_click`
+- `computer_use_perform_secondary_action`
+- `computer_use_set_value`
+- `computer_use_select_text`
+- `computer_use_scroll`
+- `computer_use_drag`
+- `computer_use_press_key`
+- `computer_use_type_text`
+- `/computer-use-status`
+- `/computer-use-mode safe|full-permissions`
+
+Safe mode enables the two read methods. Full mode enables all ten without wrapper app/intent/action gates.
+
+Pi forwards supported official form elicitations to interactive UI but never accepts them automatically. Unsupported or headless elicitations are declined.
+
+## Generic MCP gateway
+
+Merge `mcp.json.example` only after building or after a separately approved package release. `directTools: false` is intentional; it keeps this powerful generic MCP surface behind Pi's gateway.
+
+For a source checkout:
 
 ```json
 {
-  "command": "node",
-  "args": ["/absolute/path/to/codex-computer-use-mcp/dist/mcp-server.js"],
-  "lifecycle": "lazy",
-  "requestTimeoutMs": 360000,
-  "directTools": false
+  "mcpServers": {
+    "computer-use-direct-source": {
+      "command": "node",
+      "args": ["/absolute/path/to/codex-computer-use-mcp/dist/mcp-server.js"],
+      "lifecycle": "lazy",
+      "requestTimeoutMs": 180000,
+      "directTools": false
+    }
+  }
 }
 ```
 
-## Permission warning
+Do not load the native adapter and generic MCP adapter into the same acceptance process unless tool names are intentionally isolated.
 
-Standalone safe mode is list-only. `inspect`, `act`, and `dictionary_lookup` require explicitly acknowledged full-permissions mode. Full mode broadly authorizes wrapper use of official Computer Use because target checks cannot be placed before signed-client dispatch without breaking official sender authentication. Read the root README before enabling it.
+The generic MCP path cannot render Pi's native approval UI and therefore declines downstream elicitations. Configure persistent app access only through official ChatGPT Computer Use settings.
 
-Do not register the app-bundled Codex broker itself as a direct tool. This wrapper provides signing checks, post-dispatch validation, focus monitoring, locking, cleanup criteria, and private audits.
+See the root `MIGRATION.md` before replacing an installed 0.1 adapter.

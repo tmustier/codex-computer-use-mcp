@@ -2,37 +2,59 @@
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a vulnerability that could weaken code-signing checks, safe-mode dispatch restrictions, approval boundaries, focus guarantees, audit integrity, or cleanup behavior.
+Do not open a public issue for a vulnerability that could weaken signing, schema verification, permission-mode dispatch, first-party approval handling, app identity, locking, focus telemetry, cleanup, or audit integrity.
 
-Use GitHub's private vulnerability reporting. Include affected versions, the smallest non-sensitive reproduction, expected versus observed behavior, and whether app state changed or cleanup was unverified.
+Use GitHub private vulnerability reporting. Include the affected commit/version, the smallest non-sensitive reproduction, expected versus observed behavior, and whether an official action completed before failure.
 
-Never include credentials, tokens, private/customer content, sensitive screenshots, raw app-state payloads, or private audit files.
+Never include credentials, tokens, customer/private content, sensitive screenshots, raw app-state payloads, elicitation contents, or private audit files.
 
-## Authorization model
+## Architecture boundary
 
-The signed official client authenticates its parent. An unsigned wrapper cannot synchronously proxy each Computer Use call without breaking that official sender-authentication chain. Streamed target, method, argument, call-budget, focus, and cleanup checks therefore occur after dispatch.
+Raw Pi/Node invocation of the signed Computer Use MCP helper is not an authenticated responsible-process path for real calls. The bridge therefore uses the official signed app-server `mcpServer/tool/call` API.
 
-For that reason:
+The API requires a loaded thread ID. The bridge creates an empty, pathless, ephemeral context solely to own the MCP runtime. It never calls `turn/start`; any `turn/*` or `item/*` event is a fatal architecture violation. The temporary `CODEX_HOME` contains no auth file, API key, user MCPs, plugins, history, memories, or account configuration. A non-websocket dummy model provider points at unreachable loopback, and plugin/remote-control features are disabled, preventing app-server model prewarm and Responses API traffic.
 
-- safe mode is list-only and rejects targeted work before starting Codex;
-- full-permissions mode is broad wrapper authorization, not a preventive per-app sandbox;
-- post-dispatch validation can fail completion and surface cleanup risk, but cannot undo a mutation;
-- official OpenAI app approvals, sensitive-action prompts, and macOS privacy controls remain authoritative.
+This is direct tool dispatch—not model orchestration.
 
 ## Security invariants
 
-1. Only the fixed OpenAI app-bundled Codex and Computer Use client paths may broker a run.
-2. Both binaries must pass strict code-signing verification and OpenAI Team ID checks.
-3. First-party OpenAI and macOS approvals are never self-accepted.
-4. Safe mode dispatches only `list_apps`; every targeted mode fails before worker launch.
-5. Full-permissions mode requires explicit acknowledgement and never claims preventive target isolation.
-6. The target app must not become frontmost; watcher health, queued events, in-flight samples, and final state are checked.
-7. Streamed calls must match the mode allowlist, requested target aliases, argument constraints, and call budget before completion is trusted.
-8. Same-app work remains kernel-excluded.
-9. Timeout and cancellation terminate the full worker process group and retain available partial metadata.
-10. Audits remain private and content-safe; policy rejections are audited, and audit failure is fatal once a secure state path exists.
-11. Runtime dependencies are exact-pinned and published with `npm-shrinkwrap.json`.
+1. Only fixed app-bundled Codex and Computer Use client paths are allowed in production.
+2. Both binaries pass strict code-signature verification and OpenAI Team ID `2DC432GLL2` checks before dispatch.
+3. The helper's exact ten method names and input schemas match the pinned expected inventory before every call.
+4. Safe mode allows only `list_apps` and `get_app_state`; mutation rejects before identity resolution or process spawn.
+5. Full-permissions requires explicit acknowledgement but has no wrapper app, intent, task, or action allowlist.
+6. First-party OpenAI/TCC approvals remain authoritative and are never self-accepted.
+7. Target selectors resolve to canonical installed bundle IDs before dispatch.
+8. Same-app work is excluded with a kernel `lockf` lease.
+9. Target focus events, periodic samples, watcher health, queued ASN resolution, and final state are checked. This is post-action detection, not a preventive OS sandbox.
+10. One direct request emits one official `mcpServer/tool/call`; no model turn, subagent, shell, web, plugin, prompt, or reachable model transport is available.
+11. Cancellation and timeout terminate the full detached app-server process group.
+12. Per-call `CODEX_HOME` and work directories are mode-private and recursively removed.
+13. Only validated text/image result blocks cross to the invoking client. No full-result spill file is written.
+14. Audits contain metadata only. Arguments, values, screenshots, app-state text, result content, prompts, approvals, credentials, and tokens are forbidden.
+15. Policy rejections are audited; audit failure is fatal once a secure state path exists.
+16. Runtime dependencies are exact-pinned and published with `npm-shrinkwrap.json`.
+
+## Permission semantics
+
+### Safe
+
+Read-only wrapper policy: `list_apps` and `get_app_state`. App-state reads can expose visible sensitive information to the calling model. Safe means non-mutating at the official tool level, not confidential-data isolation.
+
+### Full-permissions
+
+All ten official methods and arbitrary resolvable app targets. Full mode is broad authorization. It does not imply that actions are reversible or that focus detection can prevent an already dispatched action.
+
+## Elicitations
+
+The Pi adapter forwards only bounded standard form fields to interactive Pi UI. It defaults to decline and declines unsupported, URL, headless, proprietary, or malformed forms. A human must select/input values and confirm submission.
+
+The stdio MCP wrapper cannot present Pi UI and declines first-party elicitations. Persistent approvals belong in official ChatGPT Computer Use settings.
+
+## Visible-content warning
+
+Computer Use is designed to return app state and screenshots. Do not point it at apps containing credentials, payment data, private messages, or customer secrets unless the user explicitly requires that context and accepts model exposure. Audit safety does not make target-app content non-sensitive.
 
 ## Supported versions
 
-Only the latest release is supported. Compatibility is evaluated against current ChatGPT macOS releases rather than guaranteed indefinitely.
+Only the latest approved release is supported. App-server is experimental and bundle paths/schema can change; drift fails closed until reviewed.

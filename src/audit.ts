@@ -1,26 +1,30 @@
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open } from "node:fs/promises";
 import path from "node:path";
+import type { PermissionMode } from "./config.ts";
+import type { DirectMethod } from "./tools.ts";
 
 export interface AuditRecord {
 	timestamp: string;
 	runId: string;
-	operation: string;
-	permissionMode: "safe" | "full-permissions";
+	method: DirectMethod | "configure" | "invalid_request";
+	permissionMode: PermissionMode;
 	app: string | null;
 	mutating: boolean;
-	cleanupRequested: boolean;
-	userConfirmed: boolean;
-	authorization: "none" | "full_permissions_config";
+	authorization: "safe_read" | "full_permissions_config" | "none";
 	inputBytes: number;
 	outcome: string;
 	durationMs: number;
-	model: string;
-	usage: { input: number; cachedInput: number; output: number };
-	computerUseCalls: number;
-	computerUseMethods: string[];
+	brokerVersion: string | null;
+	clientBuild: string | null;
+	directCalls: number;
+	modelTurnsStarted: number;
+	ephemeralThread: boolean | null;
+	approvalRequests: number;
 	backgroundPreserved: boolean | null;
-	cleanupVerified: boolean | null;
+	brokerCleanupVerified: boolean;
+	resultContentTypes: string[];
+	resultBytes: number;
 }
 
 async function ensurePrivateDirectory(directory: string): Promise<void> {
@@ -39,7 +43,7 @@ async function ensurePrivateDirectory(directory: string): Promise<void> {
 export async function appendAudit(
 	stateDir: string,
 	record: AuditRecord,
-	fileName = "background-computer-use.jsonl",
+	fileName = "direct-computer-use.jsonl",
 ): Promise<string> {
 	if (path.basename(fileName) !== fileName) throw new Error("Audit filename must not contain a path");
 	await ensurePrivateDirectory(stateDir);

@@ -1,94 +1,51 @@
 # Codex Computer Use MCP
 
-A local MCP server that lets compatible agents use the official, signed Computer Use broker bundled with the OpenAI ChatGPT macOS app.
+> **0.2 development branch:** direct Pi-owned Computer Use tools. The package/repository name is unchanged pending a separate naming decision.
 
-It exposes all ten typed Computer Use methods while preserving:
+This project exposes the official signed macOS Computer Use capabilities as **direct typed tools** for Pi and MCP clients. The calling agent chooses every tool and argument itself.
 
-- official OpenAI code-signing checks;
-- first-party app approvals and sensitive-action prompts;
-- macOS Screen Recording and Accessibility permissions;
-- a deliberately list-only safe default;
-- explicit acknowledgement before broad full-permissions mode;
-- per-app kernel locks;
-- foreground/focus telemetry with fail-closed background guarantees;
-- output schemas, call budgets, timeout and process-group cleanup;
-- sanitized, mode-`0600` metadata audits.
+The primary path has:
 
-> **Independent project.** This is not an OpenAI product and is not endorsed by OpenAI. It depends on implementation details in the macOS ChatGPT app and may need updates when that app changes.
+- no nested model call;
+- no model-generated action plan;
+- no subagent;
+- no prompt sent to Codex;
+- no separate model-token usage.
 
-## Important authorization model
+It does use OpenAI's signed `codex app-server` as the official host for the bundled Computer Use MCP client. The current official `mcpServer/tool/call` API requires a loaded thread identifier, so the bridge creates an empty, in-memory, zero-turn context (`ephemeral: true`, `turns: []`, `path: null`). It never calls `turn/start` and fails closed if any `turn/*` or `item/*` model activity appears.
 
-The official Computer Use client authenticates its signed parent process. Putting an unsigned local MCP proxy between app-bundled Codex and that client breaks the official sender-authentication boundary. Therefore wrapper checks of a nested model's target and arguments can only observe events **after** the signed client has dispatched them.
+> **Independent project.** This is not an OpenAI product and is not endorsed by OpenAI. The app-server API is marked experimental and fixed ChatGPT bundle paths may change.
 
-This project does not pretend that post-dispatch observation is a preventive sandbox:
+## Direct tools
 
-- **Safe mode permits only `list`.** No target app or mutation is dispatched.
-- **Full-permissions mode broadly authorizes the wrapper to use official Computer Use.** It retains first-party OpenAI/macOS controls and detects target, method, argument, call-budget, focus, and cleanup drift, but detection cannot undo an action already dispatched.
+Pi registers namespaced tools to avoid collisions with Pi's built-ins. The MCP server exposes the upstream method names.
 
-Do not enable full-permissions if you need the wrapper itself to provide a preventive per-app security boundary.
+| Pi tool | MCP method | Safe mode | Purpose |
+|---|---|---:|---|
+| `computer_use_list_apps` | `list_apps` | yes | List apps known to official Computer Use |
+| `computer_use_get_app_state` | `get_app_state` | yes | Read accessibility state and imagery for one app |
+| `computer_use_click` | `click` | no | Click an element or screenshot coordinates |
+| `computer_use_perform_secondary_action` | `perform_secondary_action` | no | Invoke a named accessibility action |
+| `computer_use_set_value` | `set_value` | no | Assign an accessibility value |
+| `computer_use_select_text` | `select_text` | no | Select text or place the cursor |
+| `computer_use_scroll` | `scroll` | no | Scroll an element |
+| `computer_use_drag` | `drag` | no | Drag between screenshot coordinates |
+| `computer_use_press_key` | `press_key` | no | Send a key or key combination |
+| `computer_use_type_text` | `type_text` | no | Type literal text |
 
-## Requirements
+Pi—not a nested planner—must call `computer_use_get_app_state`, choose a current element identifier or coordinates, execute one action, and inspect again when needed.
 
-- macOS
-- Node.js 22 or newer
-- the official ChatGPT macOS app at `/Applications/ChatGPT.app`
-- a Codex account/session available to the app-bundled Codex CLI
-- required first-party OpenAI app approvals and macOS privacy permissions, completed in their official UI
-
-The server never extracts credentials, re-signs or injects into an app, changes TCC permissions, forges sender authentication, or self-accepts first-party approvals.
-
-## Install
-
-### From npm (after a release is published)
-
-```bash
-npm install -g codex-computer-use-mcp
-codex-computer-use-mcp --status
-```
-
-### From source
-
-```bash
-git clone https://github.com/tmustier/codex-computer-use-mcp.git
-cd codex-computer-use-mcp
-npm ci
-npm test
-npm run build
-node dist/mcp-server.js --status
-```
-
-Running `codex-computer-use-mcp` with no arguments starts the stdio MCP server.
-
-## Tools
-
-### `background_computer_use`
-
-| Mode | Purpose | Permission mode |
-|---|---|---|
-| `list` | List apps visible to official Computer Use | Safe or full |
-| `inspect` | Read one app | Full only |
-| `act` | Perform a concrete app task | Full only |
-| `dictionary_lookup` | Constrained local Apple Dictionary workflow | Full only |
-
-Optional fields include `cleanup`, `cleanup_instructions`, and `required_capabilities`. The latter can require observed successful use of official methods:
-
-`list_apps`, `get_app_state`, `click`, `perform_secondary_action`, `set_value`, `select_text`, `scroll`, `drag`, `press_key`, `type_text`.
-
-### `background_computer_use_status`
-
-Returns the permission mode, state/audit locations, broker verification and version, model, approval boundary, and supported methods.
-
-## Permission modes
+## Authorization modes
 
 ### Safe mode (default)
 
-Safe mode is intentionally list-only. Targeted requests are rejected and audited before a Codex worker starts.
+Safe mode permits only the two read methods: `list_apps` and `get_app_state`. The other eight tools are rejected and metadata-audited before target resolution, process spawn, or official dispatch.
 
 ### Full-permissions mode
 
-This broadly authorizes targeted official Computer Use operations. It does **not** bypass official OpenAI approvals, sensitive-action prompts, macOS privacy controls, signing checks, focus monitoring, locks, call budgets, timeout cleanup, or audit logging.
+Full mode enables the complete official ten-tool surface with arbitrary resolvable app targets and typed official actions. It adds no wrapper app allowlist, intent classifier, task schema, per-action confirmation, special-case app policy, or method gate.
 
-Enable it only with explicit acknowledgement:
+Enable only with explicit acknowledgement:
 
 ```bash
 codex-computer-use-mcp --configure full-permissions --acknowledge-full-permissions
@@ -100,93 +57,128 @@ Return to safe mode:
 codex-computer-use-mcp --configure safe
 ```
 
-State defaults to `~/.codex-computer-use-mcp`. Override it with `CODEX_COMPUTER_USE_HOME`. Configuration is mode `0600` and audited; an audit failure rolls a mode change back.
+Full mode does **not** bypass:
 
-## MCP client configuration
+- first-party OpenAI app approvals or sensitive-action prompts;
+- macOS Screen Recording, Accessibility, or TCC controls;
+- strict OpenAI Team ID and code-signature checks;
+- exact upstream ten-tool schema verification;
+- canonical app identity resolution and per-app kernel locks;
+- focus telemetry, timeouts, process-group cleanup, or private audit logging.
 
-### Pi native adapter
+## Why the signed app-server is required
 
-```bash
-pi install npm:codex-computer-use-mcp@0.1.0
+Calling the signed `SkyComputerUseClient mcp` binary directly from an ordinary Pi/Node parent successfully initializes and lists all ten schemas, but real calls are rejected with:
+
+```text
+Computer Use server error -10000: Sender process is not authenticated
 ```
 
-This registers `background_computer_use`, `/background-computer-use-status`, and `/background-computer-use-mode`.
+OpenAI's app-server exposes a documented `mcpServer/tool/call` endpoint. That endpoint calls a configured MCP tool directly; no model turn is required. Running it from the signed app-bundled binary preserves the official responsible-process/authentication chain without injection, re-signing, TCC changes, private socket emulation, or credential extraction.
 
-### Pi MCP gateway
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for source links and the full restriction inventory.
 
-Alternatively add this to `~/.pi/agent/mcp.json`. `directTools: false` keeps the capability intentional instead of injecting it into every turn:
+## Requirements
+
+- macOS
+- Node.js 22 or newer
+- official ChatGPT macOS app at `/Applications/ChatGPT.app`
+- official Computer Use component installed and its first-party permissions configured
+
+The direct bridge starts app-server with a new private `CODEX_HOME` containing no account credentials and only one configured MCP server: official Computer Use. It does not inherit the user's Codex MCP servers, plugins, history, memories, API keys, or auth file. It selects a non-websocket dummy model provider bound to unreachable loopback, disables plugin/remote-control features, and never starts a turn; this prevents app-server model prewarm or Responses API traffic.
+
+## Pi integration
+
+After a separately approved 0.2 release:
+
+```bash
+pi install npm:codex-computer-use-mcp@0.2.0
+```
+
+For this source branch:
+
+```bash
+npm ci
+npm run build
+pi -ne -e /absolute/path/to/codex-computer-use-mcp/integrations/pi/index.ts
+```
+
+Commands:
+
+```text
+/computer-use-status
+/computer-use-mode safe
+/computer-use-mode full-permissions
+```
+
+The native Pi adapter is the primary product path. It registers all ten typed tools directly and can present supported first-party elicitation forms in Pi's UI. It never self-accepts them; unsupported or headless elicitations are declined.
+
+## MCP server
+
+Running the binary without arguments starts a stdio MCP server exposing the same ten direct methods plus `computer_use_status`:
+
+```bash
+node dist/mcp-server.js
+```
+
+For Pi's generic MCP gateway, keep `directTools: false` so this powerful surface remains intentional:
 
 ```json
 {
   "mcpServers": {
-    "codex-computer-use": {
-      "command": "npx",
-      "args": ["-y", "codex-computer-use-mcp@0.1.0"],
+    "computer-use": {
+      "command": "node",
+      "args": ["/absolute/path/to/codex-computer-use-mcp/dist/mcp-server.js"],
       "lifecycle": "lazy",
-      "requestTimeoutMs": 360000,
+      "requestTimeoutMs": 180000,
       "directTools": false
     }
   }
 }
 ```
 
-See [`integrations/pi/`](integrations/pi/). Do not load both Pi adapters under the same tool name.
+The generic MCP server cannot render Pi's native approval UI. It declines downstream elicitations; configure persistent first-party app approvals only in the official ChatGPT Computer Use settings.
 
-### Claude Desktop
+## Security and privacy
 
-```json
-{
-  "mcpServers": {
-    "codex-computer-use": {
-      "command": "npx",
-      "args": ["-y", "codex-computer-use-mcp@0.1.0"]
-    }
-  }
-}
-```
+Each call:
 
-For a source checkout, replace `npx` and its arguments with `node` and the absolute path to `dist/mcp-server.js`.
+1. validates typed arguments;
+2. enforces safe/full mode before dispatch;
+3. resolves a target to a canonical installed bundle ID;
+4. acquires a per-app kernel lock;
+5. starts global focus telemetry;
+6. verifies fixed OpenAI-signed broker/client binaries;
+7. starts a credential-free isolated app-server process group with model transport disabled;
+8. creates one empty ephemeral runtime context;
+9. verifies the exact upstream ten-tool inventory and schemas;
+10. issues exactly one `mcpServer/tool/call`;
+11. rejects any model-turn notification;
+12. terminates the process group, removes temporary state, releases the lock, and writes a content-safe audit.
 
-## How it works
+Focus checks are detection/completion criteria, not a preventive macOS sandbox. If the target becomes frontmost, the call is reported as failed even though an individual official action may already have completed.
 
-```text
-MCP client
-  → this local server
-  → ChatGPT.app's signed app-bundled Codex CLI
-  → signed SkyComputerUseClient
-  → official Computer Use service
-  → target macOS app
-```
+Tool results may contain visible target-app text or screenshots because that is the purpose of Computer Use. They return only to the invoking Pi/MCP client. Audits never retain arguments, typed values, screenshots, app-state payloads, result text, prompts, credentials, or tokens—only bounded metadata such as method, canonical/hashed app identity, byte counts, content types, outcome, focus, broker version, and zero-turn evidence.
 
-The nested Codex turn is pinned to `gpt-5.6-sol`; reasoning is `low` for list, `high` for inspect/Dictionary, and `xhigh` for act. It receives a mode-specific tool allowlist, runs with shell/web/remote plugins disabled, and emits a constrained result schema. Streamed events are checked against the requested target, method set, argument constraints, and call budget. These checks are detection and fail-closed completion criteria, not pre-dispatch mediation.
+## State and migration
 
-Target apps are background-launched with `open -g`. The server samples frontmost state and consumes global focus notifications. If the target becomes frontmost, completion fails. Unrelated user focus changes are recorded but do not invalidate the operation.
+Direct state defaults to `~/.direct-computer-use`; override with `CODEX_COMPUTER_USE_HOME`. Direct mode does not silently reuse the released nested wrapper's state.
 
-## Usage, privacy, and audits
-
-Each operation starts a separate Codex turn and consumes separate Codex plan/API usage. Results report token usage.
-
-Audits include timestamps, operation/mode, canonical or hashed app identity, byte counts, outcome, methods, usage, and cleanup/focus results. They do **not** include task text, typed content, screenshots, app-state payloads, or model output. Policy-rejected requests are also audited once a secure state directory is available.
-
-## Known limitations
-
-- The integration targets fixed bundle paths inside the ChatGPT macOS app.
-- App updates may change bundled paths, CLI flags, plugin schemas, or signing layout.
-- First-party approvals may need completion in an official interactive OpenAI session.
-- Browser-host Computer Use is not exposed; this project targets native macOS apps.
-- In full-permissions mode, a target/method/focus/cleanup failure is detected after streamed events; mutations may already have occurred. Inspect and restore manually before retrying.
-- Secure config-path failures may prevent audit creation because the server refuses to write through an untrusted path.
+See [`MIGRATION.md`](MIGRATION.md) for opt-in migration, rollback, and conflict avoidance. No live configuration is changed by this development branch.
 
 ## Development
 
 ```bash
 npm ci
 npm run check
+npm run check:pi
 npm test
 npm run build
+npm audit --omit=dev
+npm pack --dry-run
 ```
 
-Runtime dependencies are exact-pinned and the published graph is bound by `npm-shrinkwrap.json`.
+Runtime dependencies are exact-pinned and the package includes `npm-shrinkwrap.json`.
 
 See [`PROOF.md`](PROOF.md), [`SECURITY.md`](SECURITY.md), and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 

@@ -1,15 +1,27 @@
 {
   "name": "codex-computer-use-mcp",
-  "version": "0.1.0",
-  "description": "Expose OpenAI Codex Computer Use as a background-safe MCP server for macOS.",
+  "version": "0.2.0",
+  "description": "Expose the official macOS Computer Use tools directly to Pi and MCP clients without a nested model.",
   "author": "Thomas Mustier",
   "license": "MIT",
   "type": "module",
-  "os": ["darwin"],
-  "keywords": ["mcp", "codex", "computer-use", "macos", "automation", "openai", "pi-package"],
-  "publishConfig": { "access": "public" },
+  "os": [
+    "darwin"
+  ],
+  "keywords": [
+    "computer-use",
+    "macos",
+    "automation",
+    "pi-package",
+    "mcp"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "pi": {
-    "extensions": ["./integrations/pi/index.ts"]
+    "extensions": [
+      "./integrations/pi/index.ts"
+    ]
   },
   "bin": {
     "codex-computer-use-mcp": "dist/mcp-server.js"
@@ -20,6 +32,8 @@
     "npm-shrinkwrap.json",
     "README.md",
     "PROOF.md",
+    "ARCHITECTURE.md",
+    "MIGRATION.md",
     "SECURITY.md",
     "CONTRIBUTING.md",
     "LICENSE"
@@ -29,7 +43,8 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.ts",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run check && npm test && npm run build"
+    "prepublishOnly": "npm run check && npm run check:pi && npm test && npm run build",
+    "check:pi": "npx tsc --ignoreConfig --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --skipLibCheck --types node integrations/pi/index.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
@@ -42,13 +57,25 @@
     "typebox": "*"
   },
   "peerDependenciesMeta": {
-    "@earendil-works/pi-ai": { "optional": true },
-    "@earendil-works/pi-coding-agent": { "optional": true },
-    "@earendil-works/pi-tui": { "optional": true },
-    "typebox": { "optional": true }
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "0.79.0",
+    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@earendil-works/pi-tui": "0.79.0",
     "@types/node": "^24.0.0",
+    "typebox": "1.1.38",
     "typescript": "^7.0.2"
   },
   "engines": {

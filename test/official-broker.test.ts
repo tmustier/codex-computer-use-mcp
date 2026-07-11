@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import test from "node:test";
-import { verifyOfficialBroker } from "../src/runner.ts";
-
-const CLIENT =
-	"/Applications/ChatGPT.app/Contents/Resources/plugins/openai-bundled/plugins/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient";
+import { COMPUTER_USE_CLIENT_PATH, verifyOfficialDirectBroker } from "../src/direct-broker.ts";
+import { OFFICIAL_METHODS } from "../src/tools.ts";
 
 function rpc(proc: ReturnType<typeof spawn>, id: number, method: string, params: unknown): Promise<any> {
 	proc.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
@@ -30,33 +28,21 @@ function rpc(proc: ReturnType<typeof spawn>, id: number, method: string, params:
 	});
 }
 
-test("official signed broker and typed Computer Use schema are present", async () => {
-	assert.match(verifyOfficialBroker(), /^codex-cli\s+\d+\./);
-	const proc = spawn(CLIENT, ["mcp"], { stdio: ["pipe", "pipe", "ignore"] });
+test("official signed app-server broker and exact ten-tool helper inventory are present", async () => {
+	const verified = verifyOfficialDirectBroker();
+	assert.match(verified.brokerVersion, /^codex-cli\s+\d+\./);
+	assert.match(verified.clientBuild, /^\d+$/);
+	const proc = spawn(COMPUTER_USE_CLIENT_PATH, ["mcp"], { stdio: ["pipe", "pipe", "ignore"] });
 	try {
 		const initialized = await rpc(proc, 1, "initialize", {
 			protocolVersion: "2025-11-25",
 			capabilities: {},
-			clientInfo: { name: "pi-background-native-app-test", version: "1" },
+			clientInfo: { name: "direct-computer-use-test", version: "1" },
 		});
 		assert.equal(initialized.result.serverInfo.name, "Computer Use");
 		proc.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
 		const listed = await rpc(proc, 2, "tools/list", {});
-		assert.deepEqual(
-			listed.result.tools.map((tool: any) => tool.name),
-			[
-				"list_apps",
-				"get_app_state",
-				"click",
-				"perform_secondary_action",
-				"set_value",
-				"select_text",
-				"scroll",
-				"drag",
-				"press_key",
-				"type_text",
-			],
-		);
+		assert.deepEqual(listed.result.tools.map((tool: any) => tool.name), OFFICIAL_METHODS);
 	} finally {
 		proc.kill("SIGTERM");
 		await new Promise<void>((resolve) => proc.once("close", () => resolve()));

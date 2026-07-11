@@ -1,81 +1,122 @@
-# Proof and acceptance record
+# Direct architecture proof and acceptance record
 
-This records evidence for the standalone MCP extraction. It does not guarantee compatibility with future ChatGPT macOS versions.
+This file records evidence for the 0.2 direct-tool branch. It is not a compatibility promise for future ChatGPT versions.
 
-## Supported path
+## Supported direct path
 
 ```text
-MCP client → wrapper → app-bundled signed Codex CLI → signed SkyComputerUseClient → official Computer Use service
+Pi chooses typed method/arguments
+  → local direct service
+  → signed app-bundled Codex app-server
+  → mcpServer/tool/call
+  → signed SkyComputerUseClient
+  → official Computer Use service
 ```
 
-Direct unsigned access was rejected by sender authentication. The wrapper does not bypass that boundary. It verifies the fixed app-bundled Codex and Computer Use client with `codesign --verify --strict` and OpenAI Team ID `2DC432GLL2` before each run.
+No model turn, prompt, planner, result summarizer, subagent, shell, web tool, user plugin, or Codex auth credential exists on this path.
 
-## Preventive-boundary finding
+## Architectural proof
 
-An independent `gpt-5.6-sol`/`xhigh` review of the first standalone candidate found that streamed target and argument checks occur after official-client dispatch. A model deviation could therefore reach a different already-approved app before the wrapper killed the worker.
+### Negative raw-helper probe
 
-A local MCP proxy was prototyped and proved capable of rejecting a wrong target before forwarding. It was not adopted: making the unsigned proxy the official client's parent breaks the signed-parent sender-authentication chain and caused live Computer Use to fail. Injection, re-signing, credential extraction, and authentication bypass were rejected as out of bounds.
+The official helper's stdio MCP handshake succeeds and exposes all ten schemas. A real direct `list_apps` from an ordinary Node parent fails:
 
-The public authorization model was changed instead:
+```text
+Computer Use server error -10000: Sender process is not authenticated
+```
 
-- safe mode is list-only;
-- all targeted modes are rejected and audited before worker launch;
-- full-permissions mode is explicitly acknowledged broad authorization;
-- streamed target/method/argument/focus/cleanup checks are documented as post-dispatch detection and completion criteria, not a preventive sandbox.
+No attempt was made to forge sender identity, invoke a private pipe/socket, re-sign code, inject into a process, extract credentials, or alter TCC.
 
-## Other review remediation
+### Positive official app-server probe
 
-The same review found and prompted fixes for:
+The same signed helper through official app-server `mcpServer/tool/call` succeeds. Repeated read-only probes established:
 
-- incomplete operations returning a non-error tool status;
-- policy-validation failures missing audits;
-- lease-release failure suppressing the audit attempt;
-- cancellation losing available runner metadata;
-- ASN lookup failures being permanently deduplicated;
-- final focus sampling not draining an in-flight sample;
-- caret-ranged published dependencies without a shrinkwrap;
-- status claiming a healthy boundary without verifying the signed broker;
-- insufficient release provenance guidance.
+- exact ten-tool inventory;
+- one direct `list_apps` call;
+- empty ephemeral context: `turns: 0`, `path: null`;
+- no `turn/start`, `turn/*`, or `item/*` model activity;
+- app-server `CODEX_HOME` isolated from the user's Codex home and containing no auth;
+- model provider replaced by a non-websocket dummy bound to unreachable loopback;
+- plugin and remote-control features disabled;
+- trace/network sampling showed no app-server Responses API connection or model request after those controls;
+- no nested model-token usage;
+- 39 apps returned.
 
-A second exact-tree review accepted the P1 architectural remediation and found two further P2 races: shutdown-only focus events could exhaust the single post-stop ASN lookup, and cancellation audits stored only a count rather than ordered methods. The watcher now performs a bounded awaited drain after listener closure and fails closed if any ASN remains unresolved. Cancellation now returns structured non-retryable error details and persists the ordered sanitized method list plus cleanup uncertainty. Combined regressions cover both cases.
+The public OpenAI source basis and permanent links are in `ARCHITECTURE.md`.
 
-## Test and host evidence
+## Automated evidence
 
-The original reviewed core demonstrated:
+Current branch tests cover:
 
-- strict TypeScript compilation;
-- signed broker and ten-method schema verification;
-- crash-release and bounded hashed-lock tests;
-- streamed event, failed-status, call-budget, timeout, and cancellation tests;
-- focus watcher drain/final-query tests;
-- secure config/audit no-follow, mode, and fsync checks;
-- fresh stopped-Calculator background action with `2 + 2 = 4`, `AC → 0`, cleanup verified, and zero Calculator-frontmost samples;
-- all ten official methods, different-app concurrency, same-app exclusion, and cancellation cleanup in earlier benign harness acceptance.
+- strict TypeScript for core and Pi adapter;
+- fixed-path strict signature and Team ID checks;
+- exact official ten-tool inventory/schema drift rejection before dispatch;
+- direct JSONL request sequence with no `turn/start`;
+- isolated credential-free `CODEX_HOME` even when the parent environment contains a model API key;
+- production app-server arguments disable model transport, plugins, and remote control;
+- default elicitation decline and explicit handler forwarding;
+- fatal rejection of model-turn notifications;
+- cancellation process-group termination;
+- safe read-only dispatch and pre-dispatch mutation rejection;
+- full-permissions absence of wrapper app/intent/action gates;
+- canonical bundle-ID dispatch;
+- target focus violation fail-closed behavior;
+- official error preservation;
+- private metadata-only audits with no arguments/results;
+- secure config/audit no-follow and mode checks;
+- kernel same-app exclusion, race behavior, crash release, and bounded lock filenames;
+- focus-event ASN retry/drain behavior;
+- stdio MCP inventory/status and safe mutation rejection;
+- Pi source registration for every direct capability with no nested planner reference.
 
-The standalone MCP server additionally demonstrated a real stdio client handshake and safe-mode `list` call:
+## Fresh-Pi real-app acceptance
 
-- result `ok`;
-- 39 apps;
-- one successful `list_apps` method;
-- background preserved;
-- separate Codex usage reported;
-- private sanitized audit written.
+A fresh `pi -ne -e <source adapter> --no-session` process using the branch build exercised all ten tools sequentially against a real background TextEdit document with disposable local content:
 
-After remediation, release validation must rerun the exact current test count, build, dependency audit, package inspection, read-only list acceptance, Pi adapter smoke, and independent exact-head review. The GitHub release should bind the final commit, tracked-tree aggregate hash, package integrity, host versions, and reviewer verdict.
+1. `computer_use_list_apps`
+2. `computer_use_get_app_state`
+3. `computer_use_perform_secondary_action` (`Scroll Down`)
+4. `computer_use_scroll` (0.5 page)
+5. `computer_use_drag` (visible text selection)
+6. `computer_use_set_value`
+7. `computer_use_select_text`
+8. `computer_use_type_text`
+9. `computer_use_click`
+10. `computer_use_press_key` (`CMD+A` and `CMD+S`, normalized to official xdotool-style keys)
 
-## Release gate
+Evidence:
 
-Before publishing:
+- 19 strictly sequential direct calls including eight state reads;
+- every call `outcome=ok`, `directCalls=1`, `modelTurnsStarted=0`, `ephemeralThread=true`, and `brokerCleanupVerified=true`;
+- every targeted call `backgroundPreserved=true`;
+- no first-party approval request appeared or was accepted;
+- final saved document content exactly `DIRECT COMPUTER USE ACCEPTANCE CLEANUP COMPLETE`;
+- 702 external 50ms frontmost samples, all Music, zero TextEdit samples;
+- 37 sampled direct app-server process observations, all `app-server --stdio` with the disabled provider; zero `codex exec`/`mcp-server` nested commands;
+- zero app-server TCP sockets observed after model/plugin/remote-control transport was disabled;
+- zero leaked direct app-server/client/focus/lock processes; zero owner files;
+- TextEdit was stopped and the disposable document removed after verification.
 
-1. Run `npm ci`, `npm run check`, `npm test`, `npm run build`, and `npm audit --omit=dev`.
-2. Inspect `npm pack --dry-run`; verify `npm-shrinkwrap.json` and exact runtime dependency versions are included.
-3. Verify ChatGPT/Codex/client signatures and Team ID on the acceptance host.
-4. Run fresh stdio MCP `list` acceptance in safe mode.
-5. Run one benign stopped-app action only after explicitly enabling full-permissions, with external focus sampling and cleanup verification.
-6. Check for leaked workers, listeners, lock holders, owner records, and harness apps.
-7. Independently review the exact release tree. Do not publish with unresolved P0/P1/P2 findings.
-8. Record commit, aggregate hash, package integrity, host versions, test count, and review verdict in the release.
+Earlier exploratory attempts exposed and fixed two acceptance-quality issues rather than being counted as proof: common `CMD+A` needed normalization to the official `Meta_L+a` key form, and TextEdit state restoration had to be reset before a fresh run. The final evidence above is from the corrected direct path.
+
+## Release-quality gate
+
+This branch must not merge, install, switch live config, publish npm, rename the package/repository, or create a GitHub release during this task.
+
+Candidate validation completed before independent review:
+
+- `npm ci`: pass;
+- `npm run check`: pass;
+- `npm run check:pi`: pass;
+- `npm test`: 33/33 pass;
+- `npm run build`: pass;
+- `npm audit --omit=dev`: zero vulnerabilities;
+- `npm pack --dry-run`: 36 intended files, shrinkwrap present, no removed nested-runner artifact;
+- public-source scrub: no secrets, private absolute paths, or machine identifiers found;
+- fresh-Pi real-app acceptance: pass as above.
+
+Remaining gate: independent pristine exact-head `gpt-5.6-sol`/`xhigh` security and architecture review, then open a PR and stop merge-ready. Record the final commit, tree, tracked-content aggregate, package integrity, and reviewer P0–P3 verdict before opening the PR.
 
 ## Non-goals
 
-This project does not provide a Sky protocol clone, browser-host integration, credential extraction, TCC automation, app injection, re-signing, sender-authentication bypass, or automatic approval acceptance.
+No private Sky protocol clone, browser-host integration, credential extraction, TCC automation, app injection, re-signing, sender-auth bypass, automatic approval acceptance, nested model fallback, or tool-result persistence.

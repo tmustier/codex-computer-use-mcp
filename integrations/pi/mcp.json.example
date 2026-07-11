@@ -1,13 +1,13 @@
 {
   "mcpServers": {
-    "codex-computer-use": {
+    "computer-use-direct": {
       "command": "npx",
       "args": [
         "-y",
-        "codex-computer-use-mcp@0.1.0"
+        "codex-computer-use-mcp@0.2.0"
       ],
       "lifecycle": "lazy",
-      "requestTimeoutMs": 360000,
+      "requestTimeoutMs": 180000,
       "directTools": false,
       "debug": false
     }

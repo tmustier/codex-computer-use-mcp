@@ -1,0 +1,128 @@
+# Direct architecture and boundary inventory
+
+## Official API evidence
+
+The architecture uses public source and the installed signed binaries; it does not speak a private Computer Use socket protocol.
+
+At OpenAI Codex source commit [`5c19155cbd93bfa099016e7487259f61669823ff`](https://github.com/openai/codex/tree/5c19155cbd93bfa099016e7487259f61669823ff):
+
+- the app-server documentation describes initialization, ephemeral threads, and the distinct `turn/start` operation that begins model work ([README lines 74–81](https://github.com/openai/codex/blob/5c19155cbd93bfa099016e7487259f61669823ff/codex-rs/app-server/README.md#L74-L81));
+- it documents `mcpServer/tool/call` as a direct call to a configured MCP tool ([README line 238](https://github.com/openai/codex/blob/5c19155cbd93bfa099016e7487259f61669823ff/codex-rs/app-server/README.md#L238));
+- the typed request contains `thread_id`, `server`, `tool`, and `arguments`—not a prompt or model request ([protocol lines 97–110](https://github.com/openai/codex/blob/5c19155cbd93bfa099016e7487259f61669823ff/codex-rs/app-server-protocol/src/protocol/v2/mcp.rs#L97-L110));
+- the implementation loads the thread runtime and invokes `thread.call_mcp_tool(...)` directly ([processor lines 455–474](https://github.com/openai/codex/blob/5c19155cbd93bfa099016e7487259f61669823ff/codex-rs/app-server/src/request_processors/mcp_processor.rs#L455-L474));
+- downstream structured elicitation is an explicit client capability rather than implicit approval ([README lines 89–94](https://github.com/openai/codex/blob/5c19155cbd93bfa099016e7487259f61669823ff/codex-rs/app-server/README.md#L89-L94)).
+
+The installed CLI labels app-server experimental. This project therefore verifies the current method and upstream schemas on every call and fails closed on drift.
+
+## Live architecture probe
+
+A raw stdio client can initialize the signed `SkyComputerUseClient` and list all ten tool schemas, but a real `list_apps` call from an ordinary Node parent returns:
+
+```text
+Computer Use server error -10000: Sender process is not authenticated
+```
+
+The same read-only call through signed app-server `mcpServer/tool/call` succeeded while app-server ran with an empty isolated `CODEX_HOME`:
+
+- all ten exact tools discovered;
+- one `mcpServer/tool/call`;
+- 39 apps returned;
+- ephemeral context had `turns: 0` and `path: null`;
+- no `turn/start`, `turn/*`, or `item/*` model activity;
+- no account auth file or model API credential available to app-server;
+- a dummy provider with `supports_websockets = false` and unreachable loopback base URL;
+- plugin and remote-control features disabled;
+- trace/network sampling showed no app-server Responses API connection or model request after those controls (the separate official Computer Use service may use its own network transport).
+
+This is the narrow official boundary: direct calls require a loaded thread runtime ID in the current API, but do not require a conversation turn or model generation. Literal removal of the thread-shaped runtime object would require an upstream app-server API change.
+
+## Process path
+
+```text
+Pi model
+  └─ chooses computer_use_<method> and typed arguments
+      └─ local direct service
+          └─ signed app-bundled `codex app-server --stdio`
+              ├─ empty ephemeral runtime context (zero turns; no transcript)
+              └─ `mcpServer/tool/call`
+                  └─ signed SkyComputerUseClient `mcp`
+                      └─ official Computer Use service
+                          └─ target macOS app
+```
+
+Forbidden primary-path methods are enforced by code and tests:
+
+```text
+turn/start
+turn/steer
+turn/resume model work
+codex exec
+codex mcp-server model tools
+nested prompts or result summaries
+```
+
+## Restriction inventory
+
+| Released wrapper restriction | Classification | Direct design |
+|---|---|---|
+| Fixed ChatGPT/Codex/client paths | **official-required** | retained and verified |
+| Strict signatures and OpenAI Team ID | **security-essential** | retained |
+| Signed-parent/responsible-process chain | **official-required** | retained through signed app-server |
+| Private Sky socket/native-pipe access | **unsupported/private** | prohibited |
+| Nested Codex model and prompt | **compatibility-only** | removed |
+| Model selection and reasoning effort | **compatibility-only** | removed; dummy unreachable provider prevents model transport |
+| Responses websocket prewarm on empty thread | **accidental app-server behavior** | disabled with non-websocket dummy provider |
+| Plugin/remote-control startup networking | **accidental app-server behavior** | corresponding features disabled |
+| Model-written multi-step task plan | **compatibility-only** | removed |
+| Model result schema/summary | **compatibility-only** | removed |
+| Streamed model-event target/method validation | **compatibility-only** | replaced by pre-dispatch typed call validation |
+| Per-operation tool allowlists and call budgets | **compatibility-only** | one typed method per direct request |
+| Task text, cleanup instructions, required-capabilities fields | **compatibility-only** | removed |
+| Dictionary-only special policy | **accidental** | removed |
+| Wrapper app/intent allowlists in full mode | **accidental** | absent |
+| Safe mode list-only | **compatibility-only** | cleanly evolved to two read methods |
+| Explicit full-permissions acknowledgement | **security-essential user boundary** | retained |
+| Official first-party app/sensitive approvals | **official-required** | retained and never auto-accepted |
+| macOS TCC | **official-required** | retained; never modified |
+| Exact ten-tool inventory/schema | **security-essential** | retained and checked before each call |
+| Canonical bundle identity | **security-essential** | retained before targeted dispatch |
+| Same-app kernel lock | **security-essential** | retained |
+| Automatic background app launch | **accidental** | removed; the official tool owns app behavior |
+| Global focus watcher and final sample | **security-essential detection** | retained |
+| Timeout/cancellation process-group termination | **security-essential** | retained |
+| Per-call temporary worker cleanup | **security-essential** | retained with isolated `CODEX_HOME` |
+| Codex token usage accounting | **compatibility-only** | removed; no model turn exists |
+| Content-safe private audit | **security-essential** | retained with direct-call fields |
+| Full-result spill files | **unsafe/accidental** | prohibited; truncation is in-memory only |
+| Browser-host integration | **out of scope** | unchanged |
+
+## Elicitation boundary
+
+The native Pi adapter advertises supported form elicitation and renders each official field through Pi UI. A human must provide the response and confirm submission. The adapter:
+
+- defaults to decline;
+- declines headless, URL, proprietary, oversized, or unsupported forms;
+- never selects `Always allow` or any other option automatically;
+- does not write elicitation content to audits.
+
+The generic stdio MCP wrapper has no native Pi UI and declines downstream elicitations. Users configure persistent app approval in official ChatGPT Computer Use settings.
+
+## Output boundary
+
+Only official `text` and `image` MCP blocks are accepted. They are returned to the invoking client because app state and screenshots are the requested capability. They are never copied to audit, logs, temp files, or structured metadata. Text is truncated in memory at Pi's standard 50KB/2000-line bound; the full text is not persisted.
+
+## Naming proposal—separate approval required
+
+The existing repository/package remains `codex-computer-use-mcp` in this PR. That name reflects the released nested implementation and overstates Codex as product identity.
+
+Recommended future name: **`pi-computer-use`**.
+
+Why:
+
+1. Pi-owned typed tools are the primary product.
+2. “Computer Use” accurately names the capability.
+3. OpenAI's signed app-server is an implementation boundary, not the planner or product.
+
+Alternative if MCP parity should remain prominent: **`pi-computer-use-mcp`**.
+
+No repository rename, npm rename, redirect, merge, or release belongs in this PR without a separate explicit gate.
