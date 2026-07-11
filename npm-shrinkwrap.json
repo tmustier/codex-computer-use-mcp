@@ -19,9 +19,9 @@
         "codex-computer-use-mcp": "dist/mcp-server.js"
       },
       "devDependencies": {
-        "@earendil-works/pi-ai": "0.79.0",
+        "@earendil-works/pi-ai": "0.80.6",
         "@earendil-works/pi-coding-agent": "0.80.6",
-        "@earendil-works/pi-tui": "0.79.0",
+        "@earendil-works/pi-tui": "0.80.6",
         "@types/node": "^24.0.0",
         "typebox": "1.1.38",
         "typescript": "^7.0.2"
@@ -541,16 +541,17 @@
       }
     },
     "node_modules/@earendil-works/pi-ai": {
-      "version": "0.79.0",
-      "resolved": "https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-0.79.0.tgz",
-      "integrity": "sha512-D/2aDoe9vcCbqAztALQcKkdqXGuaQcqAzLm8LfUhNaorwoIHkwnaAuDVlo+OkF5clpEwS8Z1bk2o8NiSrwEdsA==",
+      "version": "0.80.6",
+      "resolved": "https://registry.npmjs.org/@earendil-works/pi-ai/-/pi-ai-0.80.6.tgz",
+      "integrity": "sha512-7xfLk8sANBp+bpPEbjoOZTbPxsa+++b1JXAoSJsNa3vbs9AHHEclmvg54XLQcxH+fuwaeti/g2jeIfJ+mVYLpA==",
       "dev": true,
       "license": "MIT",
       "dependencies": {
         "@anthropic-ai/sdk": "0.91.1",
         "@aws-sdk/client-bedrock-runtime": "3.1048.0",
         "@google/genai": "1.52.0",
-        "@mistralai/mistralai": "2.2.1",
+        "@mistralai/mistralai": "2.2.6",
+        "@opentelemetry/api": "1.9.0",
         "@smithy/node-http-handler": "4.7.3",
         "http-proxy-agent": "7.0.2",
         "https-proxy-agent": "7.0.6",
@@ -1100,7 +1101,7 @@
         "typebox": "1.1.38"
       },
       "bin": {
-        "pi-ai": "dist/cli.js"
+        "pi-ai": "./dist/cli.js"
       },
       "engines": {
         "node": ">=22.19.0"
@@ -2542,14 +2543,14 @@
       }
     },
     "node_modules/@earendil-works/pi-tui": {
-      "version": "0.79.0",
-      "resolved": "https://registry.npmjs.org/@earendil-works/pi-tui/-/pi-tui-0.79.0.tgz",
-      "integrity": "sha512-qAQWMruW7YKbk2hPcTD4INtXfvIySXifbPQ+mFY5j3J8yf2tfElkh+gGPuBvgPKPT0z9WiAkd7iySCuQq0txuQ==",
+      "version": "0.80.6",
+      "resolved": "https://registry.npmjs.org/@earendil-works/pi-tui/-/pi-tui-0.80.6.tgz",
+      "integrity": "sha512-bSuzS4EVSqEPj/Qr/p9eqCESfKsGuDNbl77EGci8Iaqqt/C/XCBZL1MjXaxSWW1NsT5afjp/Cb0NTPzOLv/aPA==",
       "dev": true,
       "license": "MIT",
       "dependencies": {
         "get-east-asian-width": "1.6.0",
-        "marked": "15.0.12"
+        "marked": "18.0.5"
       },
       "engines": {
         "node": ">=22.19.0"
@@ -2593,15 +2594,24 @@
       }
     },
     "node_modules/@mistralai/mistralai": {
-      "version": "2.2.1",
-      "resolved": "https://registry.npmjs.org/@mistralai/mistralai/-/mistralai-2.2.1.tgz",
-      "integrity": "sha512-uKU8CZmL2RzYKmplsU01hii4p3pe4HqJefpWNRWXm1Tcm0Sm4xXfwSLIy4k7ZCPlbETCGcp69E7hZs+WOJ5itQ==",
+      "version": "2.2.6",
+      "resolved": "https://registry.npmjs.org/@mistralai/mistralai/-/mistralai-2.2.6.tgz",
+      "integrity": "sha512-W8pX7zHxjJvMIpw8JMxeJEleapXX0Q9NPszdNzqkM3MIEoIGPObdodujj+WHteXEvGfaP/AMwlNyRfEzSY6dQQ==",
       "dev": true,
       "license": "Apache-2.0",
       "dependencies": {
+        "@opentelemetry/semantic-conventions": "^1.40.0",
         "ws": "^8.18.0",
         "zod": "^3.25.0 || ^4.0.0",
         "zod-to-json-schema": "^3.25.0"
+      },
+      "peerDependencies": {
+        "@opentelemetry/api": "^1.9.0"
+      },
+      "peerDependenciesMeta": {
+        "@opentelemetry/api": {
+          "optional": true
+        }
       }
     },
     "node_modules/@modelcontextprotocol/sdk": {
@@ -2642,6 +2652,26 @@
         "zod": {
           "optional": false
         }
+      }
+    },
+    "node_modules/@opentelemetry/api": {
+      "version": "1.9.0",
+      "resolved": "https://registry.npmjs.org/@opentelemetry/api/-/api-1.9.0.tgz",
+      "integrity": "sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==",
+      "dev": true,
+      "license": "Apache-2.0",
+      "engines": {
+        "node": ">=8.0.0"
+      }
+    },
+    "node_modules/@opentelemetry/semantic-conventions": {
+      "version": "1.43.0",
+      "resolved": "https://registry.npmjs.org/@opentelemetry/semantic-conventions/-/semantic-conventions-1.43.0.tgz",
+      "integrity": "sha512-eSYWTm620tTk45EKSedaUL8MFYI8hW164hIXsgIHyxu3VobUB3fFCu5t0hQby6OoWRPsG1KkKUG2M5UadiLiVg==",
+      "dev": true,
+      "license": "Apache-2.0",
+      "engines": {
+        "node": ">=14"
       }
     },
     "node_modules/@protobufjs/aspromise": {
@@ -4087,16 +4117,16 @@
       "license": "Apache-2.0"
     },
     "node_modules/marked": {
-      "version": "15.0.12",
-      "resolved": "https://registry.npmjs.org/marked/-/marked-15.0.12.tgz",
-      "integrity": "sha512-8dD6FusOQSrpv9Z1rdNMdlSgQOIP880DHqnohobOmYLElGEqAL/JvxvuxZO16r4HtjTlfPRDC1hbvxC9dPN2nA==",
+      "version": "18.0.5",
+      "resolved": "https://registry.npmjs.org/marked/-/marked-18.0.5.tgz",
+      "integrity": "sha512-S6GcvALHg6K4ohtu4E7x0a1AqhAjp6cV8KhLSyN9qVapnzJkusVBxZRcIU9AeYsbe6P1hKDusSbEOzGyyuce6w==",
       "dev": true,
       "license": "MIT",
       "bin": {
         "marked": "bin/marked.js"
       },
       "engines": {
-        "node": ">= 18"
+        "node": ">= 20"
       }
     },
     "node_modules/math-intrinsics": {
