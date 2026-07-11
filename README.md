@@ -158,7 +158,7 @@ MCP client
   → target macOS app
 ```
 
-The nested Codex turn is pinned to `gpt-5.6-sol` at `xhigh` reasoning, receives a mode-specific tool allowlist, runs with shell/web/remote plugins disabled, and emits a constrained result schema. Streamed events are checked against the requested target, method set, argument constraints, and call budget. These checks are detection and fail-closed completion criteria, not pre-dispatch mediation.
+The nested Codex turn is pinned to `gpt-5.6-sol`; reasoning is `low` for list, `high` for inspect/Dictionary, and `xhigh` for act. It receives a mode-specific tool allowlist, runs with shell/web/remote plugins disabled, and emits a constrained result schema. Streamed events are checked against the requested target, method set, argument constraints, and call budget. These checks are detection and fail-closed completion criteria, not pre-dispatch mediation.
 
 Target apps are background-launched with `open -g`. The server samples frontmost state and consumes global focus notifications. If the target becomes frontmost, completion fails. Unrelated user focus changes are recorded but do not invalidate the operation.
 

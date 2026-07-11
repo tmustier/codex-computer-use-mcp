@@ -24,7 +24,6 @@ final class HarnessDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegat
             defer: false
         )
         window.title = harnessName
-        window.setFrameAutosaveName(harnessName)
         window.center()
 
         let root = NSStackView()

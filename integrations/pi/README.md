@@ -14,7 +14,7 @@ The package manifest loads `integrations/pi/index.ts` and registers:
 - `/background-computer-use-status`
 - `/background-computer-use-mode`
 
-The adapter imports the same compiled service used by the MCP server; it does not fork the security-critical runner or policy.
+The adapter imports the same compiled service used by the MCP server; it does not fork the security-critical runner or policy. Pi signals tool failures by thrown error, so cancellation text carries observed methods and non-retry guidance while the complete structured method list remains in the private audit.
 
 For a local checkout:
 
