@@ -1,0 +1,64 @@
+{
+  "name": "codex-computer-use-mcp",
+  "version": "0.1.0",
+  "description": "Expose OpenAI Codex Computer Use as a background-safe MCP server for macOS.",
+  "author": "Thomas Mustier",
+  "license": "MIT",
+  "type": "module",
+  "os": ["darwin"],
+  "keywords": ["mcp", "codex", "computer-use", "macos", "automation", "openai", "pi-package"],
+  "publishConfig": { "access": "public" },
+  "pi": {
+    "extensions": ["./integrations/pi/index.ts"]
+  },
+  "bin": {
+    "codex-computer-use-mcp": "dist/mcp-server.js"
+  },
+  "files": [
+    "dist",
+    "integrations/pi",
+    "README.md",
+    "PROOF.md",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.ts",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run check && npm test && npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": { "optional": true },
+    "@earendil-works/pi-coding-agent": { "optional": true },
+    "@earendil-works/pi-tui": { "optional": true },
+    "typebox": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tmustier/codex-computer-use-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tmustier/codex-computer-use-mcp/issues"
+  },
+  "homepage": "https://github.com/tmustier/codex-computer-use-mcp#readme"
+}

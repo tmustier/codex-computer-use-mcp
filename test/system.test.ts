@@ -1,0 +1,82 @@
+import assert from "node:assert/strict";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import {
+	frontmostApplicationToken,
+	frontmostBundleId,
+	frontmostBundleIdAsync,
+	resolveAppIdentity,
+	resolveAppLeaseId,
+	watchTargetFrontmost,
+} from "../src/system.ts";
+
+test("async focus sampling matches the synchronous frontmost bundle", async () => {
+	const sync = frontmostBundleId();
+	const asyncValue = await frontmostBundleIdAsync();
+	assert.ok(sync);
+	assert.ok(asyncValue);
+});
+
+test("app identity preserves the official bundle ID while canonicalizing leases", () => {
+	assert.deepEqual(resolveAppIdentity("com.apple.dictionary"), {
+		bundleId: "com.apple.Dictionary",
+		leaseId: "com.apple.dictionary",
+		verifiedSystemDictionary: true,
+	});
+	assert.equal(resolveAppLeaseId("com.apple.calculator"), "com.apple.calculator");
+	assert.equal(resolveAppLeaseId("Calculator"), "com.apple.calculator");
+	assert.equal(resolveAppLeaseId("Unregistered Safe Harness"), "name:unregistered safe harness");
+	assert.deepEqual(resolveAppIdentity("com.example.UninstalledSensitiveSelector"), {
+		leaseId: "com.example.uninstalledsensitiveselector",
+		verifiedSystemDictionary: false,
+	});
+});
+
+test("event-driven global focus watcher resolves ASN notifications to bundle IDs", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "focus-watcher-test."));
+	const listener = path.join(root, "listener.mjs");
+	const asn = frontmostApplicationToken();
+	const bundleId = frontmostBundleId();
+	assert.ok(asn);
+	assert.ok(bundleId);
+	try {
+		await writeFile(listener, `#!/usr/bin/env node\nconsole.log(${JSON.stringify(asn)}); setInterval(() => {}, 1000);\n`, "utf8");
+		await chmod(listener, 0o700);
+		const watcher = await watchTargetFrontmost(listener);
+		for (let attempt = 0; attempt < 20 && !watcher.becameFrontmost(bundleId); attempt += 1) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		assert.equal(watcher.healthy(), true);
+		assert.equal(watcher.becameFrontmost(bundleId), true);
+		assert.equal(watcher.becameFrontmost("com.example.Unrelated"), false);
+		await watcher.stop();
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("focus watcher drains queued events before final query", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "focus-watcher-drain-test."));
+	const listener = path.join(root, "listener.mjs");
+	const asn = frontmostApplicationToken();
+	const bundleId = frontmostBundleId();
+	assert.ok(asn);
+	assert.ok(bundleId);
+	try {
+		await writeFile(
+			listener,
+			`#!/usr/bin/env node\nprocess.on('SIGTERM',()=>{ console.log(${JSON.stringify(asn)}); setTimeout(()=>process.exit(0),20); }); setInterval(()=>{},1000);\n`,
+			"utf8",
+		);
+		await chmod(listener, 0o700);
+		const watcher = await watchTargetFrontmost(listener);
+		await new Promise((resolve) => setTimeout(resolve, 250));
+		assert.equal(watcher.becameFrontmost(bundleId), false);
+		await watcher.stop();
+		assert.equal(watcher.becameFrontmost(bundleId), true);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});

@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "codex-computer-use": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "codex-computer-use-mcp@0.1.0"
+      ],
+      "lifecycle": "lazy",
+      "requestTimeoutMs": 360000,
+      "directTools": false,
+      "debug": false
+    }
+  }
+}
