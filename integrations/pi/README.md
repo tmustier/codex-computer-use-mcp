@@ -13,7 +13,13 @@ CODEX_COMPUTER_USE_HOME="$(mktemp -d)" \
 
 `-ne` prevents an installed 0.1 adapter from loading at the same time. This source workflow does not install or switch live Pi configuration.
 
-The npm package remains at released 0.1 until a separate release gate. A live 0.2 source switch must use the exact independently reviewed commit and the rollback procedure in `MIGRATION.md`; do not substitute an unpublished npm version.
+For normal installation, use the exact version 0.2.0 npm package:
+
+```bash
+pi install npm:codex-computer-use-mcp@0.2.0
+```
+
+Use the source workflow only when you need to test an exact reviewed commit. Follow the rollback procedure in `MIGRATION.md` when replacing version 0.1.
 
 ## Registered surface
 
@@ -33,7 +39,7 @@ No-permissions is the only policy: all ten tools are available with no wrapper a
 
 ## Generic MCP gateway
 
-Merge `mcp.json.example` only after building the exact reviewed source or after a separately approved package release. `directTools: false` is intentional; it keeps this powerful generic MCP surface behind Pi's gateway.
+Merge `mcp.json.example` only for the exact 0.2.0 package or after building an exact reviewed source commit. `directTools: false` is intentional; it keeps this powerful generic MCP surface behind Pi's gateway.
 
 For a source checkout:
 

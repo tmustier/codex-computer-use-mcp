@@ -73,9 +73,9 @@ Current branch tests cover:
 - stdio MCP all-ten inventory/status with no alternate mode route;
 - Pi source registration for every direct capability with no nested planner, permission command, or approval UI reference.
 
-## Fresh-Pi real-app acceptance
+## Fresh Pi unlocked real-app acceptance
 
-A fresh `pi -ne -e <source adapter> --no-session` process using the branch build exercised all ten tools sequentially against a real background TextEdit document with disposable local content:
+A fresh `pi -ne -e <source adapter> --no-session` process using the branch build exercised all ten tools sequentially in an unlocked macOS session. The target was a real background TextEdit document with disposable local content:
 
 1. `computer_use_list_apps`
 2. `computer_use_get_app_state`
@@ -103,11 +103,11 @@ Evidence:
 
 Earlier exploratory attempts exposed and fixed two acceptance-quality issues rather than being counted as proof: common `CMD+A` needed normalization to the official `Meta_L+a` key form, and TextEdit state restoration had to be reset before a fresh run. The final evidence above is from the corrected direct path.
 
-## Review and activation gate
+## Review and release status
 
-The candidate must remain off the live Pi path until an independent pristine exact-head `gpt-5.6-sol`/`xhigh` review returns no P0/P1/P2 blocker. After that immutable-head gate, pushing the reviewed head to `main` and a rollback-safe local Pi switch are explicitly authorized; npm publication, tags, GitHub releases, and repository/package renames are not.
+The direct implementation at commit `98d26f8040f8035a294caa8581d218a33c076990`, tree `01dd30c899863d182bcb0ac3256bd0cc11efc42b`, passed the immutable exact-head review and rollback-safe activation gates. It became the basis for the version 0.2.0 release.
 
-Candidate validation completed before independent review:
+Validation recorded for the reviewed direct implementation:
 
 - `npm ci`: pass;
 - `npm run check`: pass;
@@ -121,7 +121,7 @@ Candidate validation completed before independent review:
 
 Independent reviews of preceding candidates found cleanup/coordination and focus-telemetry gaps: fail-open/partial descendant enumeration, early-exit orphan recovery, state-root-scoped same-app locking, false-success lease-release audit, unverified focus-listener exit, pre-response direct-call accounting, and large-chunk focus-event loss. This candidate retains those remediations while removing all wrapper approval UI and safe/full configuration branches.
 
-Remaining gate: commit the remediated candidate, perform a new independent pristine exact-head `gpt-5.6-sol`/`xhigh` security and architecture review, and require zero P0/P1/P2 findings. Record the final commit, tree, tracked-content aggregate, package integrity, and reviewer P0–P3 verdict before any exact-head push or local switch.
+Version 0.2.0 supports direct local calls only in an unlocked macOS session. Targeted calls failed with official error `-10005` during genuine locked-session acceptance. OpenAI limits locked Computer Use to active trusted turns started from a connected device, so locked local use remains follow-up work and is not part of this release.
 
 ## Non-goals
 

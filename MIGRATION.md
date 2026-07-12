@@ -1,6 +1,6 @@
 # Migration and rollback
 
-Version 0.2 is a breaking architecture change. It must remain off the live Pi path until an immutable exact-head review returns no P0/P1/P2 blocker. After that gate, an exact-head push to `main` and rollback-safe local switch are authorized; npm publication, tags, GitHub releases, and renames are not.
+Version 0.2.0 is a breaking architecture change. It replaces the aggregate nested-model tool with ten direct typed tools. The direct implementation passed immutable exact-head review and rollback-safe activation before release. Follow this guide to move from version 0.1.0.
 
 ## What changes
 
@@ -37,14 +37,12 @@ CODEX_COMPUTER_USE_HOME="$(mktemp -d)" \
 
 The source adapter starts only in no-permissions mode: all ten methods are available and the wrapper opens no approval UI. Use only benign real apps whose persistent first-party access is already configured. Do not use disposable harnesses as acceptance evidence.
 
-## Reviewed exact-head migration
+## Migrate to version 0.2.0
 
-Only after the independent no-blocker review, and only while `main` still identifies the reviewed commit:
-
-1. Back up `~/.pi/agent/settings.json`, `~/.pi/agent/mcp.json`, and the installed 0.1 package/extension directory.
-2. Record the reviewed commit/tree and verify the pushed `main` commit matches byte-for-byte.
+1. Back up `~/.pi/agent/settings.json`, `~/.pi/agent/mcp.json`, and the installed 0.1 package or extension directory.
+2. Record the installed version and verify that npm resolves `codex-computer-use-mcp@0.2.0` exactly.
 3. Remove or disable the 0.1 aggregate adapter and generic MCP registration.
-4. Install the reviewed 0.2 source from the exact pushed commit without publishing a new npm version.
+4. Install `npm:codex-computer-use-mcp@0.2.0`.
 5. Remove any legacy direct `config.json`; the new build ignores it and has no mode selector.
 6. Start a fresh Pi process; do not rely on hot-reloading a security-boundary change.
 7. Verify `/computer-use-status` reports:
@@ -55,10 +53,12 @@ Only after the independent no-blocker review, and only while `main` still identi
    - `nestedModel: false`;
    - `modelUsage: false`;
    - `ephemeralZeroTurnRuntimeContextRequired: true`.
-8. Run `computer_use_list_apps` and `computer_use_get_app_state` against a benign real app with external focus sampling.
+8. Run `computer_use_list_apps` and `computer_use_get_app_state` against a benign real app with external focus sampling while the Mac is unlocked.
 9. Exercise mutating methods on benign disposable content, restore app state, then check audits and process cleanup.
 
 Do not copy old safe/full configuration into the new state root. No-permissions is compiled as the sole unrestricted, no-wrapper-prompt interface.
+
+Version 0.2.0 does not support targeted local Computer Use while the Mac is locked. OpenAI reserves locked use for active trusted turns started from a connected device. See the [locked-screen limitation](README.md#locked-screen-limitation).
 
 ## Rollback
 
@@ -74,4 +74,4 @@ Direct state can be removed only after rollback evidence is captured and no proc
 
 ## Generic MCP gateway
 
-If Pi uses `mcp.json`, retain `directTools: false`. During source acceptance, use a distinct temporary server name and source path. Remove that temporary entry after acceptance. The reviewed direct Pi adapter is the primary live path; do not leave the released aggregate server active after the rollback-safe switch.
+If Pi uses `mcp.json`, retain `directTools: false`. Use the exact `0.2.0` package shown in `integrations/pi/mcp.json.example`. During source acceptance, use a distinct temporary server name and source path, then remove it. The direct Pi adapter is the primary live path; do not leave the version 0.1 aggregate server active after the switch.

@@ -1,8 +1,6 @@
 # Codex Computer Use MCP
 
-> **0.2 direct candidate:** direct Pi-owned Computer Use tools. The package/repository name is unchanged; npm 0.1 remains the released nested implementation until a separate release gate.
-
-This project exposes the official signed macOS Computer Use capabilities as **direct typed tools** for Pi and MCP clients. The calling agent chooses every tool and argument itself.
+Version 0.2.0 exposes the official signed macOS Computer Use capabilities as direct typed tools for Pi and MCP clients. The calling agent chooses every tool and argument itself.
 
 The primary path has:
 
@@ -71,9 +69,21 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for source links and the full restricti
 
 The direct bridge starts app-server with a new private `CODEX_HOME` containing no account credentials and only one configured MCP server: official Computer Use. It does not inherit the user's Codex MCP servers, plugins, history, memories, API keys, or auth file. It selects a non-websocket dummy model provider bound to unreachable loopback, disables plugin/remote-control features, and never starts a turn; this prevents app-server model prewarm or Responses API traffic.
 
+### Locked-screen limitation
+
+Version 0.2.0 supports direct local calls in an unlocked macOS session. It does not support window or accessibility actions after the Mac locks.
+
+OpenAI's [locked Computer Use](https://developers.openai.com/codex/app/computer-use#use-computer-use-while-your-mac-is-locked) is limited to active, trusted ChatGPT turns started from a connected device. It does not authorize other apps or local processes to unlock the Mac. This package uses local zero-turn dispatch, so targeted calls can fail with official error `-10005` while the Mac is locked. Support for locked local use remains a follow-up and is not part of version 0.2.0.
+
 ## Pi integration
 
-The npm package remains at the released 0.1 nested architecture; do not assume an npm 0.2 exists. To evaluate an exact reviewed source commit:
+Install the exact release from npm:
+
+```bash
+pi install npm:codex-computer-use-mcp@0.2.0
+```
+
+To evaluate a source checkout instead:
 
 ```bash
 npm ci

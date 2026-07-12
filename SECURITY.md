@@ -54,4 +54,6 @@ Computer Use is designed to return app state and screenshots. Do not point it at
 
 ## Supported versions
 
-Only the latest approved release is supported. App-server is experimental and bundle paths/schema can change; drift fails closed until reviewed.
+Only the latest approved release is supported. Version 0.2.0 supports direct local calls in an unlocked macOS session. Targeted local calls while the Mac is locked are not supported.
+
+App-server is experimental and bundle paths or schemas can change. Drift fails closed until reviewed.
