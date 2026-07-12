@@ -191,6 +191,24 @@ function schemasEqual(left: unknown, right: unknown): boolean {
 	return JSON.stringify(normalizeSchema(left)) === JSON.stringify(normalizeSchema(right));
 }
 
+const EXPECTED_APP_ACCESS_SCHEMA = { type: "object", properties: {} } as const;
+const EXPECTED_APP_ACCESS_META = { persist: ["always"] } as const;
+
+function isExpectedComputerUseAppAccessElicitation(params: unknown, threadId: string | undefined): boolean {
+	if (!params || typeof params !== "object" || Array.isArray(params) || !threadId) return false;
+	const record = params as Record<string, unknown>;
+	const expectedKeys = ["_meta", "message", "mode", "requestedSchema", "serverName", "threadId", "turnId"];
+	if (Object.keys(record).sort().join("\0") !== expectedKeys.sort().join("\0")) return false;
+	return record.threadId === threadId
+		&& record.turnId === null
+		&& record.serverName === "computer-use"
+		&& record.mode === "form"
+		&& typeof record.message === "string"
+		&& record.message.length > 0
+		&& schemasEqual(record.requestedSchema, EXPECTED_APP_ACCESS_SCHEMA)
+		&& schemasEqual(record._meta, EXPECTED_APP_ACCESS_META);
+}
+
 function validateInventory(result: unknown): void {
 	const data = (result as any)?.data;
 	if (!Array.isArray(data)) throw new BrokerVerificationError("App-server returned an invalid MCP inventory");
@@ -435,6 +453,7 @@ export async function callOfficialDirectTool(
 	let modelTurnsStarted = 0;
 	let directCalls = 0;
 	let ephemeralThread = false;
+	let activeThreadId: string | undefined;
 	let finalResult: DirectBrokerResult | undefined;
 	let primaryError: Error | undefined;
 	let cleanupVerified = false;
@@ -534,10 +553,11 @@ export async function callOfficialDirectTool(
 						return;
 					}
 					approvalRequests += 1;
-					// Durable configuration is the sole permission authority. Full permissions
-					// deterministically authorizes first-party app access with no model/UI vote;
-					// safe mode deterministically declines it.
-					const result = options.permissionMode === "full-permissions"
+					// Durable configuration is the sole permission authority, but it may only
+					// authorize the exact first-party app-access form from this ephemeral thread.
+					// Any origin, mode, metadata, or schema drift deterministically fails closed.
+					const expectedAppAccess = isExpectedComputerUseAppAccessElicitation(message.params, activeThreadId);
+					const result = options.permissionMode === "full-permissions" && expectedAppAccess
 						? { action: "accept", content: {}, _meta: { persist: "always" } }
 						: { action: "decline" };
 					send({ id: message.id, result });
@@ -618,6 +638,7 @@ export async function callOfficialDirectTool(
 			throw new BrokerVerificationError("App-server did not attest an empty pathless ephemeral runtime context");
 		}
 		ephemeralThread = true;
+		activeThreadId = threadId;
 		const inventory = await request(
 			"mcpServerStatus/list",
 			{ threadId, detail: "toolsAndAuthOnly" },

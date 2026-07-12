@@ -27,7 +27,15 @@ rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify(
  if(m.method==="mcpServerStatus/list"){const tools=JSON.parse(JSON.stringify(inventory)); if(mode==="schema-drift")tools.list_apps.inputSchema.properties={drift:{type:"string"}}; send({id:m.id,result:{data:[{name:"computer-use",tools}]}});if(mode==="close-before-tool"){process.stdin.destroy();setTimeout(()=>process.exit(0),100);}return;}
  if(m.method==="mcpServer/tool/call"){
    if(mode==="hang"||mode==="child-hang") return;
-   if(mode==="elicit"){pendingTool=m.id; return send({id:"approval-1",method:"mcpServer/elicitation/request",params:{mode:"form",message:"Approve app access?",serverName:"computer-use",requestedSchema:{type:"object",properties:{}}}});}
+   if(mode.startsWith("elicit")){
+     pendingTool=m.id;
+     const params={threadId:"thread-test",turnId:null,serverName:"computer-use",mode:"form",_meta:{persist:["always"]},message:"Allow ChatGPT to use Test App?",requestedSchema:{type:"object",properties:{}}};
+     if(mode==="elicit-bad-origin")params.serverName="unexpected-server";
+     if(mode==="elicit-bad-thread")params.threadId="unexpected-thread";
+     if(mode==="elicit-bad-mode")params.mode="openai/form";
+     if(mode==="elicit-bad-schema")params.requestedSchema={type:"object",properties:{unexpected:{type:"string"}}};
+     return send({id:"approval-1",method:"mcpServer/elicitation/request",params});
+   }
    if(mode==="late-model-event"){send({id:m.id,result:{content:[{type:"text",text:"direct-ok"}],isError:false}});return send({method:"turn/started",params:{late:true}});}
    return send({id:m.id,result:{content:[{type:"text",text:"direct-ok"}],isError:false}});
  }
@@ -115,6 +123,23 @@ test("durable full-permissions config auto-accepts first-party app access withou
 			_meta: { persist: "always" },
 		});
 	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("durable full-permissions fails closed for unexpected elicitation origin, thread, mode, or schema", async () => {
+	for (const mode of ["elicit-bad-origin", "elicit-bad-thread", "elicit-bad-mode", "elicit-bad-schema"]) {
+		const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-bad-elicit-test."));
+		try {
+			const { script, log } = await makeFake(root);
+			const declined = await callOfficialDirectTool("list_apps", {}, {
+				...options(script, mode),
+				permissionMode: "full-permissions",
+			});
+			assert.equal(declined.content[0].text, "approval:decline", mode);
+			const records = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+			assert.deepEqual(records.find((item) => item.id === "approval-1" && item.result)?.result, { action: "decline" }, mode);
+			assert.equal(records.some((item) => item.id === "approval-1" && item.result?.action === "accept"), false, mode);
+		} finally { await rm(root, { recursive: true, force: true }); }
+	}
 });
 
 test("durable safe config declines first-party app access without a model or UI vote", async () => {
