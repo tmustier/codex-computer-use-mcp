@@ -119,7 +119,7 @@ Validation recorded for the reviewed direct implementation:
 - public-source scrub: no secrets, private absolute paths, or machine identifiers found;
 - fresh-Pi real-app acceptance: pass as above.
 
-Independent reviews of preceding candidates found cleanup/coordination and focus-telemetry gaps: fail-open/partial descendant enumeration, early-exit orphan recovery, state-root-scoped same-app locking, false-success lease-release audit, unverified focus-listener exit, pre-response direct-call accounting, and large-chunk focus-event loss. This candidate retains those remediations while removing all wrapper approval UI and safe/full configuration branches.
+Independent reviews of earlier revisions found cleanup and coordination gaps: fail-open or partial descendant enumeration, early-exit orphan recovery, state-root-scoped same-app locking, false-success lease-release audit, unverified focus-listener exit, pre-response direct-call accounting, and large-chunk focus-event loss. The reviewed implementation retains those fixes while removing all wrapper approval UI and safe or full configuration branches.
 
 Version 0.2.0 supports direct local calls only in an unlocked macOS session. Targeted calls failed with official error `-10005` during genuine locked-session acceptance. OpenAI limits locked Computer Use to active trusted turns started from a connected device, so locked local use remains follow-up work and is not part of this release.
 

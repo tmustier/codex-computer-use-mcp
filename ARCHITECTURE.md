@@ -127,18 +127,8 @@ Both Pi and generic stdio MCP omit elicitation capability. App-server is created
 
 Only official `text` and `image` MCP blocks are accepted. They are returned to the invoking client because app state and screenshots are the requested capability. They are never copied to audit, logs, temp files, or structured metadata. Text is truncated in memory at Pi's standard 50KB/2000-line bound; the full text is not persisted.
 
-## Naming proposal—separate approval required
+## Package name
 
-The existing repository/package remains `codex-computer-use-mcp` in this change. That name reflects the released nested implementation and overstates Codex as product identity.
+Version 0.2.0 keeps the repository and npm package name `codex-computer-use-mcp` for continuity with version 0.1.0. Pi-owned typed tools are now the primary product path. OpenAI's signed Codex app-server remains an implementation boundary, not the planner.
 
-Recommended future name: **`pi-computer-use`**.
-
-Why:
-
-1. Pi-owned typed tools are the primary product.
-2. “Computer Use” accurately names the capability.
-3. OpenAI's signed app-server is an implementation boundary, not the planner or product.
-
-Alternative if MCP parity should remain prominent: **`pi-computer-use-mcp`**.
-
-No repository/npm rename, npm publish, tag, or GitHub release belongs in this change without a separate explicit gate.
+Any future package or repository rename would be a separate distribution change and would require maintainer approval.

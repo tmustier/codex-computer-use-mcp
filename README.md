@@ -150,7 +150,7 @@ Tool results may contain visible target-app text or screenshots because that is 
 
 Audit state defaults to `~/.direct-computer-use`; override with `CODEX_COMPUTER_USE_HOME`. Permission policy is not read from that agent-writable path: no-permissions is compiled as the only interface. Legacy `config.json` files are ignored.
 
-See [`MIGRATION.md`](MIGRATION.md) for the immutable-review gate, exact-head opt-in migration, rollback, and conflict avoidance.
+See [`MIGRATION.md`](MIGRATION.md) for version 0.1 migration, source acceptance, rollback, and conflict avoidance.
 
 ## Development
 
