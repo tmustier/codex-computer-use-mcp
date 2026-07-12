@@ -37,7 +37,7 @@ Pi—not a nested planner—must call `computer_use_get_app_state`, choose a cur
 
 The mode-`0600` state file has two modes. `safe` is the default and exposes only `list_apps` and `get_app_state`. Explicit `full-permissions` exposes all ten official actions. The policy is loaded before every call; there is no per-call model vote, intent classifier, or action prompt.
 
-The app-server runtime uses `approvalPolicy: "never"` in safe mode and `"on-request"` in full mode. `on-request` is only a relay so the first-party elicitation reaches this deterministic client; no model participates. The broker declines in safe mode and accepts with durable persistence in full mode. This makes the configured mode the sole permission authority while leaving protocol, signing, TCC, focus, cleanup, and audit controls intact.
+The app-server runtime uses `approvalPolicy: "never"` in safe mode and `"on-request"` in full mode. `on-request` is only a relay so the first-party elicitation reaches this deterministic client; no model participates. The broker declines in safe mode and accepts with durable persistence in full mode only for the active ephemeral thread's exact `computer-use` empty-object form; unexpected origin, thread, mode, metadata, or schema fails closed. This makes the configured mode the sole permission authority while leaving protocol, signing, TCC, focus, cleanup, and audit controls intact.
 
 Full permissions does **not** bypass:
 

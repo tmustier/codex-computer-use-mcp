@@ -121,7 +121,7 @@ nested prompts or result summaries
 
 All ten methods are registered, but the private mode-`0600` config is loaded before each dispatch. Safe mode blocks mutation before identity resolution or broker launch. Full permissions allows all ten methods.
 
-Safe mode uses app-server `approvalPolicy: "never"`. Full mode uses `"on-request"` only because Codex otherwise auto-denies the MCP request before it reaches the client; the zero-turn client then deterministically returns `accept` with empty content and `persist: always`. No prompt, model, caller argument, or per-call callback can alter that result.
+Safe mode uses app-server `approvalPolicy: "never"`. Full mode uses `"on-request"` only because Codex otherwise auto-denies the MCP request before it reaches the client; the zero-turn client then deterministically returns `accept` with empty content and `persist: always` only for the active ephemeral thread's exact `computer-use` empty-object app-access form. Unexpected server, thread, mode, metadata, or schema fails closed. No prompt, model, caller argument, or per-call callback can alter that result.
 
 ## Output boundary
 

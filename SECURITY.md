@@ -23,7 +23,7 @@ This is direct tool dispatch—not model orchestration.
 3. The helper's exact ten method names and input schemas match the pinned expected inventory before every call.
 4. A private mode-`0600` config is loaded before every call and is the sole permission authority.
 5. Safe mode permits only `list_apps` and `get_app_state`; full permissions permits all ten methods. Tool arguments, models, and per-call callbacks cannot change mode.
-6. App-server uses `approvalPolicy: "never"` in safe mode and `"on-request"` as a relay in full mode. First-party app access is handled deterministically from config: safe declines; full accepts with durable persistence. No model or per-call UI participates.
+6. App-server uses `approvalPolicy: "never"` in safe mode and `"on-request"` as a relay in full mode. First-party app access is handled deterministically from config: safe declines; full accepts with durable persistence only for the active ephemeral thread's exact `computer-use` empty-object form. Unexpected origin, thread, mode, metadata, or schema fails closed. No model or per-call UI participates.
 7. Target selectors resolve to canonical installed bundle IDs before dispatch.
 8. Same-app work is excluded across native Pi, generic MCP, and custom state roots with one fixed per-user kernel `lockf` lease namespace.
 9. Target focus events, periodic samples, watcher health, queued ASN resolution, and final state are checked. This is post-action detection, not a preventive OS sandbox.
@@ -44,7 +44,7 @@ Mode changes require the explicit Pi command confirmation or the CLI acknowledge
 
 ## Elicitations
 
-Pi and stdio MCP render no per-call approval UI. Safe mode uses `approvalPolicy: "never"`; full mode uses `"on-request"` only to relay the helper request to the deterministic client. Safe returns `decline`. Full permissions returns `accept`, empty content, and `_meta.persist = "always"`; this also allows the official helper to persist the app approval. The approval request count remains audit metadata.
+Pi and stdio MCP render no per-call approval UI. Safe mode uses `approvalPolicy: "never"`; full mode uses `"on-request"` only to relay the helper request to the deterministic client. Safe returns `decline`. Full permissions returns `accept`, empty content, and `_meta.persist = "always"` only after exact server/thread/form/metadata/schema validation; otherwise it returns `decline`. This also allows the official helper to persist the app approval. The approval request count remains audit metadata.
 
 ## Visible-content warning
 

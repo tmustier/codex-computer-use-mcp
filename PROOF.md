@@ -56,7 +56,7 @@ Current branch tests cover:
 - production app-server arguments disable model transport, plugins, and remote control;
 - private mode-`0600` durable config as the sole permission authority, loaded before every call;
 - safe mode read-only enforcement before broker dispatch and full-permissions access to all ten methods;
-- deterministic first-party elicitation handling: safe declines, full accepts with durable persistence, with no model/UI vote;
+- deterministic first-party elicitation handling: safe declines; full accepts with durable persistence only for the active ephemeral thread's exact `computer-use` empty-object form, while unexpected server, thread, mode, metadata, and schema fail closed, with no model/UI vote;
 - fatal rejection of model-turn notifications, including a notification emitted during teardown;
 - strict `ephemeral: true` / `path: null` / `turns: []` response attestation before dispatch;
 - pre-buffer rejection of an oversized unterminated protocol line;
@@ -102,6 +102,25 @@ Evidence:
 - TextEdit was stopped and the disposable document removed after verification.
 
 Earlier exploratory attempts exposed and fixed two acceptance-quality issues rather than being counted as proof: common `CMD+A` needed normalization to the official `Meta_L+a` key form, and TextEdit state restoration had to be reset before a fresh run. The final evidence above is from the corrected direct path.
+
+## Live durable full-permissions acceptance
+
+Redacted live acceptance was run from the isolated source checkout without recording UI text, image data, arguments beyond the named acceptance app, or other sensitive output.
+
+The initial Excel run used executable commit `bdaed808340bb2af1b23d09afd8fa34e4e67c243`, tree `b90f403f4c62494f1328a8ab7a760ed314632545`. A private mode-`0600` config contained `permissionMode: "full-permissions"`. The official `computer-use` server emitted its empty-object form, the bridge returned exactly `{action: "accept", content: {}, _meta: {persist: "always"}}`, and `computer_use_get_app_state(app="Microsoft Excel")` completed with `outcome=ok`, `directCalls=1`, `approvalRequests=1`, `modelTurnsStarted=0`, `backgroundPreserved=true`, and `brokerCleanupVerified=true`.
+
+Review hardening then restricted acceptance to the active ephemeral thread, exact `computer-use` server, `turnId: null`, exact form mode, `_meta.persist: ["always"]`, and exact `{type: "object", properties: {}}` schema. At executable commit `35b5458b3981ca271508802065d6fdec2608b7e3`, tree `c56818de031fa53b54869d5b3f900df6da633f52`, a fresh unapproved first-party app exercised that validated relay with `approvalRequests=1`, `modelTurnsStarted=0`, and `outcome=ok`. The same exact head then read Excel successfully. Excel's approval had already been durably persisted by the initial acceptance, so this confirming call correctly reported `approvalRequests=0` rather than eliciting again.
+
+The redacted metadata-only Excel audit at that exact executable head recorded:
+
+- `permissionMode=full-permissions` and `authorization=full_permissions_config`;
+- canonical app identity `com.microsoft.Excel`;
+- signed runtime identity `codex-cli 0.144.0-alpha.4`, client build `1000366`;
+- `outcome=ok`, `directCalls=1`, `modelTurnsStarted=0`, and `ephemeralThread=true`;
+- `backgroundPreserved=true`, `brokerCleanupVerified=true`, and `appLeaseReleased=true`;
+- result content types only (`image`, `text`), with content omitted here.
+
+No model turn, per-call UI decision, TCC mutation, Settings navigation, auth change, or alternate Computer Use surface was used. The evidence-only documentation commit after the executable proof does not change runtime source.
 
 ## Review and release status
 
