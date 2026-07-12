@@ -2,6 +2,7 @@ import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:chil
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { PermissionMode } from "./config.ts";
 import {
 	EXPECTED_OFFICIAL_INPUT_SCHEMAS,
 	OFFICIAL_METHODS,
@@ -31,6 +32,7 @@ export interface DirectBrokerResult {
 }
 
 export interface DirectBrokerOptions {
+	permissionMode: PermissionMode;
 	timeoutMs?: number;
 	signal?: AbortSignal;
 	/** Test-only executable override. Production callers never set this. */
@@ -408,7 +410,7 @@ async function terminateGroup(
 export async function callOfficialDirectTool(
 	method: DirectMethod,
 	args: DirectToolArguments,
-	options: DirectBrokerOptions = {},
+	options: DirectBrokerOptions,
 ): Promise<DirectBrokerResult> {
 	const startedAt = Date.now();
 	const verification = options.skipSignatureVerification
@@ -532,9 +534,13 @@ export async function callOfficialDirectTool(
 						return;
 					}
 					approvalRequests += 1;
-					// The durable no-permissions interface never opens an approval UI and never
-					// self-accepts a first-party request. Unexpected elicitations are declined.
-					send({ id: message.id, result: { action: "decline" } });
+					// Durable configuration is the sole permission authority. Full permissions
+					// deterministically authorizes first-party app access with no model/UI vote;
+					// safe mode deterministically declines it.
+					const result = options.permissionMode === "full-permissions"
+						? { action: "accept", content: {}, _meta: { persist: "always" } }
+						: { action: "decline" };
+					send({ id: message.id, result });
 					return;
 				}
 			} catch (error) {
@@ -580,14 +586,23 @@ export async function callOfficialDirectTool(
 			"initialize",
 			{
 				clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: "0.2.0" },
-				capabilities: { mcpServerOpenaiFormElicitation: false },
+				capabilities: { mcpServerOpenaiFormElicitation: true },
 			},
 			15_000,
 		);
 		send({ method: "initialized" });
 		const started = (await request(
 			"thread/start",
-			{ cwd: workDir, approvalPolicy: "never", sandbox: "read-only", ephemeral: true, serviceName: "pi_direct_computer_use" },
+			{
+				cwd: workDir,
+				// `never` makes Codex auto-deny MCP elicitations before they reach this
+				// client. Full mode uses `on-request` only as a relay; the durable config
+				// still makes the deterministic accept decision above without a model/UI.
+				approvalPolicy: options.permissionMode === "full-permissions" ? "on-request" : "never",
+				sandbox: "read-only",
+				ephemeral: true,
+				serviceName: "pi_direct_computer_use",
+			},
 			30_000,
 		)) as any;
 		const thread = started?.thread;

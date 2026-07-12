@@ -101,9 +101,9 @@ nested prompts or result summaries
 | Task text, cleanup instructions, required-capabilities fields | **compatibility-only** | removed |
 | Dictionary-only special policy | **accidental** | removed |
 | Wrapper app/intent allowlists in full mode | **accidental** | absent |
-| Safe/full wrapper modes | **compatibility-only** | removed; one durable no-permissions interface exposes all ten methods |
-| Wrapper approval prompts/configuration | **compatibility-only** | removed; no command, config, environment, or per-call selector remains |
-| Official first-party app access | **official-required** | remains external to this wrapper; unexpected elicitations are silently declined and never auto-accepted |
+| Safe/full wrapper modes | **security-essential** | durable mode-`0600` config is loaded before every call; safe permits reads, full permits all ten methods |
+| Per-call approval/model discretion | **compatibility-only** | removed; the durable config is the sole permission authority |
+| Official first-party app access | **official-required** | safe deterministically declines; full deterministically accepts and requests durable persistence |
 | macOS TCC | **official-required** | retained; never modified |
 | Exact ten-tool inventory/schema | **security-essential** | retained and checked before each call |
 | Canonical bundle identity | **security-essential** | retained before targeted dispatch |
@@ -117,11 +117,11 @@ nested prompts or result summaries
 | Full-result spill files | **unsafe/accidental** | prohibited; truncation is in-memory only |
 | Browser-host integration | **out of scope** | unchanged |
 
-## No-permissions and elicitation boundary
+## Durable permission and elicitation boundary
 
-No-permissions is the sole interface and means unrestricted wrapper dispatch with no wrapper approval prompt. All ten methods are registered. No config file, environment value, slash command, CLI mode switch, or tool argument selects another route.
+All ten methods are registered, but the private mode-`0600` config is loaded before each dispatch. Safe mode blocks mutation before identity resolution or broker launch. Full permissions allows all ten methods.
 
-Both Pi and generic stdio MCP omit elicitation capability. App-server is created with `approvalPolicy: "never"`. If the official downstream server nevertheless sends an elicitation request, the bridge counts and silently declines it; there is no UI path and no acceptance callback. Users configure any persistent first-party app access externally in official ChatGPT Computer Use settings.
+Safe mode uses app-server `approvalPolicy: "never"`. Full mode uses `"on-request"` only because Codex otherwise auto-denies the MCP request before it reaches the client; the zero-turn client then deterministically returns `accept` with empty content and `persist: always`. No prompt, model, caller argument, or per-call callback can alter that result.
 
 ## Output boundary
 

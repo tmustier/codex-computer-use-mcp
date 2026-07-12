@@ -21,9 +21,9 @@ This is direct tool dispatch—not model orchestration.
 1. Only fixed app-bundled Codex and Computer Use client paths are allowed in production.
 2. Both binaries pass strict code-signature verification and OpenAI Team ID `2DC432GLL2` checks before dispatch.
 3. The helper's exact ten method names and input schemas match the pinned expected inventory before every call.
-4. `no-permissions` is the only wrapper policy: all ten methods are exposed and no wrapper permission prompt is opened.
-5. There is no config file, environment override, command, tool argument, per-call branch, or alternate safe/full route that an agent can select.
-6. App-server uses `approvalPolicy: "never"`; elicitation capability is disabled and unexpected first-party requests are silently declined, never prompted or self-accepted. Persistent official app access remains authoritative and must be configured outside this wrapper.
+4. A private mode-`0600` config is loaded before every call and is the sole permission authority.
+5. Safe mode permits only `list_apps` and `get_app_state`; full permissions permits all ten methods. Tool arguments, models, and per-call callbacks cannot change mode.
+6. App-server uses `approvalPolicy: "never"` in safe mode and `"on-request"` as a relay in full mode. First-party app access is handled deterministically from config: safe declines; full accepts with durable persistence. No model or per-call UI participates.
 7. Target selectors resolve to canonical installed bundle IDs before dispatch.
 8. Same-app work is excluded across native Pi, generic MCP, and custom state roots with one fixed per-user kernel `lockf` lease namespace.
 9. Target focus events, periodic samples, watcher health, queued ASN resolution, and final state are checked. This is post-action detection, not a preventive OS sandbox.
@@ -38,15 +38,13 @@ This is direct tool dispatch—not model orchestration.
 
 ## Permission semantics
 
-### No-permissions
+Safe is the default and is read-only. Explicit full permissions authorizes all ten methods and arbitrary resolvable app targets without per-call prompts. This broad authorization does not imply that actions are reversible or that focus detection can prevent an already dispatched action. App-state reads can expose visible sensitive information to the calling model.
 
-All ten official methods and arbitrary resolvable app targets are available without wrapper permission prompts. The name means “ask no permission,” not “disable tools.” This is broad authorization. It does not imply that actions are reversible or that focus detection can prevent an already dispatched action. App-state reads can expose visible sensitive information to the calling model.
-
-The mode is compiled as the sole policy. Agent-writable audit state and legacy configuration files cannot change it, and there is no CLI/slash/tool/environment mode selector.
+Mode changes require the explicit Pi command confirmation or the CLI acknowledgement flag and are securely audited. The mode is reloaded before each call; no process reload is required for mode changes.
 
 ## Elicitations
 
-Neither Pi nor stdio MCP advertises or renders an approval UI. The bridge starts app-server with `approvalPolicy: "never"`. An unexpected downstream elicitation is counted, silently declined, and never self-accepted. Persistent first-party app access belongs in official ChatGPT Computer Use settings.
+Pi and stdio MCP render no per-call approval UI. Safe mode uses `approvalPolicy: "never"`; full mode uses `"on-request"` only to relay the helper request to the deterministic client. Safe returns `decline`. Full permissions returns `accept`, empty content, and `_meta.persist = "always"`; this also allows the official helper to persist the app approval. The approval request count remains audit metadata.
 
 ## Visible-content warning
 

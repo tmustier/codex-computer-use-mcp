@@ -7,11 +7,11 @@ import type { DirectMethod } from "./tools.ts";
 export interface AuditRecord {
 	timestamp: string;
 	runId: string;
-	method: DirectMethod | "invalid_request";
+	method: DirectMethod | "configure" | "invalid_request";
 	permissionMode: PermissionMode;
 	app: string | null;
 	mutating: boolean;
-	authorization: "no_permissions_unrestricted" | "none";
+	authorization: "safe_read" | "full_permissions_config" | "none";
 	inputBytes: number;
 	outcome: string;
 	durationMs: number;

@@ -3,7 +3,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { executeDirectTool, type DirectServiceDependencies } from "../src/direct-service.ts";
+import { saveConfig } from "../src/config.ts";
+import { executeDirectTool, DirectPolicyError, type DirectServiceDependencies } from "../src/direct-service.ts";
 import { DirectBrokerCallError, type DirectBrokerResult } from "../src/direct-broker.ts";
 
 function brokerResult(content = "ok", isError = false): DirectBrokerResult {
@@ -32,12 +33,12 @@ function deps(root: string, callTool: DirectServiceDependencies["callTool"], bec
 	};
 }
 
-test("no-permissions directly permits read methods and canonicalizes app identity", async () => {
+test("safe mode directly permits only read methods and canonicalizes app identity", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-safe-test."));
-	const calls: Array<{ method: string; args: Record<string, unknown> }> = [];
+	const calls: Array<{ method: string; args: Record<string, unknown>; permissionMode: string }> = [];
 	try {
-		const callTool: NonNullable<DirectServiceDependencies["callTool"]> = async (method, args) => {
-			calls.push({ method, args });
+		const callTool: NonNullable<DirectServiceDependencies["callTool"]> = async (method, args, options) => {
+			calls.push({ method, args, permissionMode: options.permissionMode });
 			return brokerResult("state");
 		};
 		const listed = await executeDirectTool({ method: "list_apps", arguments: {} }, deps(root, callTool));
@@ -45,8 +46,8 @@ test("no-permissions directly permits read methods and canonicalizes app identit
 		const state = await executeDirectTool({ method: "get_app_state", arguments: { app: "TextEdit" } }, deps(root, callTool));
 		assert.equal(state.ok, true);
 		assert.deepEqual(calls, [
-			{ method: "list_apps", args: {} },
-			{ method: "get_app_state", args: { app: "com.apple.TextEdit" } },
+			{ method: "list_apps", args: {}, permissionMode: "safe" },
+			{ method: "get_app_state", args: { app: "com.apple.TextEdit" }, permissionMode: "safe" },
 		]);
 		assert.equal(state.details.modelTurnsStarted, 0);
 		assert.equal(state.details.ephemeralRuntimeContext, true);
@@ -84,37 +85,39 @@ test("same-app exclusion is global across different supported state roots", asyn
 	}
 });
 
-test("no-permissions dispatches mutating methods without a wrapper gate or prompt", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-mutation-test."));
-	let observed: unknown;
+test("safe mode rejects mutation before identity resolution or broker dispatch", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-reject-test."));
+	let dispatched = false;
 	try {
-		const response = await executeDirectTool(
-			{ method: "click", arguments: { app: "TextEdit", element_index: "button-1" } },
-			deps(root, async (method, args) => { observed = { method, args }; return brokerResult("clicked"); }),
+		await assert.rejects(
+			executeDirectTool(
+				{ method: "click", arguments: { app: "TextEdit", element_index: "button-1" } },
+				{ stateRoot: root, callTool: async () => { dispatched = true; return brokerResult(); } },
+			),
+			DirectPolicyError,
 		);
-		assert.equal(response.ok, true);
-		assert.deepEqual(observed, { method: "click", args: { app: "com.apple.TextEdit", element_index: "button-1" } });
+		assert.equal(dispatched, false);
 		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
-		assert.equal(audit.permissionMode, "no-permissions");
-		assert.equal(audit.authorization, "no_permissions_unrestricted");
-		assert.equal(audit.directCalls, 1);
+		assert.equal(audit.outcome, "policy_rejected");
+		assert.equal(audit.directCalls, 0);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("no-permissions has no wrapper app, intent, or action gate", async () => {
+test("full-permissions has no wrapper app, intent, or action gate", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-full-test."));
 	let observed: unknown;
 	try {
+		await saveConfig(root, { version: 1, permissionMode: "full-permissions" });
 		const response = await executeDirectTool(
 			{ method: "type_text", arguments: { app: "TextEdit", text: "arbitrary direct action" } },
-			deps(root, async (method, args) => { observed = { method, args }; return brokerResult("typed"); }),
+			deps(root, async (method, args, options) => { observed = { method, args, permissionMode: options.permissionMode }; return brokerResult("typed"); }),
 		);
 		assert.equal(response.ok, true);
-		assert.deepEqual(observed, { method: "type_text", args: { app: "com.apple.TextEdit", text: "arbitrary direct action" } });
+		assert.deepEqual(observed, { method: "type_text", args: { app: "com.apple.TextEdit", text: "arbitrary direct action" }, permissionMode: "full-permissions" });
 		const auditText = await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8");
 		assert.doesNotMatch(auditText, /arbitrary direct action/);
 		const audit = JSON.parse(auditText.trim());
-		assert.equal(audit.authorization, "no_permissions_unrestricted");
+		assert.equal(audit.authorization, "full_permissions_config");
 		assert.equal(audit.modelTurnsStarted, 0);
 		assert.equal(audit.directCalls, 1);
 		assert.equal(audit.backgroundPreserved, true);
@@ -124,6 +127,7 @@ test("no-permissions has no wrapper app, intent, or action gate", async () => {
 test("focus telemetry fails closed after a completed direct action", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-focus-test."));
 	try {
+		await saveConfig(root, { version: 1, permissionMode: "full-permissions" });
 		await assert.rejects(
 			executeDirectTool(
 				{ method: "press_key", arguments: { app: "TextEdit", key: "ESC" } },
@@ -170,6 +174,7 @@ test("broker failures preserve content-safe architecture evidence in audit", asy
 test("asynchronous focus sampling failures are handled and fail closed", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-sample-test."));
 	try {
+		await saveConfig(root, { version: 1, permissionMode: "full-permissions" });
 		const testDeps = deps(root, async () => {
 			await new Promise((resolve) => setTimeout(resolve, 150));
 			return brokerResult("pressed");

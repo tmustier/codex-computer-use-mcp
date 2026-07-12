@@ -34,8 +34,9 @@ Use the source workflow only when you need to test an exact reviewed commit. Fol
 - `computer_use_press_key`
 - `computer_use_type_text`
 - `/computer-use-status`
+- `/computer-use-mode safe|full-permissions`
 
-No-permissions is the only policy: all ten tools are available with no wrapper approval prompts, mode selector, or app/intent/action gate. Pi does not advertise or render elicitation UI. Unexpected downstream elicitations are silently declined and never accepted.
+Durable configuration is the sole permission authority. Safe mode permits only inventory and app-state reads and declines first-party app-access elicitations. Full permissions exposes all ten methods and deterministically accepts app access without any per-call model or UI vote.
 
 ## Generic MCP gateway
 
@@ -59,6 +60,6 @@ For a source checkout:
 
 Do not load the native adapter and generic MCP adapter into the same acceptance process unless tool names are intentionally isolated.
 
-The generic MCP path uses the same durable no-permissions policy: all ten methods, no wrapper approval UI, and silent decline of unexpected downstream elicitations. Configure persistent app access only through official ChatGPT Computer Use settings.
+The generic MCP path uses the same durable safe/full policy. Use its explicit `--configure` command; there is no per-call approval path.
 
 See the root `MIGRATION.md` before replacing an installed 0.1 adapter.

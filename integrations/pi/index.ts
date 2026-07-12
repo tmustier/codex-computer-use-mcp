@@ -1,10 +1,13 @@
+import crypto from "node:crypto";
 import path from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { getAgentDir, truncateHead, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "typebox";
+import { appendAudit, type AuditRecord } from "../../dist/audit.js";
+import { ConfigError, loadConfig, saveConfig } from "../../dist/config.js";
 import { executeDirectTool, getDirectStatus } from "../../dist/direct-service.js";
-import type { DirectMethod } from "../../dist/tools.js";
+import { READ_ONLY_METHODS, type DirectMethod } from "../../dist/tools.js";
 
 const App = Type.String({ minLength: 1, maxLength: 500, description: "App name, full app path, or unambiguous bundle identifier" });
 const Element = Type.String({ minLength: 1, maxLength: 200, description: "Element identifier from computer_use_get_app_state" });
@@ -43,7 +46,10 @@ const ToolParameters: Record<DirectMethod, TSchema> = {
 };
 
 function toolDescription(method: DirectMethod): string {
-  return `Call the official signed Computer Use ${method} capability directly through the unrestricted no-permissions interface. Pi supplies the typed arguments itself; there is no wrapper approval prompt, mode gate, nested model, planner, prompt, or separate model-token usage.`;
+  const policy = READ_ONLY_METHODS.has(method)
+    ? "Available in safe mode; full-permissions deterministically authorizes first-party app access."
+    : "Requires durable full-permissions mode.";
+  return `Call the official signed Computer Use ${method} capability directly. Pi supplies the typed arguments itself; there is no per-call approval, nested model, planner, prompt, or separate model-token usage. ${policy}`;
 }
 
 function titleFor(method: DirectMethod): string {
@@ -79,10 +85,47 @@ export default function directComputerUse(pi: ExtensionAPI) {
   const stateRoot = process.env.CODEX_COMPUTER_USE_HOME || path.join(getAgentDir(), "direct-computer-use");
 
   pi.registerCommand("computer-use-status", {
-    description: "Show the direct-call architecture, durable no-permissions policy, signed broker, and private audit path",
+    description: "Show the direct-call architecture, durable permission policy, signed broker, and private audit path",
     handler: async (_args, ctx) => {
       const status = await getDirectStatus(stateRoot);
-      ctx.ui.notify(JSON.stringify(status, null, 2), "info");
+      ctx.ui.notify(JSON.stringify(status, null, 2), status.permissionMode === "full-permissions" ? "warning" : "info");
+    },
+  });
+
+  pi.registerCommand("computer-use-mode", {
+    description: "Show or explicitly change durable safe vs full-permissions mode",
+    handler: async (args, ctx) => {
+      const requested = args.trim();
+      const current = await loadConfig(stateRoot);
+      if (!requested) {
+        ctx.ui.notify(`Current direct Computer Use permission mode: ${current.permissionMode}`, "info");
+        return;
+      }
+      if (requested !== "safe" && requested !== "full-permissions") throw new ConfigError("Usage: /computer-use-mode safe|full-permissions");
+      if (requested === current.permissionMode) return;
+      if (requested === "full-permissions") {
+        if (!ctx.hasUI) throw new ConfigError("Enabling full-permissions requires an interactive Pi UI");
+        const confirmed = await ctx.ui.confirm(
+          "Enable FULL direct Computer Use permissions?",
+          "This durable mode authorizes all ten official actions and first-party app-access elicitations without any per-call model or UI vote.",
+          { timeout: 60_000 },
+        );
+        if (!confirmed) return;
+      }
+      await saveConfig(stateRoot, { version: 1, permissionMode: requested });
+      const audit: AuditRecord = {
+        timestamp: new Date().toISOString(), runId: crypto.randomUUID(), method: "configure", permissionMode: requested,
+        app: null, mutating: true, authorization: requested === "full-permissions" ? "full_permissions_config" : "none",
+        inputBytes: 0, outcome: "ok", durationMs: 0, brokerVersion: null, clientBuild: null, directCalls: 0,
+        modelTurnsStarted: 0, ephemeralThread: null, approvalRequests: 0, backgroundPreserved: null,
+        brokerCleanupVerified: true, appLeaseReleased: true, resultContentTypes: [], resultBytes: 0,
+      };
+      try { await appendAudit(stateRoot, audit); }
+      catch {
+        await saveConfig(stateRoot, current);
+        throw new ConfigError("Permission mode change was rolled back because secure audit logging failed");
+      }
+      ctx.ui.notify(`Direct Computer Use permission mode set to ${requested}.`, requested === "full-permissions" ? "warning" : "info");
     },
   });
 
@@ -97,7 +140,8 @@ export default function directComputerUse(pi: ExtensionAPI) {
       promptGuidelines: [
         `${piName} is a direct typed tool: choose its arguments yourself; it does not invoke a nested planner or model.`,
         `${piName} must use current element identifiers from computer_use_get_app_state; inspect again after UI state changes.`,
-        `${piName} must not be used for credentials, authentication, payments, external messages, or destructive actions without the user's explicit request; this wrapper will not open a permission prompt.`,
+        `${piName} obeys the durable Computer Use config; full-permissions has no per-call model or UI approval, while safe mode restricts state-changing methods.`,
+        `${piName} must not be used for credentials, authentication, payments, external messages, or destructive actions without the user's explicit request.`,
       ],
       parameters: ToolParameters[method] as any,
       async execute(_toolCallId, params, signal, onUpdate) {

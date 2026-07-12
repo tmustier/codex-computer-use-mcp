@@ -54,15 +54,15 @@ Current branch tests cover:
 - direct JSONL request sequence with no `turn/start`;
 - isolated credential-free `CODEX_HOME` even when the parent environment contains a model API key;
 - production app-server arguments disable model transport, plugins, and remote control;
-- durable no-permissions as the sole policy, with no config/environment/command/tool override;
-- all ten methods available without wrapper prompts or mode gates;
-- no advertised elicitation capability, no acceptance callback, and silent decline of unexpected requests;
+- private mode-`0600` durable config as the sole permission authority, loaded before every call;
+- safe mode read-only enforcement before broker dispatch and full-permissions access to all ten methods;
+- deterministic first-party elicitation handling: safe declines, full accepts with durable persistence, with no model/UI vote;
 - fatal rejection of model-turn notifications, including a notification emitted during teardown;
 - strict `ephemeral: true` / `path: null` / `turns: []` response attestation before dispatch;
 - pre-buffer rejection of an oversized unterminated protocol line;
 - partial-preserving ancestry enumeration plus private-cwd recovery, stable freeze/termination of separately grouped or reparented helpers, and stdio closure;
-- unrestricted read and mutation dispatch under the single no-permissions policy;
-- absence of wrapper app/intent/action gates and permission prompts;
+- full-permissions read/mutation dispatch without per-call gates;
+- absence of model/app/intent/action discretion after durable full-permissions is configured;
 - canonical bundle-ID dispatch;
 - target focus violation fail-closed behavior;
 - official error preservation;
@@ -70,8 +70,8 @@ Current branch tests cover:
 - secure audit-directory/file no-follow and mode checks;
 - global per-user same-app exclusion across different supported state roots, race behavior, crash release, private lock roots, and bounded lock filenames;
 - focus-event ASN retry/drain behavior, including valid events at the start of a single large stdout chunk;
-- stdio MCP all-ten inventory/status with no alternate mode route;
-- Pi source registration for every direct capability with no nested planner, permission command, or approval UI reference.
+- stdio MCP all-ten inventory/status plus acknowledged durable mode configuration;
+- Pi source registration for every direct capability with no nested planner or per-call approval UI.
 
 ## Fresh Pi unlocked real-app acceptance
 
@@ -119,10 +119,10 @@ Validation recorded for the reviewed direct implementation:
 - public-source scrub: no secrets, private absolute paths, or machine identifiers found;
 - fresh-Pi real-app acceptance: pass as above.
 
-Independent reviews of earlier revisions found cleanup and coordination gaps: fail-open or partial descendant enumeration, early-exit orphan recovery, state-root-scoped same-app locking, false-success lease-release audit, unverified focus-listener exit, pre-response direct-call accounting, and large-chunk focus-event loss. The reviewed implementation retains those fixes while removing all wrapper approval UI and safe or full configuration branches.
+Independent reviews of earlier revisions found cleanup and coordination gaps: fail-open or partial descendant enumeration, early-exit orphan recovery, state-root-scoped same-app locking, false-success lease-release audit, unverified focus-listener exit, pre-response direct-call accounting, and large-chunk focus-event loss. The current implementation retains those fixes and uses durable safe/full configuration without per-call model or UI approval.
 
 Version 0.2.0 supports direct local calls only in an unlocked macOS session. Targeted calls failed with official error `-10005` during genuine locked-session acceptance. OpenAI limits locked Computer Use to active trusted turns started from a connected device, so locked local use remains follow-up work and is not part of this release.
 
 ## Non-goals
 
-No private Sky protocol clone, browser-host integration, credential extraction, TCC automation, app injection, re-signing, sender-auth bypass, automatic approval acceptance, nested model fallback, or tool-result persistence.
+No private Sky protocol clone, browser-host integration, credential extraction, TCC automation, app injection, re-signing, sender-auth bypass, model-driven approval, nested model fallback, or tool-result persistence. Full-permissions does deterministically accept the official helper's app-access elicitation because durable config is the sole permission authority.

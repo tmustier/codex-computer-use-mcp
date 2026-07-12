@@ -18,30 +18,29 @@ It does use OpenAI's signed `codex app-server` as the official host for the bund
 
 Pi registers namespaced tools to avoid collisions with Pi's built-ins. The MCP server exposes the upstream method names.
 
-| Pi tool | MCP method | No-permissions | Purpose |
-|---|---|---:|---|
-| `computer_use_list_apps` | `list_apps` | yes | List apps known to official Computer Use |
-| `computer_use_get_app_state` | `get_app_state` | yes | Read accessibility state and imagery for one app |
-| `computer_use_click` | `click` | yes | Click an element or screenshot coordinates |
-| `computer_use_perform_secondary_action` | `perform_secondary_action` | yes | Invoke a named accessibility action |
-| `computer_use_set_value` | `set_value` | yes | Assign an accessibility value |
-| `computer_use_select_text` | `select_text` | yes | Select text or place the cursor |
-| `computer_use_scroll` | `scroll` | yes | Scroll an element |
-| `computer_use_drag` | `drag` | yes | Drag between screenshot coordinates |
-| `computer_use_press_key` | `press_key` | yes | Send a key or key combination |
-| `computer_use_type_text` | `type_text` | yes | Type literal text |
+| Pi tool | MCP method | Safe | Full permissions | Purpose |
+|---|---|---:|---:|---|
+| `computer_use_list_apps` | `list_apps` | yes | yes | List apps known to official Computer Use |
+| `computer_use_get_app_state` | `get_app_state` | yes | yes | Read accessibility state and imagery for one app |
+| `computer_use_click` | `click` | no | yes | Click an element or screenshot coordinates |
+| `computer_use_perform_secondary_action` | `perform_secondary_action` | no | yes | Invoke a named accessibility action |
+| `computer_use_set_value` | `set_value` | no | yes | Assign an accessibility value |
+| `computer_use_select_text` | `select_text` | no | yes | Select text or place the cursor |
+| `computer_use_scroll` | `scroll` | no | yes | Scroll an element |
+| `computer_use_drag` | `drag` | no | yes | Drag between screenshot coordinates |
+| `computer_use_press_key` | `press_key` | no | yes | Send a key or key combination |
+| `computer_use_type_text` | `type_text` | no | yes | Type literal text |
 
 Pi—not a nested planner—must call `computer_use_get_app_state`, choose a current element identifier or coordinates, execute one action, and inspect again when needed.
 
-## Authorization policy: durable no-permissions
+## Authorization policy: durable configuration is authoritative
 
-`no-permissions` has one precise meaning here: **the wrapper asks no permission questions and exposes all ten official actions**. It is the only mode and the durable default. There is no safe/full selector, config file, environment override, slash command, CLI switch, per-call elevation, app allowlist, intent classifier, task schema, per-action confirmation, special-case app policy, or method gate.
+The mode-`0600` state file has two modes. `safe` is the default and exposes only `list_apps` and `get_app_state`. Explicit `full-permissions` exposes all ten official actions. The policy is loaded before every call; there is no per-call model vote, intent classifier, or action prompt.
 
-The app-server runtime is also created with `approvalPolicy: "never"`. The client does not advertise an elicitation UI. If the official downstream service unexpectedly requests elicitation, the bridge silently declines it; it never opens a prompt and never self-accepts. Any persistent first-party access required by Computer Use must therefore already be configured in the official ChatGPT app.
+The app-server runtime uses `approvalPolicy: "never"` in safe mode and `"on-request"` in full mode. `on-request` is only a relay so the first-party elicitation reaches this deterministic client; no model participates. The broker declines in safe mode and accepts with durable persistence in full mode. This makes the configured mode the sole permission authority while leaving protocol, signing, TCC, focus, cleanup, and audit controls intact.
 
-No-permissions does **not** bypass:
+Full permissions does **not** bypass:
 
-- first-party OpenAI app approvals or sensitive-action prompts;
 - macOS Screen Recording, Accessibility, or TCC controls;
 - strict OpenAI Team ID and code-signature checks;
 - exact upstream ten-tool schema verification;
@@ -91,13 +90,15 @@ npm run build
 pi -ne -e /absolute/path/to/codex-computer-use-mcp/integrations/pi/index.ts
 ```
 
-Command:
+Commands:
 
 ```text
 /computer-use-status
+/computer-use-mode safe
+/computer-use-mode full-permissions
 ```
 
-The native Pi adapter is the primary product path. It always registers all ten typed tools directly. It exposes no mode-changing command and no approval UI.
+The native Pi adapter is the primary product path. It registers all ten typed tools directly; safe mode rejects mutations before broker dispatch. Enabling full permissions requires one explicit durable-mode confirmation, after which calls have no per-call approval UI.
 
 ## MCP server
 
@@ -123,14 +124,14 @@ For Pi's generic MCP gateway, keep `directTools: false` so this powerful surface
 }
 ```
 
-The generic MCP server exposes the same no-permissions behavior: no wrapper approval UI and all ten methods. Unexpected downstream elicitations are silently declined; configure persistent first-party app access only in official ChatGPT Computer Use settings.
+The generic MCP server uses the same durable policy. Configure it with `--configure safe` or `--configure full-permissions --acknowledge-full-permissions`. Safe mode declines first-party app access and blocks mutations; full permissions deterministically accepts app-access elicitations and permits all ten methods.
 
 ## Security and privacy
 
 Each call:
 
 1. validates typed arguments;
-2. applies the single durable no-permissions policy with no mode or prompt branch;
+2. loads the durable safe/full policy and applies it without any per-call model or UI vote;
 3. resolves a target to a canonical installed bundle ID;
 4. acquires a fixed per-user/per-app kernel lock shared across all supported clients and state roots;
 5. starts global focus telemetry;
@@ -148,7 +149,7 @@ Tool results may contain visible target-app text or screenshots because that is 
 
 ## State and migration
 
-Audit state defaults to `~/.direct-computer-use`; override with `CODEX_COMPUTER_USE_HOME`. Permission policy is not read from that agent-writable path: no-permissions is compiled as the only interface. Legacy `config.json` files are ignored.
+State defaults to `~/.direct-computer-use`; the Pi adapter uses `~/.pi/agent/direct-computer-use`. Override with `CODEX_COMPUTER_USE_HOME`. The mode-`0600` `config.json` in that private state directory is the sole permission authority and is loaded before each call.
 
 See [`MIGRATION.md`](MIGRATION.md) for version 0.1 migration, source acceptance, rollback, and conflict avoidance.
 

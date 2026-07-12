@@ -21,6 +21,7 @@ import {
 import {
 	MUTATING_METHODS,
 	OFFICIAL_METHODS,
+	READ_ONLY_METHODS,
 	isDirectMethod,
 	targetAppFor,
 	validateDirectArguments,
@@ -105,15 +106,16 @@ function rejectedMetadata(raw: unknown): { method: AuditRecord["method"]; inputB
 	};
 }
 
-function authorizationFor(_mode: PermissionMode, _method: DirectMethod): AuditRecord["authorization"] {
-	return "no_permissions_unrestricted";
+function authorizationFor(mode: PermissionMode, method: DirectMethod): AuditRecord["authorization"] {
+	if (mode === "full-permissions") return "full_permissions_config";
+	return READ_ONLY_METHODS.has(method) ? "safe_read" : "none";
 }
 
 export async function executeDirectTool(raw: unknown, deps: DirectServiceDependencies = {}): Promise<DirectResponse> {
 	const stateRoot = deps.stateRoot ?? defaultStateRoot();
 	const runId = crypto.randomUUID();
 	const startedAt = Date.now();
-	const config = await loadConfig();
+	const config = await loadConfig(stateRoot);
 	let request: DirectRequest;
 	try {
 		if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new DirectPolicyError("Direct Computer Use request must be an object");
@@ -121,6 +123,9 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 		if (typeof record.method !== "string" || !isDirectMethod(record.method)) throw new DirectPolicyError("Unknown direct Computer Use method");
 		const args = validateDirectArguments(record.method, record.arguments ?? {});
 		request = { method: record.method, arguments: args };
+		if (config.permissionMode === "safe" && MUTATING_METHODS.has(request.method)) {
+			throw new DirectPolicyError(`${request.method} requires explicitly acknowledged full-permissions mode; safe mode permits only list_apps and get_app_state`);
+		}
 	} catch (error) {
 		const rejected = rejectedMetadata(raw);
 		const record: AuditRecord = {
@@ -217,6 +222,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 		try {
 			brokerDispatchAttempted = true;
 			broker = await (deps.callTool ?? callOfficialDirectTool)(request.method, canonicalArgs, {
+				permissionMode: config.permissionMode,
 				signal: deps.signal,
 				timeoutMs: 120_000,
 			});
@@ -320,7 +326,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 }
 
 export async function getDirectStatus(stateRoot = defaultStateRoot()): Promise<Record<string, unknown>> {
-	const config: ExtensionConfig = await loadConfig();
+	const config: ExtensionConfig = await loadConfig(stateRoot);
 	let brokerVerified = false;
 	let brokerVersion: string | undefined;
 	let clientBuild: string | undefined;
@@ -336,14 +342,16 @@ export async function getDirectStatus(stateRoot = defaultStateRoot()): Promise<R
 		brokerVerified,
 		...(brokerVersion ? { brokerVersion } : {}),
 		...(clientBuild ? { clientBuild } : {}),
-		officialApprovalAuthoritative: true,
+		officialApprovalAuthoritative: false,
+		durableConfigAuthoritative: true,
 		architecture: "official-codex-app-server-direct-mcp-tool-call",
 		nestedModel: false,
 		modelUsage: false,
 		ephemeralZeroTurnRuntimeContextRequired: true,
 		approvalPrompts: false,
-		wrapperAuthorization: "unrestricted",
-		availableMethods: [...OFFICIAL_METHODS],
+		firstPartyElicitationPolicy: config.permissionMode === "full-permissions" ? "auto-accept" : "decline",
+		safeMethods: [...READ_ONLY_METHODS],
+		availableMethods: config.permissionMode === "full-permissions" ? [...OFFICIAL_METHODS] : [...READ_ONLY_METHODS],
 		supportedMethods: [...OFFICIAL_METHODS],
 		appLockRoot: globalAppLockRoot(),
 		auditPath: path.join(stateRoot, "audit", "direct-computer-use.jsonl"),

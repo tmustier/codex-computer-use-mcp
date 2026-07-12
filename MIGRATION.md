@@ -8,8 +8,8 @@ Version 0.2.0 is a breaking architecture change. It replaces the aggregate neste
 |---|---|
 | `background_computer_use` aggregate task | ten `computer_use_<method>` Pi tools |
 | `background_computer_use_status` | `/computer-use-status` and MCP `computer_use_status` |
-| `/background-computer-use-mode` | removed; `/computer-use-status` is read-only |
-| safe/full wrapper modes | one durable no-permissions interface: all ten methods, no wrapper prompts |
+| `/background-computer-use-mode` | `/computer-use-mode safe|full-permissions` |
+| safe/full wrapper modes | durable private config is authoritative; safe reads only, full all ten methods |
 | nested model plans and summarizes | Pi calls one official typed method per tool call |
 | separate Codex model usage | no nested model/token usage |
 | state under wrapper-specific old path | isolated direct state under `~/.direct-computer-use` or Pi agent direct state |
@@ -35,7 +35,7 @@ CODEX_COMPUTER_USE_HOME="$(mktemp -d)" \
 
 `-ne` suppresses auto-discovered extensions so the live 0.1 adapter is not loaded. This does not change live Pi configuration.
 
-The source adapter starts only in no-permissions mode: all ten methods are available and the wrapper opens no approval UI. Use only benign real apps whose persistent first-party access is already configured. Do not use disposable harnesses as acceptance evidence.
+The source adapter defaults to safe mode. Use the explicit mode command or CLI acknowledgement to enable full permissions. No mode has a per-call model/UI vote. Use only benign real apps during acceptance.
 
 ## Migrate to version 0.2.0
 
@@ -43,12 +43,13 @@ The source adapter starts only in no-permissions mode: all ten methods are avail
 2. Record the installed version and verify that npm resolves `codex-computer-use-mcp@0.2.0` exactly.
 3. Remove or disable the 0.1 aggregate adapter and generic MCP registration.
 4. Install `npm:codex-computer-use-mcp@0.2.0`.
-5. Remove any legacy direct `config.json`; the new build ignores it and has no mode selector.
-6. Start a fresh Pi process; do not rely on hot-reloading a security-boundary change.
+5. Set the private direct `config.json` to the intended mode using `/computer-use-mode` or the acknowledged CLI command.
+6. Start a fresh Pi process after installing new extension code. Mode-only changes are reloaded per call.
 7. Verify `/computer-use-status` reports:
-   - `permissionMode: "no-permissions"`;
+   - the intended `permissionMode`;
    - `approvalPrompts: false`;
-   - all ten `availableMethods`;
+   - `firstPartyElicitationPolicy: "auto-accept"` in full permissions;
+   - all ten `availableMethods` in full permissions;
    - `brokerVerified: true`;
    - `nestedModel: false`;
    - `modelUsage: false`;
@@ -56,7 +57,7 @@ The source adapter starts only in no-permissions mode: all ten methods are avail
 8. Run `computer_use_list_apps` and `computer_use_get_app_state` against a benign real app with external focus sampling while the Mac is unlocked.
 9. Exercise mutating methods on benign disposable content, restore app state, then check audits and process cleanup.
 
-Do not copy old safe/full configuration into the new state root. No-permissions is compiled as the sole unrestricted, no-wrapper-prompt interface.
+If restoring a prior mode file, verify it is version 1, mode `0600`, current-user-owned, and contains only `safe` or `full-permissions`.
 
 Version 0.2.0 does not support targeted local Computer Use while the Mac is locked. OpenAI reserves locked use for active trusted turns started from a connected device. See the [locked-screen limitation](README.md#locked-screen-limitation).
 
