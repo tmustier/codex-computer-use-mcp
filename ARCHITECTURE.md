@@ -12,6 +12,12 @@ At OpenAI Codex source commit [`5c19155cbd93bfa099016e7487259f61669823ff`](https
 - the implementation loads the thread runtime and invokes `thread.call_mcp_tool(...)` directly ([processor lines 455–474](https://github.com/openai/codex/blob/5c19155cbd93bfa099016e7487259f61669823ff/codex-rs/app-server/src/request_processors/mcp_processor.rs#L455-L474));
 - downstream structured elicitation is an explicit client capability rather than implicit approval ([README lines 89–94](https://github.com/openai/codex/blob/5c19155cbd93bfa099016e7487259f61669823ff/codex-rs/app-server/README.md#L89-L94)).
 
+The Full access behavior is also public in the pinned Codex `rust-v0.144.2` source at commit [`a6645b6b8a656360fa16fb7e1c6721d0697d3d6a`](https://github.com/openai/codex/tree/a6645b6b8a656360fa16fb7e1c6721d0697d3d6a):
+
+- legacy `danger-full-access` maps to `PermissionProfile::Disabled` ([models lines 289–297](https://github.com/openai/codex/blob/a6645b6b8a656360fa16fb7e1c6721d0697d3d6a/codex-rs/protocol/src/models.rs#L289-L297));
+- MCP permission prompts are auto-approved when the approval policy is `Never` and the permission profile is disabled ([MCP policy lines 76–99](https://github.com/openai/codex/blob/a6645b6b8a656360fa16fb7e1c6721d0697d3d6a/codex-rs/codex-mcp/src/mcp/mod.rs#L76-L99));
+- the elicitation manager applies that policy before client notification ([elicitation lines 196–221](https://github.com/openai/codex/blob/a6645b6b8a656360fa16fb7e1c6721d0697d3d6a/codex-rs/codex-mcp/src/elicitation.rs#L196-L221)), and limits the automatic response to empty-schema approval/confirmation forms ([lines 319–331](https://github.com/openai/codex/blob/a6645b6b8a656360fa16fb7e1c6721d0697d3d6a/codex-rs/codex-mcp/src/elicitation.rs#L319-L331)).
+
 The installed CLI labels app-server experimental. This project therefore verifies the current method and upstream schemas on every call and fails closed on drift.
 
 ## Live architecture probe
@@ -103,7 +109,7 @@ nested prompts or result summaries
 | Wrapper app/intent allowlists in full mode | **accidental** | absent |
 | Safe/full wrapper modes | **compatibility-only** | removed; one durable no-permissions interface exposes all ten methods |
 | Wrapper approval prompts/configuration | **compatibility-only** | removed; no command, config, environment, or per-call selector remains |
-| Official first-party app access | **official-required** | signed service elicitations are forwarded to the invoking client; never auto-accepted or silently declined |
+| Official first-party app access | **official-required** | official Codex Full access auto-accepts normal empty-schema app approval elicitations; any elicitation app-server emits is forwarded unchanged |
 | macOS TCC | **official-required** | retained; never modified |
 | Exact ten-tool inventory/schema | **security-essential** | retained and checked before each call |
 | Canonical bundle identity | **security-essential** | retained before targeted dispatch |
@@ -121,7 +127,9 @@ nested prompts or result summaries
 
 No-permissions is the sole interface and means unrestricted wrapper dispatch with no wrapper approval prompt. All ten methods are registered. No config file, environment value, slash command, CLI mode switch, or tool argument selects another route.
 
-App-server is created with `approvalPolicy: "never"` so the wrapper does not generate Codex approval prompts. The broker still handles `mcpServer/elicitation/request` from the signed downstream service. Pi advertises OpenAI-form support and renders form, OpenAI-form, and URL requests through its UI. Generic stdio MCP forwards standard form and URL requests as `elicitation/create` to the invoking MCP client. The response path preserves `accept`, `decline`, `cancel`, structured content, and response metadata; no callback or compatible UI yields `cancel`, never an invented decline.
+App-server is created with `approvalPolicy: "never"` and `sandbox: "danger-full-access"`. This is the official Codex Full access combination. The legacy sandbox field maps to `PermissionProfile::Disabled`; Codex then auto-accepts empty-schema MCP approval elicitations before client notification. Normal first-party Computer Use app approvals therefore do not prompt, and the bridge does not need to mutate the per-bundle approval store.
+
+The broker still handles any `mcpServer/elicitation/request` that app-server emits. Pi advertises OpenAI-form support and renders emitted form, OpenAI-form, and URL requests. Generic stdio MCP forwards supported standard modes as `elicitation/create`. The response path preserves `accept`, `decline`, `cancel`, structured content, and response metadata; no callback or compatible UI yields `cancel`, never an invented decision.
 
 ## Output boundary
 

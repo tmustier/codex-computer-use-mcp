@@ -71,6 +71,7 @@ test("direct broker uses only zero-turn app-server MCP methods and an isolated c
 		assert.deepEqual(records.map((item) => item.method).filter(Boolean), ["initialize", "initialized", "thread/start", "mcpServerStatus/list", "mcpServer/tool/call"]);
 		assert.equal(records.some((item) => item.method === "turn/start"), false);
 		assert.equal(records.find((item) => item.method === "thread/start")?.params?.approvalPolicy, "never");
+		assert.equal(records.find((item) => item.method === "thread/start")?.params?.sandbox, "danger-full-access");
 		assert.deepEqual(records.find((item) => item.method === "initialize")?.params?.capabilities, { mcpServerOpenaiFormElicitation: false });
 		assert.ok(records.every((item) => item.hasOpenAIKey === false));
 		assert.ok(records.every((item) => typeof item.codexHome === "string" && item.codexHome.includes("pi-direct-computer-use.")));

@@ -35,7 +35,7 @@ CODEX_COMPUTER_USE_HOME="$(mktemp -d)" \
 
 `-ne` suppresses auto-discovered extensions so the live 0.1 adapter is not loaded. This does not change live Pi configuration.
 
-The source adapter starts only in no-permissions mode: all ten methods are available and the wrapper opens no permission UI of its own. Signed Computer Use elicitations are still shown through Pi and answered only by the user. Use benign real apps for acceptance; do not use disposable harnesses as evidence.
+The source adapter starts only in no-permissions mode: all ten methods are available and the wrapper opens no permission UI of its own. The signed app-server runs with Codex Full access, so normal empty-schema app approval elicitations resolve without a prompt. Any elicitation app-server emits is still shown through Pi and answered only by the user. Use benign real apps for acceptance; do not use disposable harnesses as evidence.
 
 ## Migrate to version 0.2.0
 
@@ -48,7 +48,9 @@ The source adapter starts only in no-permissions mode: all ten methods are avail
 7. Verify `/computer-use-status` reports:
    - `permissionMode: "no-permissions"`;
    - `wrapperPermissionPrompts: false`;
-   - `officialElicitationHandling: "forwarded-when-client-supported"`;
+   - `officialApprovalPolicy: "full-access"`;
+   - `officialAppApprovalHandling: "auto-approved-by-codex-full-access"`;
+   - `officialElicitationHandling: "forwarded-if-emitted"`;
    - all ten `availableMethods`;
    - `brokerVerified: true`;
    - `nestedModel: false`;

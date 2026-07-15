@@ -56,7 +56,7 @@ Current branch tests cover:
 - production app-server arguments disable model transport, plugins, and remote control;
 - durable no-permissions as the sole policy, with no config/environment/command/tool override;
 - all ten methods available without wrapper prompts or mode gates;
-- no advertised elicitation capability, no acceptance callback, and silent decline of unexpected requests;
+- exact `thread/start` Full access parameters (`approvalPolicy: "never"`, `sandbox: "danger-full-access"`);
 - fatal rejection of model-turn notifications, including a notification emitted during teardown;
 - strict `ephemeral: true` / `path: null` / `turns: []` response attestation before dispatch;
 - pre-buffer rejection of an oversized unterminated protocol line;
@@ -75,6 +75,15 @@ Current branch tests cover:
 - standard form/URL forwarding across a real MCP SDK client/server transport;
 - Pi source registration for every direct capability with no nested planner, permission command, or wrapper-generated approval UI;
 - Pi form, opaque OpenAI-form, URL, decline, and headless-cancel elicitation handling.
+
+## Official Full access approval probe
+
+A live differential used Chess (`com.apple.Chess`), which was absent from the signed service's persistent per-bundle approval file before and after both calls:
+
+1. `approvalPolicy: "never"` with `sandbox: "read-only"` returned `Computer Use approval denied`; app-server never emitted the service's empty-schema approval request to the bridge callback.
+2. Changing only the thread sandbox to `danger-full-access` made the same `get_app_state` call succeed. The bridge callback count and broker `elicitationRequests` were both zero, the runtime remained zero-turn and ephemeral, cleanup verified, and a before/after hash confirmed the persistent approval file was unchanged.
+
+This matches the pinned Codex source: `danger-full-access` maps to a disabled permission profile, and `Never` plus that profile auto-accepts empty-schema MCP confirmation elicitations inside the official host. It proves prompt-free request authorization without editing persistent app approvals or inventing a bridge response.
 
 ## Fresh Pi unlocked real-app acceptance
 
@@ -122,10 +131,10 @@ Validation recorded for the reviewed direct implementation:
 - public-source scrub: no secrets, private absolute paths, or machine identifiers found;
 - fresh-Pi real-app acceptance: pass as above.
 
-Independent reviews of earlier revisions found cleanup and coordination gaps: fail-open or partial descendant enumeration, early-exit orphan recovery, state-root-scoped same-app locking, false-success lease-release audit, unverified focus-listener exit, pre-response direct-call accounting, and large-chunk focus-event loss. The reviewed implementation retains those fixes while removing wrapper-generated approval UI and safe or full configuration branches. Signed official-service elicitations remain a separate, forwarded user interaction.
+Independent reviews of earlier revisions found cleanup and coordination gaps: fail-open or partial descendant enumeration, early-exit orphan recovery, state-root-scoped same-app locking, false-success lease-release audit, unverified focus-listener exit, pre-response direct-call accounting, and large-chunk focus-event loss. The reviewed implementation retains those fixes while removing wrapper-generated approval UI and safe or full configuration branches. The follow-up Full access change uses Codex's own policy to resolve normal empty-schema app approvals without prompts; any elicitation app-server emits remains a separate, faithfully forwarded user interaction.
 
 Version 0.2.0 supports direct local calls only in an unlocked macOS session. Targeted calls failed with official error `-10005` during genuine locked-session acceptance. OpenAI limits locked Computer Use to active trusted turns started from a connected device, so locked local use remains follow-up work and is not part of this release.
 
 ## Non-goals
 
-No private Sky protocol clone, browser-host integration, credential extraction, TCC automation, app injection, re-signing, sender-auth bypass, automatic approval acceptance, nested model fallback, or tool-result persistence.
+No private Sky protocol clone, browser-host integration, credential extraction, TCC automation, app injection, re-signing, sender-auth bypass, wrapper-side approval fabrication, persistent approval-file mutation, nested model fallback, or tool-result persistence.

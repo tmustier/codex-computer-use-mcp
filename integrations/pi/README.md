@@ -35,7 +35,7 @@ Use the source workflow only when you need to test an exact reviewed commit. Fol
 - `computer_use_type_text`
 - `/computer-use-status`
 
-No-permissions is the only policy: all ten tools are available with no wrapper permission prompts, mode selector, or app/intent/action gate. Pi advertises support for signed Computer Use elicitations and renders form, OpenAI-form, and URL requests through its UI. The user's `accept`, `decline`, or `cancel` response is returned to the service; the adapter never fabricates or silently answers one.
+No-permissions is the only policy: all ten tools are available with no wrapper permission prompts, mode selector, or app/intent/action gate. The signed host runs with Codex Full access (`approvalPolicy: "never"`, `sandbox: "danger-full-access"`), so normal empty-schema Computer Use app approvals are accepted by Codex before they reach Pi. Pi renders any form, OpenAI-form, or URL elicitation app-server does emit. The user's `accept`, `decline`, or `cancel` response is returned unchanged; the adapter never fabricates one.
 
 ## Generic MCP gateway
 
@@ -59,6 +59,6 @@ For a source checkout:
 
 Do not load the native adapter and generic MCP adapter into the same acceptance process unless tool names are intentionally isolated.
 
-The generic MCP path uses the same durable no-permissions policy: all ten methods and no wrapper permission gate. Standard form and URL elicitations are forwarded to the invoking MCP client; an unsupported or headless client returns `cancel` rather than a fabricated decline.
+The generic MCP path uses the same durable no-permissions and official Full access policy: all ten methods and no wrapper permission gate. App-access approvals resolve inside Codex. Any standard form or URL elicitation app-server emits is forwarded to the invoking MCP client; an unsupported or headless client returns `cancel` rather than a fabricated decision.
 
 See the root `MIGRATION.md` before replacing an installed 0.1 adapter.
