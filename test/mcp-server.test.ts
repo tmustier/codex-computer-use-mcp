@@ -36,7 +36,9 @@ test("stdio MCP advertises one unrestricted no-permissions interface with all te
 		const details = status.structuredContent as Record<string, unknown>;
 		assert.equal(details.permissionMode, "no-permissions");
 		assert.equal(details.wrapperPermissionPrompts, false);
-		assert.equal(details.officialElicitationHandling, "forwarded-when-client-supported");
+		assert.equal(details.officialApprovalPolicy, "full-access");
+		assert.equal(details.officialAppApprovalHandling, "auto-approved-by-codex-full-access");
+		assert.equal(details.officialElicitationHandling, "forwarded-if-emitted");
 		assert.equal(details.wrapperAuthorization, "unrestricted");
 		assert.deepEqual(details.availableMethods, OFFICIAL_METHODS);
 		assert.equal(details.brokerVerified, true);

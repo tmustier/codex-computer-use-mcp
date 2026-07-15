@@ -39,11 +39,10 @@ As the official contract specifies, Pi—not a nested planner—calls `computer_
 
 `no-permissions` has one precise meaning here: **the wrapper asks no permission questions and exposes all ten official actions**. It is the only mode and the durable default. There is no safe/full selector, config file, environment override, slash command, CLI switch, per-call elevation, app allowlist, intent classifier, task schema, per-action confirmation, special-case app policy, or method gate.
 
-The app-server runtime is also created with `approvalPolicy: "never"`, which removes host-generated Codex approval prompts. It does not suppress requests from the signed Computer Use service. When that service sends `mcpServer/elicitation/request`, the bridge forwards the request to the invoking client and returns that client's `accept`, `decline`, or `cancel` response. It never fabricates a permission prompt, accepts on the user's behalf, or silently converts a request into a decline. A headless or elicitation-incompatible client returns `cancel`, matching Codex's non-interactive behavior.
+The app-server runtime uses the official Full access combination: `approvalPolicy: "never"` and `sandbox: "danger-full-access"`. In the pinned Codex host, that maps to a disabled permission profile and automatically accepts empty-schema MCP approval elicitations. Normal Computer Use app-access checks therefore proceed without a per-app prompt, just as they do in Codex Full access. The bridge does not edit the service's persistent per-bundle approval file. If app-server emits an elicitation instead of resolving it under Full access, the bridge still forwards it faithfully to the invoking client; unsupported clients return `cancel`, never a fabricated `accept` or `decline`.
 
 No-permissions does **not** bypass:
 
-- first-party OpenAI app approvals or sensitive-action prompts;
 - macOS Screen Recording, Accessibility, or TCC controls;
 - strict OpenAI Team ID and code-signature checks;
 - exact upstream ten-tool schema verification;
@@ -99,7 +98,7 @@ Command:
 /computer-use-status
 ```
 
-The native Pi adapter is the primary product path. It always registers all ten typed tools directly and exposes no mode-changing command or wrapper-generated approval UI. Signed Computer Use form, OpenAI-form, and URL elicitations are shown through Pi's UI; only the user's choice is returned to the service.
+The native Pi adapter is the primary product path. It always registers all ten typed tools directly and exposes no mode-changing command or wrapper-generated approval UI. Official app-access approval elicitations are resolved by Codex Full access before they reach Pi. Any elicitation that app-server does emit is shown through Pi's UI, and only the user's choice is returned to the service.
 
 ## MCP server
 
@@ -125,7 +124,7 @@ For Pi's generic MCP gateway, keep `directTools: false` so this powerful surface
 }
 ```
 
-The generic MCP server exposes the same no-permissions behavior: no wrapper permission gate and all ten methods. Standard form and URL elicitations from the signed service are forwarded as MCP `elicitation/create` requests. The upstream client response is returned unchanged; unsupported or headless clients cancel rather than fabricate a decline.
+The generic MCP server exposes the same no-permissions behavior: official Codex Full access, no wrapper permission gate, and all ten methods. App-access approvals are resolved inside the official host. Any standard form or URL elicitation that app-server emits is forwarded as an MCP `elicitation/create` request. The upstream client response is returned unchanged; unsupported or headless clients cancel rather than fabricate a decision.
 
 ## Security and privacy
 

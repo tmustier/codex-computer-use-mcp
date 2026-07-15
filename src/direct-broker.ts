@@ -612,9 +612,11 @@ export async function callOfficialDirectTool(
 			15_000,
 		);
 		send({ method: "initialized" });
+		// Codex Full access requires both values: with `never` plus a restricted sandbox,
+		// core declines the signed service's app approval instead of prompting or accepting it.
 		const started = (await request(
 			"thread/start",
-			{ cwd: workDir, approvalPolicy: "never", sandbox: "read-only", ephemeral: true, serviceName: "pi_direct_computer_use" },
+			{ cwd: workDir, approvalPolicy: "never", sandbox: "danger-full-access", ephemeral: true, serviceName: "pi_direct_computer_use" },
 			30_000,
 		)) as any;
 		const thread = started?.thread;
