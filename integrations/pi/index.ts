@@ -4,46 +4,58 @@ import { getAgentDir, truncateHead, type ExtensionAPI } from "@earendil-works/pi
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "typebox";
 import { executeDirectTool, getDirectStatus } from "../../dist/direct-service.js";
-import type { DirectMethod } from "../../dist/tools.js";
+import { OFFICIAL_TOOL_METADATA, type DirectMethod } from "../../dist/tools.js";
 
-const App = Type.String({ minLength: 1, maxLength: 500, description: "App name, full app path, or unambiguous bundle identifier" });
-const Element = Type.String({ minLength: 1, maxLength: 200, description: "Element identifier from computer_use_get_app_state" });
-const Coordinate = Type.Number({ minimum: 0, maximum: 1_000_000 });
+const App = Type.String({ description: "App name, full app path, or unambiguous bundle identifier" });
 
 const ToolParameters: Record<DirectMethod, TSchema> = {
   list_apps: Type.Object({}, { additionalProperties: false }),
   get_app_state: Type.Object({ app: App }, { additionalProperties: false }),
   click: Type.Object({
     app: App,
-    click_count: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
-    element_index: Type.Optional(Element),
-    mouse_button: Type.Optional(StringEnum(["left", "right", "middle"] as const)),
-    x: Type.Optional(Coordinate),
-    y: Type.Optional(Coordinate),
+    click_count: Type.Optional(Type.Integer({ description: "Number of clicks. Defaults to 1" })),
+    element_index: Type.Optional(Type.String({ description: "Element index to click" })),
+    mouse_button: Type.Optional(StringEnum(["left", "right", "middle"] as const, { description: "Mouse button to click. Defaults to left." })),
+    x: Type.Optional(Type.Number({ description: "X coordinate in screenshot pixel coordinates" })),
+    y: Type.Optional(Type.Number({ description: "Y coordinate in screenshot pixel coordinates" })),
   }, { additionalProperties: false }),
-  perform_secondary_action: Type.Object({ app: App, element_index: Element, action: Type.String({ minLength: 1, maxLength: 200 }) }, { additionalProperties: false }),
-  set_value: Type.Object({ app: App, element_index: Element, value: Type.String({ maxLength: 20_000 }) }, { additionalProperties: false }),
-  select_text: Type.Object({
+  perform_secondary_action: Type.Object({
     app: App,
-    element_index: Element,
-    text: Type.String({ minLength: 1, maxLength: 20_000 }),
-    prefix: Type.Optional(Type.String({ maxLength: 2_000 })),
-    selection: Type.Optional(StringEnum(["text", "cursor_before", "cursor_after"] as const)),
-    suffix: Type.Optional(Type.String({ maxLength: 2_000 })),
+    element_index: Type.String({ description: "Element identifier" }),
+    action: Type.String({ description: "Secondary accessibility action name" }),
+  }, { additionalProperties: false }),
+  set_value: Type.Object({
+    app: App,
+    element_index: Type.String({ description: "Element identifier" }),
+    value: Type.String({ description: "Value to assign" }),
+  }, { additionalProperties: false }),
+  select_text: Type.Object({
+    app: Type.String({ description: "App name or bundle identifier" }),
+    element_index: Type.String({ description: "Text element identifier" }),
+    text: Type.String({ description: "Target text as shown in the accessibility tree" }),
+    prefix: Type.Optional(Type.String({ description: "Optional text immediately before the target, used to disambiguate repeated matches" })),
+    selection: Type.Optional(StringEnum(["text", "cursor_before", "cursor_after"] as const, { description: "Whether to select the text or place the cursor before or after it. Defaults to text." })),
+    suffix: Type.Optional(Type.String({ description: "Optional text immediately after the target, used to disambiguate repeated matches" })),
   }, { additionalProperties: false }),
   scroll: Type.Object({
     app: App,
-    element_index: Element,
-    direction: StringEnum(["up", "down", "left", "right"] as const),
-    pages: Type.Optional(Type.Number({ exclusiveMinimum: 0, maximum: 100 })),
+    element_index: Type.String({ description: "Element identifier" }),
+    direction: Type.String({ description: "Scroll direction: up, down, left, or right" }),
+    pages: Type.Optional(Type.Number({ description: "Number of pages to scroll. Fractional values are supported. Defaults to 1" })),
   }, { additionalProperties: false }),
-  drag: Type.Object({ app: App, from_x: Coordinate, from_y: Coordinate, to_x: Coordinate, to_y: Coordinate }, { additionalProperties: false }),
-  press_key: Type.Object({ app: App, key: Type.String({ minLength: 1, maxLength: 100, description: "Key or combination; common aliases such as CMD+A are normalized to the official xdotool-style Meta_L+a form" }) }, { additionalProperties: false }),
-  type_text: Type.Object({ app: App, text: Type.String({ maxLength: 20_000 }) }, { additionalProperties: false }),
+  drag: Type.Object({
+    app: App,
+    from_x: Type.Number({ description: "Start X coordinate" }),
+    from_y: Type.Number({ description: "Start Y coordinate" }),
+    to_x: Type.Number({ description: "End X coordinate" }),
+    to_y: Type.Number({ description: "End Y coordinate" }),
+  }, { additionalProperties: false }),
+  press_key: Type.Object({ app: App, key: Type.String({ description: "Key or key combination to press" }) }, { additionalProperties: false }),
+  type_text: Type.Object({ app: App, text: Type.String({ description: "Literal text to type" }) }, { additionalProperties: false }),
 };
 
 function toolDescription(method: DirectMethod): string {
-  return `Call the official signed Computer Use ${method} capability directly through the unrestricted no-permissions interface. Pi supplies the typed arguments itself; there is no wrapper approval prompt, mode gate, nested model, planner, prompt, or separate model-token usage.`;
+  return OFFICIAL_TOOL_METADATA[method].description;
 }
 
 function titleFor(method: DirectMethod): string {
@@ -96,8 +108,7 @@ export default function directComputerUse(pi: ExtensionAPI) {
       promptSnippet: `${titleFor(method)} through the official signed macOS Computer Use service`,
       promptGuidelines: [
         `${piName} is a direct typed tool: choose its arguments yourself; it does not invoke a nested planner or model.`,
-        `${piName} must use current element identifiers from computer_use_get_app_state; inspect again after UI state changes.`,
-        `${piName} must not be used for credentials, authentication, payments, external messages, or destructive actions without the user's explicit request; this wrapper will not open a permission prompt.`,
+        `Call computer_use_get_app_state once per assistant turn before interacting with an app.`,
       ],
       parameters: ToolParameters[method] as any,
       async execute(_toolCallId, params, signal, onUpdate) {
