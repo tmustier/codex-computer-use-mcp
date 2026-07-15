@@ -1,0 +1,147 @@
+{
+  "observed_at": "2026-07-15T15:32:42.688149Z",
+  "client": {
+    "name": "ChatGPT-bundled Codex CLI",
+    "version": "0.144.2"
+  },
+  "discovery": {
+    "executor_session_id": "bp_arc_e_6a57a395276081919eaacc69e8c724ca",
+    "surface": "excel",
+    "document_id": "1120b2ed-5510-42f8-8b66-fd0130d1d9f8",
+    "document_title": "Target Companies.xlsx",
+    "status": "connected",
+    "supported_tools": [
+      { "name": "read_ranges", "version": "1" },
+      { "name": "search_workbook", "version": "1" },
+      { "name": "list_items", "version": "1" },
+      { "name": "write_range", "version": "1" },
+      { "name": "clear_range", "version": "1" },
+      { "name": "update_sheet", "version": "1" },
+      { "name": "update_workbook", "version": "1" },
+      { "name": "copy_range_to", "version": "1" },
+      { "name": "read_range_image", "version": "1" },
+      { "name": "run_officejs", "version": "1" },
+      { "name": "read_sheets_metadata", "version": "1" },
+      { "name": "resize_range", "version": "1" },
+      { "name": "update_sheet_view", "version": "1" },
+      { "name": "format_range", "version": "1" },
+      { "name": "chart", "version": "1" },
+      { "name": "table", "version": "1" },
+      { "name": "pivot_table", "version": "1" }
+    ]
+  },
+  "schema_lookup": [
+    { "surface": "excel", "tool_name": "read_sheets_metadata", "version": "1" },
+    { "surface": "excel", "tool_name": "update_workbook", "version": "1" },
+    { "surface": "excel", "tool_name": "write_range", "version": "1" },
+    { "surface": "excel", "tool_name": "read_ranges", "version": "1" }
+  ],
+  "commands": [
+    {
+      "logical_step": "metadata_before",
+      "tool_name": "read_sheets_metadata",
+      "idempotency_key": "probe-7f3a9c2e-01-metadata-before",
+      "command_id": "cmd_e_47882765af708191a9683e465356f7f4",
+      "status": "succeeded",
+      "result": [
+        {
+          "id": "{00000000-0001-0000-0000-000000000000}",
+          "name": "Sheet1",
+          "position": 0,
+          "visibility": "Visible",
+          "usedRange": {
+            "address": "Sheet1!A1:E86",
+            "rowCount": 86,
+            "columnCount": 5
+          },
+          "isActive": true
+        }
+      ]
+    },
+    {
+      "logical_step": "create_probe_sheet",
+      "tool_name": "update_workbook",
+      "idempotency_key": "probe-7f3a9c2e-02-create-sheet",
+      "command_id": "cmd_e_b66d9099e30881918e66d6bee05f4f74",
+      "status": "succeeded",
+      "result": {
+        "id": "{74BC0E69-19E5-8245-BA5C-74DAE29D3248}",
+        "name": "__codex_probe_7f3a9c2e",
+        "position": 1
+      }
+    },
+    {
+      "logical_step": "write_probe_value",
+      "tool_name": "write_range",
+      "idempotency_key": "probe-7f3a9c2e-03-write-a1",
+      "command_id": null,
+      "status": "effect_verified_after_caller_interruption",
+      "args": {
+        "summary": "Write probe value to A1",
+        "sheetId": "{74BC0E69-19E5-8245-BA5C-74DAE29D3248}",
+        "writes": [
+          {
+            "cell": "A1",
+            "value": "codex-document-control-probe-7f3a9c2e"
+          }
+        ]
+      },
+      "terminal_result_captured": false,
+      "effect_verified_by_command_id": "cmd_e_8c5c8659ad1081918a65c112845a474a"
+    },
+    {
+      "logical_step": "read_probe_value",
+      "tool_name": "read_ranges",
+      "idempotency_key": "probe-7f3a9c2e-04-read-a1-resume",
+      "command_id": "cmd_e_8c5c8659ad1081918a65c112845a474a",
+      "status": "succeeded",
+      "result": "<ranges><range><sheet>__codex_probe_7f3a9c2e</sheet><address range=\"__codex_probe_7f3a9c2e!A1\"><A1><v>codex-document-control-probe-7f3a9c2e</v><t>codex-document-control-probe-7f3a9c2e</t><f>codex-document-control-probe-7f3a9c2e</f></A1></address></range></ranges>",
+      "exact_read_back_value": "codex-document-control-probe-7f3a9c2e"
+    },
+    {
+      "logical_step": "delete_probe_sheet",
+      "tool_name": "update_workbook",
+      "idempotency_key": "probe-7f3a9c2e-05-delete-sheet",
+      "command_id": "cmd_e_899f1647b6a48191815f52778de0e2fa",
+      "status": "succeeded",
+      "result": {
+        "status": "ok",
+        "operation": "delete",
+        "id": "{74BC0E69-19E5-8245-BA5C-74DAE29D3248}",
+        "name": "__codex_probe_7f3a9c2e"
+      }
+    },
+    {
+      "logical_step": "metadata_after",
+      "tool_name": "read_sheets_metadata",
+      "idempotency_key": "probe-7f3a9c2e-06-metadata-after",
+      "command_id": "cmd_e_6d02786bfc1c8191977764c7827147c8",
+      "status": "succeeded",
+      "result": [
+        {
+          "id": "{00000000-0001-0000-0000-000000000000}",
+          "name": "Sheet1",
+          "position": 0,
+          "visibility": "Visible",
+          "usedRange": {
+            "address": "Sheet1!A1:E86",
+            "rowCount": 86,
+            "columnCount": 5
+          },
+          "isActive": true
+        }
+      ]
+    }
+  ],
+  "cleanup": {
+    "temporary_sheet_name": "__codex_probe_7f3a9c2e",
+    "temporary_sheet_id": "{74BC0E69-19E5-8245-BA5C-74DAE29D3248}",
+    "verified_absent": true,
+    "remaining_sheets": ["Sheet1"]
+  },
+  "notes": [
+    "The write was dispatched with a stable idempotency key, but its terminal result was not captured because the local caller was interrupted while awaiting it.",
+    "A subsequent read_ranges command returned the exact written value, proving that the workbook mutation committed.",
+    "Executor, document, and command IDs are capture-specific opaque values and must not be reused for another live session."
+  ]
+}

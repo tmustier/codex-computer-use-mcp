@@ -61,7 +61,7 @@ Command, environment, cwd, and config differences were also isolated: both paths
 
 OpenAI's official ChatGPT Office add-in does not use Computer Use to read or edit workbook cells. It registers a live Excel executor with OpenAI's brokered document-control service, receives commands over a server-provided Client Sync WebSocket, executes the selected tool through Office.js, and posts a terminal callback. Codex exposes that control plane through `list_document_sessions`, `get_document_tool_schemas`, and `execute_document_command`.
 
-See [`docs/excel-live-control.md`](docs/excel-live-control.md) for the recovered architecture, exact 17-tool registry contract, output behavior, and the distinction between live session advertisements, schema registry entries, and the deployed executor allowlist.
+See [`docs/excel-live-control.md`](docs/excel-live-control.md) for the recovered architecture, exact 17-tool registry contract, output behavior, and the distinction between live session advertisements, schema registry entries, and the deployed executor allowlist. The successful live read–write–read-back–cleanup evidence is preserved in [`docs/excel-live-probe.json`](docs/excel-live-probe.json).
 
 ## Process path
 

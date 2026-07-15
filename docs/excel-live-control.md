@@ -41,19 +41,55 @@ The exact captured registry result is in [`excel-live-tool-schemas.json`](excel-
 
 ### Live verification status
 
-The official Marketplace add-in was installed and opened in a real Excel workbook. Schema retrieval succeeded, but Google Workspace rejected the add-in's OpenAI OAuth flow before multifactor authentication with “Contact your domain admin for help”. OpenAI's direct email route resolved to the same Google flow. Consequently, the observed `list_document_sessions` result was:
+The complete brokered path was live-verified on 15 July 2026 against an open Excel workbook. Session visibility proved to be account-scoped: while the task pane and Codex CLI used different ChatGPT accounts, `list_document_sessions` returned no executors even though the task pane had established its Arc WebSocket. After both clients were authenticated to the same account and “Allow Codex control” was enabled, discovery returned this connected session:
 
 ```json
-{"executors":[]}
+{
+  "executor_session_id": "bp_arc_e_6a57a395276081919eaacc69e8c724ca",
+  "surface": "excel",
+  "document_id": "1120b2ed-5510-42f8-8b66-fd0130d1d9f8",
+  "document_title": "Target Companies.xlsx",
+  "status": "connected"
+}
 ```
 
-The deployed allowlist, executor behavior, and registry contract are therefore confirmed independently, but the following are not yet live-verified:
+Its complete runtime `supported_tools[]` contained the same 17 names as the deployed allowlist and registry capture, all at version `1`:
 
-- a selected session's actual `supported_tools[]`;
-- a read-only command delivered through Arc and its terminal callback;
-- a controlled write followed by a document-tool read-back.
+```text
+read_ranges, search_workbook, list_items, write_range, clear_range,
+update_sheet, update_workbook, copy_range_to, read_range_image,
+run_officejs, read_sheets_metadata, resize_range, update_sheet_view,
+format_range, chart, table, pivot_table
+```
 
-This limitation is material: the document below does not represent static executor inspection as successful live command execution.
+The controlled probe then used only `codex_document_control` operations:
+
+| Step | Tool | Stable idempotency key | Observed result |
+|---|---|---|---|
+| Baseline read | `read_sheets_metadata` | `probe-7f3a9c2e-01-metadata-before` | Succeeded; only `Sheet1` existed |
+| Create temporary sheet | `update_workbook` | `probe-7f3a9c2e-02-create-sheet` | Succeeded; returned the new sheet ID |
+| Write sentinel to A1 | `write_range` | `probe-7f3a9c2e-03-write-a1` | Dispatched; the local caller was interrupted before preserving the terminal result |
+| Read A1 | `read_ranges` | `probe-7f3a9c2e-04-read-a1-resume` | Succeeded; returned the exact sentinel |
+| Delete temporary sheet | `update_workbook` | `probe-7f3a9c2e-05-delete-sheet` | Succeeded |
+| Verify cleanup | `read_sheets_metadata` | `probe-7f3a9c2e-06-metadata-after` | Succeeded; only `Sheet1` remained |
+
+The exact document-tool read-back was:
+
+```text
+codex-document-control-probe-7f3a9c2e
+```
+
+The interrupted write was not replayed because the subsequent `read_ranges` result proved that it had committed. The temporary sheet was then deleted by its returned sheet ID, and a final metadata read verified that neither its name nor ID remained. Read, create, delete, and final-verification commands all returned successful Arc terminal callbacks. The write's workbook effect is live-verified, but its terminal callback was not captured by the interrupted local caller.
+
+The live `read_sheets_metadata` result reported `Sheet1!A1:E86`, matching the source file's last non-empty cell. Excel's accessibility description reported `A1:E998`, and the file contains cell records through E998. Consumers should therefore use document-tool results for document-control logic rather than treating accessibility's used-range description as an equivalent workbook value.
+
+The exact capture is preserved in [`excel-live-probe.json`](excel-live-probe.json), with SHA-256:
+
+```text
+56ebaf958c0e18529a63e86216e7aa135faeae4bff6987b4ec0e83ec1aa55be8
+```
+
+Executor, document, and command IDs in that capture are opaque, session-specific evidence. A future caller must obtain fresh values through discovery rather than reusing them.
 
 ## Broker contract
 

@@ -37,7 +37,7 @@ As the official contract specifies, Pi—not a nested planner—calls `computer_
 
 ### Native Excel document control is separate
 
-OpenAI's official ChatGPT for Excel add-in has a brokered Office.js document-control path. It does not use these Computer Use tools for cell reads or writes. The recovered architecture and exact current 17-tool input contract are documented in [`docs/excel-live-control.md`](docs/excel-live-control.md) and [`docs/excel-live-tool-schemas.json`](docs/excel-live-tool-schemas.json).
+OpenAI's official ChatGPT for Excel add-in has a brokered Office.js document-control path. It does not use these Computer Use tools for cell reads or writes. The recovered architecture, exact current 17-tool input contract, and successful live read–write–read-back–cleanup capture are documented in [`docs/excel-live-control.md`](docs/excel-live-control.md), [`docs/excel-live-tool-schemas.json`](docs/excel-live-tool-schemas.json), and [`docs/excel-live-probe.json`](docs/excel-live-probe.json).
 
 ## Authorization policy: durable no-permissions
 
