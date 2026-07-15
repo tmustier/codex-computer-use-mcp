@@ -56,6 +56,6 @@ Computer Use returns the official app-state text and screenshots to the invoking
 
 ## Supported versions
 
-Only the latest approved release is supported. Version 0.2.0 supports direct local calls in an unlocked macOS session. Targeted local calls while the Mac is locked are not supported.
+Only the latest approved release is supported. Version 0.3.0 supports direct local calls in an unlocked macOS session. Targeted local calls while the Mac is locked are not supported.
 
 App-server is experimental and bundle paths or schemas can change. Drift fails closed until reviewed.

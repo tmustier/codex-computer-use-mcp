@@ -4,7 +4,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "codex-computer-use-mcp@0.2.0"
+        "codex-computer-use-mcp@0.3.0"
       ],
       "lifecycle": "lazy",
       "requestTimeoutMs": 180000,

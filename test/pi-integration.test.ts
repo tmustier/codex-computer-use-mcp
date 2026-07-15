@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { EXPECTED_OFFICIAL_INPUT_SCHEMAS, OFFICIAL_METHODS, OFFICIAL_TOOL_METADATA } from "../src/tools.ts";
 
-test("Pi adapter registers all ten tools through one no-permissions path with no prompt or mode route", async () => {
+test("Pi adapter registers all ten tools through one no-permissions path with progressive disclosure", async () => {
 	const source = await readFile("integrations/pi/index.ts", "utf8");
 	assert.match(source, /const piName = `computer_use_\$\{method\}`/);
 	for (const method of OFFICIAL_METHODS) assert.match(source, new RegExp(`\\b${method}: Type\\.Object`));
@@ -37,6 +37,8 @@ test("Pi adapter registers all ten tools through one no-permissions path with no
 	assert.match(source, /onElicitation: \(request\) => handleOfficialElicitation/);
 	assert.match(source, /supportsOpenAiFormElicitation: true/);
 	assert.match(source, /Call computer_use_get_app_state once per assistant turn before interacting with an app/);
+	assert.match(source, /if \(method === "get_app_state"\) activateInteractionTools\(pi\)/);
+	assert.match(source, /pi\.on\("session_start", \(\) => setInitialComputerUseTools\(pi\)\)/);
 });
 
 test("Pi surfaces an official form elicitation and returns the user's structured response", async () => {
@@ -120,12 +122,27 @@ test("Pi preserves explicit decline and uses cancel when no UI is available", as
 });
 
 test("Pi runtime registration exposes the exact official contract for all ten tools", async () => {
-	const { default: adapter } = await import("../integrations/pi/index.ts");
-	const tools: Array<{ name: string; description: string; parameters: unknown; promptGuidelines: string[] }> = [];
+	const {
+		default: adapter,
+		INSPECTION_TOOL_NAMES,
+		INTERACTION_TOOL_NAMES,
+	} = await import("../integrations/pi/index.ts");
+	const tools: Array<{
+		name: string;
+		description: string;
+		parameters: unknown;
+		promptSnippet?: string;
+		promptGuidelines?: string[];
+	}> = [];
 	const commands: string[] = [];
+	const handlers = new Map<string, () => void>();
+	const active = new Set(["read", ...OFFICIAL_METHODS.map((method) => `computer_use_${method}`)]);
 	adapter({
-		registerTool(tool: { name: string; description: string; parameters: unknown; promptGuidelines: string[] }) { tools.push(tool); },
+		registerTool(tool: typeof tools[number]) { tools.push(tool); },
 		registerCommand(name: string) { commands.push(name); },
+		on(name: string, handler: () => void) { handlers.set(name, handler); },
+		getActiveTools() { return [...active]; },
+		setActiveTools(names: string[]) { active.clear(); for (const name of names) active.add(name); },
 	} as any);
 	assert.deepEqual(commands, ["computer-use-status"]);
 	assert.deepEqual(tools.map((tool) => tool.name).sort(), OFFICIAL_METHODS.map((method) => `computer_use_${method}`).sort());
@@ -133,5 +150,30 @@ test("Pi runtime registration exposes the exact official contract for all ten to
 		const tool = tools.find((item) => item.name === `computer_use_${method}`)!;
 		assert.equal(tool.description, OFFICIAL_TOOL_METADATA[method].description);
 		assert.deepEqual(tool.parameters, EXPECTED_OFFICIAL_INPUT_SCHEMAS[method]);
+		if (INSPECTION_TOOL_NAMES.includes(tool.name as any)) {
+			assert.ok(tool.promptSnippet);
+			assert.ok(tool.promptGuidelines?.length);
+		} else {
+			assert.equal(tool.promptSnippet, undefined);
+			assert.equal(tool.promptGuidelines, undefined);
+		}
 	}
+
+	handlers.get("session_start")!();
+	assert.ok(active.has("read"), "preserves tools owned by Pi and other extensions");
+	for (const name of INSPECTION_TOOL_NAMES) assert.ok(active.has(name));
+	for (const name of INTERACTION_TOOL_NAMES) assert.ok(!active.has(name));
+});
+
+test("Pi interaction activation is purely additive", async () => {
+	const { activateInteractionTools, INTERACTION_TOOL_NAMES } = await import("../integrations/pi/index.ts");
+	const before = ["read", "computer_use_list_apps", "computer_use_get_app_state", "another_extension_tool"];
+	let after: string[] = [];
+	activateInteractionTools({
+		getActiveTools: () => [...before],
+		setActiveTools: (names: string[]) => { after = names; },
+	} as any);
+	for (const name of before) assert.ok(after.includes(name), `preserves active tool ${name}`);
+	for (const name of INTERACTION_TOOL_NAMES) assert.ok(after.includes(name), `activates ${name}`);
+	assert.equal(new Set(after).size, after.length);
 });

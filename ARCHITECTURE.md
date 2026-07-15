@@ -133,6 +133,12 @@ App-server is created with `approvalPolicy: "never"` and `sandbox: "danger-full-
 
 The broker still handles any `mcpServer/elicitation/request` that app-server emits. Pi advertises OpenAI-form support and renders emitted form, OpenAI-form, and URL requests. Generic stdio MCP forwards supported standard modes as `elicitation/create`. The response path preserves `accept`, `decline`, `cancel`, structured content, and response metadata; no callback or compatible UI yields `cancel`, never an invented decision.
 
+## Pi tool disclosure boundary
+
+The Pi extension registers all ten official definitions. On `session_start` it preserves active tools owned by Pi and other extensions, keeps `computer_use_list_apps` and `computer_use_get_app_state` active, and removes only the eight Computer Use interaction definitions from the initial active set. After a successful `get_app_state` result, it additively activates those eight definitions without removing any currently active tool.
+
+This is context disclosure, not a wrapper permission gate. The schemas, execution path, and no-permissions policy do not change. Loader and interaction definitions remain registered throughout the session. The interaction definitions omit `promptSnippet` and `promptGuidelines`, allowing Pi 0.80.7's native deferred-loading representation to add schemas at the tool-result position without changing the system-prompt prefix. Providers without native support use Pi's next-request fallback.
+
 ## Output boundary
 
 Only official `text` and `image` MCP blocks are accepted. They are returned to the invoking client because app state and screenshots are the requested capability. They are never copied to audit, logs, temp files, or structured metadata. Text is truncated in memory at Pi's standard 50KB/2000-line bound; the full text is not persisted.

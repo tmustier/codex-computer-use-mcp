@@ -66,6 +66,33 @@ function titleFor(method: DirectMethod): string {
   return method.split("_").map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`).join(" ");
 }
 
+const INSPECTION_METHODS = new Set<DirectMethod>(["list_apps", "get_app_state"]);
+export const INSPECTION_TOOL_NAMES = [
+  "computer_use_list_apps",
+  "computer_use_get_app_state",
+] as const;
+export const INTERACTION_TOOL_NAMES = [
+  "computer_use_click",
+  "computer_use_perform_secondary_action",
+  "computer_use_set_value",
+  "computer_use_select_text",
+  "computer_use_scroll",
+  "computer_use_drag",
+  "computer_use_press_key",
+  "computer_use_type_text",
+] as const;
+
+export function setInitialComputerUseTools(pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">): void {
+  const interactionTools = new Set<string>(INTERACTION_TOOL_NAMES);
+  const preserved = pi.getActiveTools().filter((name) => !interactionTools.has(name));
+  pi.setActiveTools([...new Set([...preserved, ...INSPECTION_TOOL_NAMES])]);
+}
+
+export function activateInteractionTools(pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">): void {
+  const active = pi.getActiveTools();
+  pi.setActiveTools([...new Set([...active, ...INTERACTION_TOOL_NAMES])]);
+}
+
 function toPiContent(content: Array<Record<string, unknown>>): Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> {
   const result: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [];
   for (const block of content) {
@@ -173,15 +200,18 @@ export default function directComputerUse(pi: ExtensionAPI) {
   const methods = Object.keys(ToolParameters) as DirectMethod[];
   for (const method of methods) {
     const piName = `computer_use_${method}`;
-    pi.registerTool({
-      name: piName,
-      label: titleFor(method),
-      description: toolDescription(method),
+    const inspectionPromptMetadata = INSPECTION_METHODS.has(method) ? {
       promptSnippet: `${titleFor(method)} through the official signed macOS Computer Use service`,
       promptGuidelines: [
         `${piName} is a direct typed tool: choose its arguments yourself; it does not invoke a nested planner or model.`,
         `Call computer_use_get_app_state once per assistant turn before interacting with an app.`,
       ],
+    } : {};
+    pi.registerTool({
+      name: piName,
+      label: titleFor(method),
+      description: toolDescription(method),
+      ...inspectionPromptMetadata,
       parameters: ToolParameters[method] as any,
       async execute(_toolCallId, params, signal, onUpdate, ctx) {
         const response = await executeDirectTool(
@@ -202,6 +232,7 @@ export default function directComputerUse(pi: ExtensionAPI) {
           },
         );
         if (response.isError) throw new Error(errorText(response.content));
+        if (method === "get_app_state") activateInteractionTools(pi);
         return { content: toPiContent(response.content), details: response.details };
       },
       renderCall(args, theme) {
@@ -211,4 +242,6 @@ export default function directComputerUse(pi: ExtensionAPI) {
       },
     });
   }
+
+  pi.on("session_start", () => setInitialComputerUseTools(pi));
 }
