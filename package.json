@@ -1,6 +1,6 @@
 {
   "name": "codex-computer-use-mcp",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Expose the official macOS Computer Use tools directly to Pi and MCP clients without a nested model.",
   "author": "Thomas Mustier",
   "license": "MIT",
@@ -74,9 +74,9 @@
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.80.6",
-    "@earendil-works/pi-coding-agent": "0.80.6",
-    "@earendil-works/pi-tui": "0.80.6",
+    "@earendil-works/pi-ai": "0.80.7",
+    "@earendil-works/pi-coding-agent": "0.80.7",
+    "@earendil-works/pi-tui": "0.80.7",
     "typebox": "1.1.38"
   },
   "engines": {

@@ -606,7 +606,7 @@ export async function callOfficialDirectTool(
 		await request(
 			"initialize",
 			{
-				clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: "0.2.0" },
+				clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: "0.3.0" },
 				capabilities: { mcpServerOpenaiFormElicitation: options.supportsOpenAiFormElicitation === true && options.onElicitation !== undefined },
 			},
 			15_000,
