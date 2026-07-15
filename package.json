@@ -35,6 +35,7 @@
     "ARCHITECTURE.md",
     "MIGRATION.md",
     "SECURITY.md",
+    "docs/adr",
     "CONTRIBUTING.md",
     "LICENSE"
   ],

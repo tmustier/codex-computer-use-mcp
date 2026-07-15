@@ -1,5 +1,7 @@
 # Direct architecture and boundary inventory
 
+Code Mode remains outside this package. See [ADR 0001: Keep Code Mode in a standalone MCP process](docs/adr/0001-standalone-code-mode-mcp.md).
+
 ## Official API evidence
 
 The architecture uses public source and the installed signed binaries; it does not speak a private Computer Use socket protocol.
