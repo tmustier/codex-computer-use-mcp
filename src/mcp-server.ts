@@ -10,6 +10,7 @@ import {
 	type ContentBlock,
 } from "@modelcontextprotocol/sdk/types.js";
 import { executeDirectTool, getDirectStatus } from "./direct-service.ts";
+import { forwardOfficialElicitationToMcpClient } from "./mcp-elicitation.ts";
 import {
 	EXPECTED_OFFICIAL_INPUT_SCHEMAS,
 	isDirectMethod,
@@ -77,7 +78,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<
 	try {
 		const response = await executeDirectTool(
 			{ method: request.params.name, arguments: request.params.arguments ?? {} },
-			{ signal: extra.signal },
+			{
+				signal: extra.signal,
+				onElicitation: (elicitation) => forwardOfficialElicitationToMcpClient(server, elicitation, extra.signal),
+			},
 		);
 		return {
 			content: response.content as ContentBlock[],

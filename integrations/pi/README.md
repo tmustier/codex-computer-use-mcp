@@ -35,7 +35,7 @@ Use the source workflow only when you need to test an exact reviewed commit. Fol
 - `computer_use_type_text`
 - `/computer-use-status`
 
-No-permissions is the only policy: all ten tools are available with no wrapper approval prompts, mode selector, or app/intent/action gate. Pi does not advertise or render elicitation UI. Unexpected downstream elicitations are silently declined and never accepted.
+No-permissions is the only policy: all ten tools are available with no wrapper permission prompts, mode selector, or app/intent/action gate. Pi advertises support for signed Computer Use elicitations and renders form, OpenAI-form, and URL requests through its UI. The user's `accept`, `decline`, or `cancel` response is returned to the service; the adapter never fabricates or silently answers one.
 
 ## Generic MCP gateway
 
@@ -59,6 +59,6 @@ For a source checkout:
 
 Do not load the native adapter and generic MCP adapter into the same acceptance process unless tool names are intentionally isolated.
 
-The generic MCP path uses the same durable no-permissions policy: all ten methods, no wrapper approval UI, and silent decline of unexpected downstream elicitations. Configure persistent app access only through official ChatGPT Computer Use settings.
+The generic MCP path uses the same durable no-permissions policy: all ten methods and no wrapper permission gate. Standard form and URL elicitations are forwarded to the invoking MCP client; an unsupported or headless client returns `cancel` rather than a fabricated decline.
 
 See the root `MIGRATION.md` before replacing an installed 0.1 adapter.

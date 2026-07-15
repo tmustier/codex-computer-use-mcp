@@ -13,7 +13,7 @@ function brokerResult(content = "ok", isError = false): DirectBrokerResult {
 		brokerVersion: "test-app-server",
 		clientBuild: "test-client",
 		durationMs: 10,
-		approvalRequests: 0,
+		elicitationRequests: 0,
 		modelTurnsStarted: 0,
 		ephemeralThread: true,
 		brokerCleanupVerified: true,
@@ -50,6 +50,23 @@ test("no-permissions directly permits read methods and canonicalizes app identit
 		]);
 		assert.equal(state.details.modelTurnsStarted, 0);
 		assert.equal(state.details.ephemeralRuntimeContext, true);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("direct service passes client elicitation handling through to the signed broker", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-elicit-test."));
+	try {
+		const onElicitation = async () => ({ action: "accept" as const, content: { choice: "allow" } });
+		let observedOptions: unknown;
+		const testDeps = deps(root, async (_method, _args, options) => {
+			observedOptions = options;
+			return brokerResult("state");
+		});
+		testDeps.onElicitation = onElicitation;
+		testDeps.supportsOpenAiFormElicitation = true;
+		await executeDirectTool({ method: "list_apps", arguments: {} }, testDeps);
+		assert.equal((observedOptions as any).onElicitation, onElicitation);
+		assert.equal((observedOptions as any).supportsOpenAiFormElicitation, true);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -149,7 +166,7 @@ test("broker failures preserve content-safe architecture evidence in audit", asy
 						directCalls: 1,
 						modelTurnsStarted: 1,
 						ephemeralThread: true,
-						approvalRequests: 1,
+						elicitationRequests: 1,
 						brokerVersion: "test-app-server",
 						clientBuild: "test-client",
 					});
@@ -162,7 +179,7 @@ test("broker failures preserve content-safe architecture evidence in audit", asy
 		assert.equal(audit.directCalls, 1);
 		assert.equal(audit.modelTurnsStarted, 1);
 		assert.equal(audit.ephemeralThread, true);
-		assert.equal(audit.approvalRequests, 1);
+		assert.equal(audit.elicitationRequests, 1);
 		assert.equal(audit.brokerCleanupVerified, true);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -103,7 +103,7 @@ nested prompts or result summaries
 | Wrapper app/intent allowlists in full mode | **accidental** | absent |
 | Safe/full wrapper modes | **compatibility-only** | removed; one durable no-permissions interface exposes all ten methods |
 | Wrapper approval prompts/configuration | **compatibility-only** | removed; no command, config, environment, or per-call selector remains |
-| Official first-party app access | **official-required** | remains external to this wrapper; unexpected elicitations are silently declined and never auto-accepted |
+| Official first-party app access | **official-required** | signed service elicitations are forwarded to the invoking client; never auto-accepted or silently declined |
 | macOS TCC | **official-required** | retained; never modified |
 | Exact ten-tool inventory/schema | **security-essential** | retained and checked before each call |
 | Canonical bundle identity | **security-essential** | retained before targeted dispatch |
@@ -121,7 +121,7 @@ nested prompts or result summaries
 
 No-permissions is the sole interface and means unrestricted wrapper dispatch with no wrapper approval prompt. All ten methods are registered. No config file, environment value, slash command, CLI mode switch, or tool argument selects another route.
 
-Both Pi and generic stdio MCP omit elicitation capability. App-server is created with `approvalPolicy: "never"`. If the official downstream server nevertheless sends an elicitation request, the bridge counts and silently declines it; there is no UI path and no acceptance callback. Users configure any persistent first-party app access externally in official ChatGPT Computer Use settings.
+App-server is created with `approvalPolicy: "never"` so the wrapper does not generate Codex approval prompts. The broker still handles `mcpServer/elicitation/request` from the signed downstream service. Pi advertises OpenAI-form support and renders form, OpenAI-form, and URL requests through its UI. Generic stdio MCP forwards standard form and URL requests as `elicitation/create` to the invoking MCP client. The response path preserves `accept`, `decline`, `cancel`, structured content, and response metadata; no callback or compatible UI yields `cancel`, never an invented decline.
 
 ## Output boundary
 

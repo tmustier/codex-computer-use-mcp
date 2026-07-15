@@ -7,6 +7,8 @@ import {
 	callOfficialDirectTool,
 	DirectBrokerCallError,
 	verifyOfficialDirectBroker,
+	type DirectBrokerElicitationRequest,
+	type DirectBrokerElicitationResponse,
 	type DirectBrokerResult,
 } from "./direct-broker.ts";
 import { acquireAppLock, globalAppLockRoot, type AppLock } from "./lock.ts";
@@ -44,6 +46,10 @@ export interface DirectServiceDependencies {
 	stateRoot?: string;
 	signal?: AbortSignal;
 	onProgress?: (message: string) => void | Promise<void>;
+	onElicitation?: (
+		request: DirectBrokerElicitationRequest,
+	) => DirectBrokerElicitationResponse | Promise<DirectBrokerElicitationResponse>;
+	supportsOpenAiFormElicitation?: boolean;
 	callTool?: typeof callOfficialDirectTool;
 	resolveIdentity?: typeof resolveAppIdentity;
 	frontmost?: typeof frontmostBundleId;
@@ -139,7 +145,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			directCalls: 0,
 			modelTurnsStarted: 0,
 			ephemeralThread: null,
-			approvalRequests: 0,
+			elicitationRequests: 0,
 			backgroundPreserved: null,
 			brokerCleanupVerified: true,
 			appLeaseReleased: true,
@@ -160,7 +166,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			app: auditAppIdentifier(rawApp, identity), mutating: MUTATING_METHODS.has(request.method),
 			authorization: authorizationFor(config.permissionMode, request.method), inputBytes: inputByteCount(request.arguments),
 			outcome: "identity_rejected", durationMs: Date.now() - startedAt, brokerVersion: null, clientBuild: null,
-			directCalls: 0, modelTurnsStarted: 0, ephemeralThread: null, approvalRequests: 0,
+			directCalls: 0, modelTurnsStarted: 0, ephemeralThread: null, elicitationRequests: 0,
 			backgroundPreserved: null, brokerCleanupVerified: true, appLeaseReleased: true, resultContentTypes: [], resultBytes: 0,
 		};
 		try { await appendAudit(stateRoot, audit); }
@@ -219,6 +225,8 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			broker = await (deps.callTool ?? callOfficialDirectTool)(request.method, canonicalArgs, {
 				signal: deps.signal,
 				timeoutMs: 120_000,
+				onElicitation: deps.onElicitation,
+				supportsOpenAiFormElicitation: deps.supportsOpenAiFormElicitation,
 			});
 			brokerCleanupVerified = broker.brokerCleanupVerified;
 		} catch (error) {
@@ -245,7 +253,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 				directCalls: 1,
 				modelTurnsStarted: 0,
 				ephemeralRuntimeContext: true,
-				approvalRequests: broker.approvalRequests,
+				elicitationRequests: broker.elicitationRequests,
 				brokerVersion: broker.brokerVersion,
 				clientBuild: broker.clientBuild,
 				durationMs: broker.durationMs,
@@ -301,7 +309,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			directCalls: broker ? 1 : brokerFailure?.directCalls ?? 0,
 			modelTurnsStarted: broker?.modelTurnsStarted ?? brokerFailure?.modelTurnsStarted ?? 0,
 			ephemeralThread: broker?.ephemeralThread ?? brokerFailure?.ephemeralThread ?? null,
-			approvalRequests: broker?.approvalRequests ?? brokerFailure?.approvalRequests ?? 0,
+			elicitationRequests: broker?.elicitationRequests ?? brokerFailure?.elicitationRequests ?? 0,
 			backgroundPreserved,
 			brokerCleanupVerified,
 			appLeaseReleased: !releaseFailed,
@@ -336,12 +344,13 @@ export async function getDirectStatus(stateRoot = defaultStateRoot()): Promise<R
 		brokerVerified,
 		...(brokerVersion ? { brokerVersion } : {}),
 		...(clientBuild ? { clientBuild } : {}),
-		officialApprovalAuthoritative: true,
+		officialElicitationsAuthoritative: true,
 		architecture: "official-codex-app-server-direct-mcp-tool-call",
 		nestedModel: false,
 		modelUsage: false,
 		ephemeralZeroTurnRuntimeContextRequired: true,
-		approvalPrompts: false,
+		wrapperPermissionPrompts: false,
+		officialElicitationHandling: "forwarded-when-client-supported",
 		wrapperAuthorization: "unrestricted",
 		availableMethods: [...OFFICIAL_METHODS],
 		supportedMethods: [...OFFICIAL_METHODS],

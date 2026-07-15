@@ -35,7 +35,7 @@ CODEX_COMPUTER_USE_HOME="$(mktemp -d)" \
 
 `-ne` suppresses auto-discovered extensions so the live 0.1 adapter is not loaded. This does not change live Pi configuration.
 
-The source adapter starts only in no-permissions mode: all ten methods are available and the wrapper opens no approval UI. Use only benign real apps whose persistent first-party access is already configured. Do not use disposable harnesses as acceptance evidence.
+The source adapter starts only in no-permissions mode: all ten methods are available and the wrapper opens no permission UI of its own. Signed Computer Use elicitations are still shown through Pi and answered only by the user. Use benign real apps for acceptance; do not use disposable harnesses as evidence.
 
 ## Migrate to version 0.2.0
 
@@ -47,7 +47,8 @@ The source adapter starts only in no-permissions mode: all ten methods are avail
 6. Start a fresh Pi process; do not rely on hot-reloading a security-boundary change.
 7. Verify `/computer-use-status` reports:
    - `permissionMode: "no-permissions"`;
-   - `approvalPrompts: false`;
+   - `wrapperPermissionPrompts: false`;
+   - `officialElicitationHandling: "forwarded-when-client-supported"`;
    - all ten `availableMethods`;
    - `brokerVerified: true`;
    - `nestedModel: false`;

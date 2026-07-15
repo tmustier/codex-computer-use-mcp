@@ -17,6 +17,20 @@ const OPENAI_TEAM_ID = "2DC432GLL2";
 const MAX_PROTOCOL_LINE_BYTES = 8 * 1024 * 1024;
 const MAX_RESULT_BYTES = 25 * 1024 * 1024;
 
+export interface DirectBrokerElicitationRequest extends Record<string, unknown> {
+	mode?: string;
+	message?: string;
+	requestedSchema?: unknown;
+	url?: string;
+	elicitationId?: string;
+}
+
+export interface DirectBrokerElicitationResponse {
+	action: "accept" | "decline" | "cancel";
+	content?: unknown;
+	_meta?: unknown;
+}
+
 export interface DirectBrokerResult {
 	content: Array<Record<string, unknown>>;
 	structuredContent?: unknown;
@@ -24,7 +38,7 @@ export interface DirectBrokerResult {
 	brokerVersion: string;
 	clientBuild: string;
 	durationMs: number;
-	approvalRequests: number;
+	elicitationRequests: number;
 	modelTurnsStarted: 0;
 	ephemeralThread: true;
 	brokerCleanupVerified: true;
@@ -33,6 +47,10 @@ export interface DirectBrokerResult {
 export interface DirectBrokerOptions {
 	timeoutMs?: number;
 	signal?: AbortSignal;
+	onElicitation?: (
+		request: DirectBrokerElicitationRequest,
+	) => DirectBrokerElicitationResponse | Promise<DirectBrokerElicitationResponse>;
+	supportsOpenAiFormElicitation?: boolean;
 	/** Test-only executable override. Production callers never set this. */
 	appServerCommand?: string;
 	/** Test-only argument override. */
@@ -58,7 +76,7 @@ export class DirectBrokerCallError extends Error {
 	readonly directCalls: number;
 	readonly modelTurnsStarted: number;
 	readonly ephemeralThread: boolean;
-	readonly approvalRequests: number;
+	readonly elicitationRequests: number;
 	readonly brokerVersion: string;
 	readonly clientBuild: string;
 	constructor(
@@ -69,7 +87,7 @@ export class DirectBrokerCallError extends Error {
 			directCalls?: number;
 			modelTurnsStarted?: number;
 			ephemeralThread?: boolean;
-			approvalRequests?: number;
+			elicitationRequests?: number;
 			brokerVersion?: string;
 			clientBuild?: string;
 		} = {},
@@ -80,7 +98,7 @@ export class DirectBrokerCallError extends Error {
 		this.directCalls = evidence.directCalls ?? 0;
 		this.modelTurnsStarted = evidence.modelTurnsStarted ?? 0;
 		this.ephemeralThread = evidence.ephemeralThread ?? false;
-		this.approvalRequests = evidence.approvalRequests ?? 0;
+		this.elicitationRequests = evidence.elicitationRequests ?? 0;
 		this.brokerVersion = evidence.brokerVersion ?? "unknown";
 		this.clientBuild = evidence.clientBuild ?? "unknown";
 	}
@@ -429,7 +447,7 @@ export async function callOfficialDirectTool(
 	let fatalError: Error | undefined;
 	let stderr = "";
 	let nextId = 1;
-	let approvalRequests = 0;
+	let elicitationRequests = 0;
 	let modelTurnsStarted = 0;
 	let directCalls = 0;
 	let ephemeralThread = false;
@@ -527,14 +545,23 @@ export async function callOfficialDirectTool(
 						send({ id: message.id, error: { code: -32601, message: "Unsupported server request" } });
 						return;
 					}
-					if (approvalRequests >= 8) {
-						fail(new Error("Official app-server emitted excessive elicitation requests"));
-						return;
-					}
-					approvalRequests += 1;
-					// The durable no-permissions interface never opens an approval UI and never
-					// self-accepts a first-party request. Unexpected elicitations are declined.
-					send({ id: message.id, result: { action: "decline" } });
+					elicitationRequests += 1;
+					const requestParams = message.params && typeof message.params === "object" && !Array.isArray(message.params)
+						? message.params as DirectBrokerElicitationRequest
+						: {};
+					void (async () => {
+						let response: DirectBrokerElicitationResponse = { action: "cancel" };
+						if (options.onElicitation) {
+							try {
+								const candidate = await options.onElicitation(requestParams);
+								if (candidate && ["accept", "decline", "cancel"].includes(candidate.action)) response = candidate;
+							} catch {
+								response = { action: "cancel" };
+							}
+						}
+						if (fatalError || !proc?.stdin.writable) return;
+						send({ id: message.id, result: response });
+					})().catch((error) => fail(error instanceof Error ? error : new Error(String(error))));
 					return;
 				}
 			} catch (error) {
@@ -580,7 +607,7 @@ export async function callOfficialDirectTool(
 			"initialize",
 			{
 				clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: "0.2.0" },
-				capabilities: { mcpServerOpenaiFormElicitation: false },
+				capabilities: { mcpServerOpenaiFormElicitation: options.supportsOpenAiFormElicitation === true && options.onElicitation !== undefined },
 			},
 			15_000,
 		);
@@ -622,7 +649,7 @@ export async function callOfficialDirectTool(
 			brokerVersion: verification.brokerVersion,
 			clientBuild: verification.clientBuild,
 			durationMs: Date.now() - startedAt,
-			approvalRequests,
+			elicitationRequests,
 			modelTurnsStarted: 0,
 			ephemeralThread: true,
 			brokerCleanupVerified: true,
@@ -660,7 +687,7 @@ export async function callOfficialDirectTool(
 		directCalls,
 		modelTurnsStarted,
 		ephemeralThread,
-		approvalRequests,
+		elicitationRequests,
 		brokerVersion: verification.brokerVersion,
 		clientBuild: verification.clientBuild,
 	};

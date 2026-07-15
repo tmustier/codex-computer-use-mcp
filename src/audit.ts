@@ -20,7 +20,7 @@ export interface AuditRecord {
 	directCalls: number;
 	modelTurnsStarted: number;
 	ephemeralThread: boolean | null;
-	approvalRequests: number;
+	elicitationRequests: number;
 	backgroundPreserved: boolean | null;
 	brokerCleanupVerified: boolean;
 	appLeaseReleased: boolean;
