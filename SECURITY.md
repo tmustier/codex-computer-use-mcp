@@ -23,7 +23,7 @@ This is direct tool dispatch—not model orchestration.
 3. The helper's exact ten method names and input schemas match the pinned expected inventory before every call; release tests also verify its descriptions and annotations.
 4. `no-permissions` is the only wrapper policy: all ten methods are exposed and no wrapper permission prompt is opened.
 5. There is no config file, environment override, command, tool argument, per-call branch, or alternate safe/full route that an agent can select.
-6. App-server uses `approvalPolicy: "never"`; elicitation capability is disabled and unexpected first-party requests are silently declined, never prompted or self-accepted. Persistent official app access remains authoritative and must be configured outside this wrapper.
+6. App-server uses `approvalPolicy: "never"` to disable host-generated Codex approvals. Signed downstream elicitations remain authoritative: Pi renders them, generic MCP forwards standard form/URL requests to its client, and the bridge returns the resulting `accept`, `decline`, or `cancel`. It never invents, silently declines, or self-accepts them; an unavailable client cancels.
 7. Target selectors resolve to canonical installed bundle IDs before dispatch.
 8. Same-app work is excluded across native Pi, generic MCP, and custom state roots with one fixed per-user kernel `lockf` lease namespace.
 9. Target focus events, periodic samples, watcher health, queued ASN resolution, and final state are checked. This is post-action detection, not a preventive OS sandbox.
@@ -46,7 +46,7 @@ The mode is compiled as the sole policy. Agent-writable audit state and legacy c
 
 ## Elicitations
 
-Neither Pi nor stdio MCP advertises or renders an approval UI. The bridge starts app-server with `approvalPolicy: "never"`. An unexpected downstream elicitation is counted, silently declined, and never self-accepted. Persistent first-party app access belongs in official ChatGPT Computer Use settings.
+The bridge starts app-server with `approvalPolicy: "never"`, so it does not create Codex host approval prompts. This is separate from the signed Computer Use service's own elicitations. Pi advertises and renders the service's form, OpenAI-form, and URL requests. Stdio MCP forwards standard form and URL requests through `elicitation/create`. Only a user or upstream client response can produce `accept` or `decline`; cancellation, missing UI, unsupported modes, and unsupported clients produce `cancel`.
 
 ## Visible content
 

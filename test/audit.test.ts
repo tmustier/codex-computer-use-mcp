@@ -21,7 +21,7 @@ const record: AuditRecord = {
 	directCalls: 1,
 	modelTurnsStarted: 0,
 	ephemeralThread: true,
-	approvalRequests: 0,
+	elicitationRequests: 0,
 	backgroundPreserved: true,
 	brokerCleanupVerified: true,
 	appLeaseReleased: true,

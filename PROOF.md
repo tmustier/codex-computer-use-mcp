@@ -71,7 +71,10 @@ Current branch tests cover:
 - global per-user same-app exclusion across different supported state roots, race behavior, crash release, private lock roots, and bounded lock filenames;
 - focus-event ASN retry/drain behavior, including valid events at the start of a single large stdout chunk;
 - stdio MCP all-ten inventory/status with no alternate mode route;
-- Pi source registration for every direct capability with no nested planner, permission command, or approval UI reference.
+- signed app-server elicitation forwarding, exact user responses, headless cancellation, and cancellation while a UI callback is pending;
+- standard form/URL forwarding across a real MCP SDK client/server transport;
+- Pi source registration for every direct capability with no nested planner, permission command, or wrapper-generated approval UI;
+- Pi form, opaque OpenAI-form, URL, decline, and headless-cancel elicitation handling.
 
 ## Fresh Pi unlocked real-app acceptance
 
@@ -119,7 +122,7 @@ Validation recorded for the reviewed direct implementation:
 - public-source scrub: no secrets, private absolute paths, or machine identifiers found;
 - fresh-Pi real-app acceptance: pass as above.
 
-Independent reviews of earlier revisions found cleanup and coordination gaps: fail-open or partial descendant enumeration, early-exit orphan recovery, state-root-scoped same-app locking, false-success lease-release audit, unverified focus-listener exit, pre-response direct-call accounting, and large-chunk focus-event loss. The reviewed implementation retains those fixes while removing all wrapper approval UI and safe or full configuration branches.
+Independent reviews of earlier revisions found cleanup and coordination gaps: fail-open or partial descendant enumeration, early-exit orphan recovery, state-root-scoped same-app locking, false-success lease-release audit, unverified focus-listener exit, pre-response direct-call accounting, and large-chunk focus-event loss. The reviewed implementation retains those fixes while removing wrapper-generated approval UI and safe or full configuration branches. Signed official-service elicitations remain a separate, forwarded user interaction.
 
 Version 0.2.0 supports direct local calls only in an unlocked macOS session. Targeted calls failed with official error `-10005` during genuine locked-session acceptance. OpenAI limits locked Computer Use to active trusted turns started from a connected device, so locked local use remains follow-up work and is not part of this release.
 

@@ -22,7 +22,8 @@ test("CLI exposes durable no-permissions status and no mode-selection route", as
 		const { stdout } = await run(stateRoot, ["--status"]);
 		const status = JSON.parse(stdout);
 		assert.equal(status.permissionMode, "no-permissions");
-		assert.equal(status.approvalPrompts, false);
+		assert.equal(status.wrapperPermissionPrompts, false);
+		assert.equal(status.officialElicitationHandling, "forwarded-when-client-supported");
 		assert.equal(status.wrapperAuthorization, "unrestricted");
 		assert.equal(status.availableMethods.length, 10);
 		assert.equal(status.nestedModel, false);

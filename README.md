@@ -39,7 +39,7 @@ As the official contract specifies, Pi—not a nested planner—calls `computer_
 
 `no-permissions` has one precise meaning here: **the wrapper asks no permission questions and exposes all ten official actions**. It is the only mode and the durable default. There is no safe/full selector, config file, environment override, slash command, CLI switch, per-call elevation, app allowlist, intent classifier, task schema, per-action confirmation, special-case app policy, or method gate.
 
-The app-server runtime is also created with `approvalPolicy: "never"`. The client does not advertise an elicitation UI. If the official downstream service unexpectedly requests elicitation, the bridge silently declines it; it never opens a prompt and never self-accepts. Any persistent first-party access required by Computer Use must therefore already be configured in the official ChatGPT app.
+The app-server runtime is also created with `approvalPolicy: "never"`, which removes host-generated Codex approval prompts. It does not suppress requests from the signed Computer Use service. When that service sends `mcpServer/elicitation/request`, the bridge forwards the request to the invoking client and returns that client's `accept`, `decline`, or `cancel` response. It never fabricates a permission prompt, accepts on the user's behalf, or silently converts a request into a decline. A headless or elicitation-incompatible client returns `cancel`, matching Codex's non-interactive behavior.
 
 No-permissions does **not** bypass:
 
@@ -67,7 +67,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for source links and the full restricti
 - macOS
 - Node.js 22 or newer
 - official ChatGPT macOS app at `/Applications/ChatGPT.app`
-- official Computer Use component installed and its first-party permissions configured
+- official Computer Use component installed
 
 The direct bridge starts app-server with a new private `CODEX_HOME` containing no account credentials and only one configured MCP server: official Computer Use. It does not inherit the user's Codex MCP servers, plugins, history, memories, API keys, or auth file. It selects a non-websocket dummy model provider bound to unreachable loopback, disables plugin/remote-control features, and never starts a turn; this prevents app-server model prewarm or Responses API traffic.
 
@@ -99,7 +99,7 @@ Command:
 /computer-use-status
 ```
 
-The native Pi adapter is the primary product path. It always registers all ten typed tools directly. It exposes no mode-changing command and no approval UI.
+The native Pi adapter is the primary product path. It always registers all ten typed tools directly and exposes no mode-changing command or wrapper-generated approval UI. Signed Computer Use form, OpenAI-form, and URL elicitations are shown through Pi's UI; only the user's choice is returned to the service.
 
 ## MCP server
 
@@ -125,7 +125,7 @@ For Pi's generic MCP gateway, keep `directTools: false` so this powerful surface
 }
 ```
 
-The generic MCP server exposes the same no-permissions behavior: no wrapper approval UI and all ten methods. Unexpected downstream elicitations are silently declined; configure persistent first-party app access only in official ChatGPT Computer Use settings.
+The generic MCP server exposes the same no-permissions behavior: no wrapper permission gate and all ten methods. Standard form and URL elicitations from the signed service are forwarded as MCP `elicitation/create` requests. The upstream client response is returned unchanged; unsupported or headless clients cancel rather than fabricate a decline.
 
 ## Security and privacy
 
