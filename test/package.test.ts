@@ -15,6 +15,8 @@ test("package contains direct architecture, Pi adapter, docs, and shrinkwrap wit
 		"README.md",
 		"SECURITY.md",
 		"PROOF.md",
+		"docs/excel-live-control.md",
+		"docs/excel-live-tool-schemas.json",
 		"npm-shrinkwrap.json",
 		"dist/direct-broker.js",
 		"dist/direct-service.js",

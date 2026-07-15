@@ -35,6 +35,10 @@ The MCP façade preserves the official signed helper's tool descriptions, input 
 
 As the official contract specifies, Pi—not a nested planner—calls `computer_use_get_app_state` once per assistant turn before interacting with an app, then chooses and executes actions itself.
 
+### Native Excel document control is separate
+
+OpenAI's official ChatGPT for Excel add-in has a brokered Office.js document-control path. It does not use these Computer Use tools for cell reads or writes. The recovered architecture and exact current 17-tool input contract are documented in [`docs/excel-live-control.md`](docs/excel-live-control.md) and [`docs/excel-live-tool-schemas.json`](docs/excel-live-tool-schemas.json).
+
 ## Authorization policy: durable no-permissions
 
 `no-permissions` has one precise meaning here: **the wrapper asks no permission questions and exposes all ten official actions**. It is the only mode and the durable default. There is no safe/full selector, config file, environment override, slash command, CLI switch, per-call elevation, app allowlist, intent classifier, task schema, per-action confirmation, special-case app policy, or method gate.

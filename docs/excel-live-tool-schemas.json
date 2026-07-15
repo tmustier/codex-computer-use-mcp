@@ -1,0 +1,1270 @@
+{
+  "tool_schemas": [
+    {
+      "surface": "excel",
+      "tool_name": "read_ranges",
+      "version": "1",
+      "description": "Get detailed information about cells (values, formulas, text, and optionally styles) for one or more ranges. Use this for exact localized inspection near the target edit. Prefer omitting styles unless number presentation, cell highlighting, or formatting semantics are needed. Avoid using it as a broad workbook-mapping or full-sheet scanning tool when `search_workbook` or a summarized runtime-script read would be faster.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "sheetId": {
+            "type": "string",
+            "description": "Sheet ID to read."
+          },
+          "ranges": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "A1 ranges, e.g. ['A1:C10','E1:F5']."
+          },
+          "includeStyles": {
+            "type": "boolean",
+            "description": "Include cell styles; numberFormat is only returned when true. Prefer false unless formatting semantics matter.",
+            "default": false
+          },
+          "cellLimit": {
+            "type": "number",
+            "description": "Max non-empty cells returned; may truncate.",
+            "default": 10000
+          },
+          "summary": {
+            "type": "string",
+            "description": "Short label shown next to the tool icon. 4-8 words describing in active tense what is happening",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "sheetId",
+          "ranges"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "search_workbook",
+      "version": "1",
+      "description": "Search for text across the spreadsheet and return matching cell locations. Use this to resolve exact labels, anchor rows, and target blocks quickly before writing instead of hardcoding row or column offsets.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "searchTerm": {
+            "type": "string",
+            "description": "Text (or regex) to find."
+          },
+          "sheetId": {
+            "type": "string",
+            "description": "Optional sheet ID scope."
+          },
+          "range": {
+            "type": "string",
+            "description": "Optional A1 range scope."
+          },
+          "offset": {
+            "type": "number",
+            "description": "Pagination offset.",
+            "default": 0
+          },
+          "options": {
+            "type": "object",
+            "properties": {
+              "matchCase": {
+                "type": "boolean",
+                "default": false
+              },
+              "matchEntireCell": {
+                "type": "boolean",
+                "default": false
+              },
+              "useRegex": {
+                "type": "boolean",
+                "default": false
+              },
+              "matchFormulas": {
+                "type": "boolean",
+                "default": false
+              },
+              "ignoreDiacritics": {
+                "type": "boolean",
+                "default": true
+              },
+              "maxResults": {
+                "type": "number",
+                "default": 500
+              }
+            },
+            "additionalProperties": false
+          },
+          "summary": {
+            "type": "string",
+            "description": "Short label shown next to the tool icon. 4-8 words describing in active tense what is happening",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "searchTerm"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "list_items",
+      "version": "1",
+      "description": "List all spreadsheet items (pivot tables, charts, tables).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "sheetId": {
+            "type": "string",
+            "description": "Optional sheet ID filter."
+          },
+          "itemType": {
+            "type": "string",
+            "enum": [
+              "pivotTable",
+              "chart",
+              "table"
+            ],
+            "description": "Optional item type filter. If not provided, all item types will be listed."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Short label shown next to the tool icon. 4-8 words describing in active tense what is happening",
+            "maxLength": 40
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "write_range",
+      "version": "1",
+      "description": "Set values, formulas, notes, and/or formatting for individual cells. Best for sparse patches, assumption inputs, repair edits, and seeding a verified formula pattern while preserving the template’s existing logic. Do not use this to rebuild a large section cell-by-cell when a runtime script or `copy_range_to` would be more efficient. This tool is NON-DESTRUCTIVE by default: any omitted cell is left unchanged. For a given cell, if value and formula are omitted, its existing contents are preserved.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "description": "Short label shown next to the tool icon. 4–8 words describing in active tense what is happening.",
+            "maxLength": 40
+          },
+          "sheetId": {
+            "type": "string",
+            "description": "Sheet ID to modify."
+          },
+          "writes": {
+            "type": "array",
+            "description": "List of per-cell write operations. Each entry targets one cell and applies a non-destructive patch.",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "description": "Cell patch object. Any omitted property is left unchanged in the existing spreadsheet.",
+              "properties": {
+                "cell": {
+                  "type": "string",
+                  "description": "A1 cell address (e.g. 'A1', 'B2'). Sheet-qualified addresses like 'Sheet1!A1' are allowed but must match sheetId."
+                },
+                "value": {
+                  "type": [
+                    "string",
+                    "number",
+                    "boolean",
+                    "null"
+                  ],
+                  "description": "Raw cell value. Mutually exclusive with formula. If omitted, the existing value is preserved."
+                },
+                "formula": {
+                  "type": "string",
+                  "description": "Excel formula string. Must include leading '='. If omitted, the existing formula/value is preserved."
+                },
+                "note": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Note/comment for the cell. If omitted, the existing note is preserved. If null or empty string, the note is removed."
+                },
+                "resizeColumn": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "autofit",
+                        "points",
+                        "standard"
+                      ]
+                    },
+                    "value": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Resize the column (of this cell) to the specified width. If omitted, the column size is unchanged."
+                },
+                "resizeRow": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "autofit",
+                        "points",
+                        "standard"
+                      ]
+                    },
+                    "value": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "type"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Resize the row (of this cell) to the specified height. If omitted, the row size is unchanged."
+                },
+                "cellStyles": {
+                  "type": "object",
+                  "description": "Primary styling object for the cell.",
+                  "properties": {
+                    "fontColor": {
+                      "type": "string",
+                      "description": "Hex or named font color."
+                    },
+                    "fontSize": {
+                      "type": "number",
+                      "description": "Font size in points."
+                    },
+                    "fontFamily": {
+                      "type": "string",
+                      "description": "Font family name."
+                    },
+                    "fontWeight": {
+                      "type": "string",
+                      "enum": [
+                        "normal",
+                        "bold"
+                      ],
+                      "description": "Font weight."
+                    },
+                    "fontStyle": {
+                      "type": "string",
+                      "enum": [
+                        "normal",
+                        "italic"
+                      ],
+                      "description": "Font style."
+                    },
+                    "fontLine": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "underline",
+                        "line-through"
+                      ],
+                      "description": "Underline or strikethrough styling."
+                    },
+                    "backgroundColor": {
+                      "type": "string",
+                      "description": "Hex or named background fill color."
+                    },
+                    "horizontalAlignment": {
+                      "type": "string",
+                      "enum": [
+                        "left",
+                        "center",
+                        "right"
+                      ],
+                      "description": "Horizontal text alignment."
+                    },
+                    "numberFormat": {
+                      "type": "string",
+                      "description": "Excel number format string."
+                    },
+                    "borders": {
+                      "type": "array",
+                      "description": "Condensed border model. Each entry applies the same border style to one or more sides.",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sides": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "top",
+                                "bottom",
+                                "left",
+                                "right"
+                              ]
+                            },
+                            "minItems": 1,
+                            "description": "Which sides of the cell to apply this border definition to."
+                          },
+                          "style": {
+                            "type": "string",
+                            "enum": [
+                              "solid",
+                              "dashed",
+                              "dotted",
+                              "double"
+                            ],
+                            "description": "Line style of the border."
+                          },
+                          "weight": {
+                            "type": "string",
+                            "enum": [
+                              "thin",
+                              "medium",
+                              "thick"
+                            ],
+                            "description": "Thickness of the border."
+                          },
+                          "color": {
+                            "type": "string",
+                            "description": "Hex or named color of the border."
+                          }
+                        },
+                        "required": [
+                          "sides",
+                          "style",
+                          "weight"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "cell"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "summary",
+          "sheetId",
+          "writes"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "clear_range",
+      "version": "1",
+      "description": "Clear cells in a range (contents, formats, or both).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "sheetId": {
+            "type": "string",
+            "description": "Sheet ID to clear."
+          },
+          "range": {
+            "type": "string",
+            "description": "Range to clear; supports full rows/cols."
+          },
+          "clearType": {
+            "type": "string",
+            "enum": [
+              "contents",
+              "formats",
+              "all"
+            ],
+            "default": "contents"
+          },
+          "summary": {
+            "type": "string",
+            "description": "Short label shown next to the tool icon. 4-8 words describing in active tense what is happening",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "sheetId",
+          "range"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "update_sheet",
+      "version": "1",
+      "description": "Insert/delete/hide/unhide/freeze/unfreeze rows or columns.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "sheetId": {
+            "type": "string",
+            "description": "Sheet ID to modify."
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "insert",
+              "delete",
+              "hide",
+              "unhide",
+              "freeze",
+              "unfreeze"
+            ]
+          },
+          "dimension": {
+            "type": "string",
+            "enum": [
+              "rows",
+              "columns"
+            ]
+          },
+          "reference": {
+            "type": "string",
+            "description": "Row number or column letter anchor."
+          },
+          "position": {
+            "type": "string",
+            "enum": [
+              "before",
+              "after"
+            ],
+            "description": "Insert position (for insert)."
+          },
+          "count": {
+            "type": "number",
+            "description": "How many rows/cols.",
+            "default": 1
+          },
+          "summary": {
+            "type": "string",
+            "description": "Short label shown next to the tool icon. 4-8 words describing in active tense what is happening",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "sheetId",
+          "operation"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "update_workbook",
+      "version": "1",
+      "description": "Create, delete, rename, or duplicate sheets.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "create",
+              "delete",
+              "rename",
+              "duplicate"
+            ]
+          },
+          "sheetName": {
+            "type": "string",
+            "description": "Name for created sheet (create)."
+          },
+          "rows": {
+            "type": "number",
+            "description": "Row count for new sheet.",
+            "default": 1000
+          },
+          "columns": {
+            "type": "number",
+            "description": "Column count for new sheet.",
+            "default": 26
+          },
+          "tabColor": {
+            "type": "string",
+            "description": "Hex tab color (create)."
+          },
+          "sheetId": {
+            "type": "string",
+            "description": "Target sheet ID for delete/rename/duplicate."
+          },
+          "newName": {
+            "type": "string",
+            "description": "New name for rename/duplicate."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Short label shown next to the tool icon. 4-8 words describing in active tense what is happening",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "operation"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "copy_range_to",
+      "version": "1",
+      "description": "Copy a range to another location with formula translation and pattern repetition. Prefer this when one verified formula or block should be extended across repeated periods or rows without re-authoring the formulas. Do not use this for dozens of unrelated copies when a single runtime-script edit would be faster and clearer.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "sheetId": {
+            "type": "string",
+            "description": "Sheet ID containing the ranges."
+          },
+          "sourceRange": {
+            "type": "string",
+            "description": "Source A1 range to copy."
+          },
+          "destinationRange": {
+            "type": "string",
+            "description": "Destination A1 range to fill."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Short label shown next to the tool icon. 4-8 words describing in active tense what is happening",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "sheetId",
+          "sourceRange",
+          "destinationRange"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "read_range_image",
+      "version": "1",
+      "description": "Capture a range as a base64 image (PNG).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "sheetId": {
+            "type": "string",
+            "description": "Sheet ID containing the range."
+          },
+          "range": {
+            "type": "string",
+            "description": "A1 range to capture."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Short label shown next to the tool icon. 4-8 words describing in active tense what is happening",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "sheetId",
+          "range"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "run_officejs",
+      "version": "1",
+      "description": "Run Office.js JavaScript inside an already-provided host wrapper. Excel uses async function runOfficeJsScript(ctx, Excel, console) { ... }; PowerPoint uses async function runOfficeJsScript(ctx, PowerPoint, console) { ... }. In PowerPoint scripts, use readPowerPointAttachmentPptxBase64(fileId) to stage an attached PPTX source for native template-slide import, then pass that value directly into insertSlidesFromBase64(..., { formatting: \"KeepSourceFormatting\" }) without inspecting, logging, or returning it. Use this when it is the fastest accurate path for host-native work that exceeds the direct primitive tools. Keep scripts scoped to the intended workbook, presentation, slides, shapes, or charts. Provide only the function body; top-level return is surfaced.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "description": "Short label shown next to the tool icon. 4-8 words describing in active tense what is happening"
+          },
+          "extended_summary": {
+            "type": "string",
+            "description": "Extended summary of what is happening. 10-12 words describing in active tense what is happening. Use this to explain the script in more detail."
+          },
+          "code": {
+            "type": "string",
+            "description": "Function body only for the active host wrapper. Excel exposes (ctx, Excel, console); PowerPoint exposes (ctx, PowerPoint, console)."
+          },
+          "destructive": {
+            "type": "boolean",
+            "description": "Optional legacy metadata for UI summaries. You may omit it; if included, set true when the script edits the active Office document."
+          },
+          "references": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Optional user-visible references for the touched target. Excel may use A1 ranges such as ['Sheet1!A1:C10']; PowerPoint may omit this or use concise slide/object labels when useful."
+          }
+        },
+        "required": [
+          "summary",
+          "extended_summary",
+          "code"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "read_sheets_metadata",
+      "version": "1",
+      "description": "Get metadata for worksheets in the workbook (id, name, position, visibility, usedRange, active).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "description": "Short label shown next to the tool icon. 4-8 words describing in active tense what is happening",
+            "maxLength": 40
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "resize_range",
+      "version": "1",
+      "description": "Resize columns and/or rows (autofit, points, or standard).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "sheetId": {
+            "type": "string",
+            "description": "Sheet ID to resize."
+          },
+          "range": {
+            "type": "string",
+            "description": "Range/rows/cols to resize (optional)."
+          },
+          "width": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "autofit",
+                  "points",
+                  "standard"
+                ]
+              },
+              "value": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          "height": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "autofit",
+                  "points",
+                  "standard"
+                ]
+              },
+              "value": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          "summary": {
+            "type": "string",
+            "description": "Short label shown next to the tool icon. 4-8 words describing in active tense what is happening",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "sheetId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "update_sheet_view",
+      "version": "1",
+      "description": "Update worksheet view options (gridlines, headings, zoom, direction).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "sheetId": {
+            "type": "string",
+            "description": "Sheet ID to update."
+          },
+          "showGridlines": {
+            "type": "boolean",
+            "description": "Whether to display gridlines."
+          },
+          "showHeadings": {
+            "type": "boolean",
+            "description": "Whether to display row/column headings."
+          },
+          "zoomScale": {
+            "type": "number",
+            "minimum": 10,
+            "maximum": 400,
+            "description": "Zoom percentage (10-400)."
+          },
+          "displayRightToLeft": {
+            "type": "boolean",
+            "description": "Toggle right-to-left sheet display if supported."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Short label shown next to the tool icon. 4-8 words describing in active tense what is happening",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "sheetId"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "format_range",
+      "version": "1",
+      "description": "Apply styles to a range of cells. This will apply the styles to the entire range. ",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "sheetId": {
+            "type": "string",
+            "description": "Sheet ID to format."
+          },
+          "range": {
+            "type": "string",
+            "description": "A1 range to format."
+          },
+          "cellStyles": {
+            "type": "object",
+            "description": "Primary styling object for the cell.",
+            "properties": {
+              "fontColor": {
+                "type": "string",
+                "description": "Hex or named font color."
+              },
+              "fontSize": {
+                "type": "number",
+                "description": "Font size in points."
+              },
+              "fontFamily": {
+                "type": "string",
+                "description": "Font family name."
+              },
+              "fontWeight": {
+                "type": "string",
+                "enum": [
+                  "normal",
+                  "bold"
+                ],
+                "description": "Font weight."
+              },
+              "fontStyle": {
+                "type": "string",
+                "enum": [
+                  "normal",
+                  "italic"
+                ],
+                "description": "Font style."
+              },
+              "fontLine": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "underline",
+                  "line-through"
+                ],
+                "description": "Underline or strikethrough styling."
+              },
+              "backgroundColor": {
+                "type": "string",
+                "description": "Hex or named background fill color."
+              },
+              "horizontalAlignment": {
+                "type": "string",
+                "enum": [
+                  "left",
+                  "center",
+                  "right"
+                ],
+                "description": "Horizontal text alignment."
+              },
+              "numberFormat": {
+                "type": "string",
+                "description": "Excel number format string."
+              },
+              "borders": {
+                "type": "array",
+                "description": "Condensed border model. Each entry applies the same border style to one or more sides.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "sides": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "top",
+                          "bottom",
+                          "left",
+                          "right"
+                        ]
+                      },
+                      "minItems": 1,
+                      "description": "Which sides of the cell to apply this border definition to."
+                    },
+                    "style": {
+                      "type": "string",
+                      "enum": [
+                        "solid",
+                        "dashed",
+                        "dotted",
+                        "double"
+                      ],
+                      "description": "Line style of the border."
+                    },
+                    "weight": {
+                      "type": "string",
+                      "enum": [
+                        "thin",
+                        "medium",
+                        "thick"
+                      ],
+                      "description": "Thickness of the border."
+                    },
+                    "color": {
+                      "type": "string",
+                      "description": "Hex or named color of the border."
+                    }
+                  },
+                  "required": [
+                    "sides",
+                    "style",
+                    "weight"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "summary": {
+            "type": "string",
+            "description": "Short label shown next to the tool icon. 4-8 words describing in active tense what is happening",
+            "maxLength": 40
+          }
+        },
+        "required": [
+          "sheetId",
+          "range",
+          "cellStyles"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "chart",
+      "version": "1",
+      "description": "Create, update, or delete a chart.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "summary": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "4–8 words, active tense."
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "create",
+              "update",
+              "delete"
+            ]
+          },
+          "sheetId": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "description": "Chart ID (update/delete)."
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Chart properties. For create: source + chartType required (enforced by runtime).",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "chartType": {
+                "type": "string",
+                "enum": [
+                  "ColumnClustered",
+                  "ColumnStacked",
+                  "BarClustered",
+                  "BarStacked",
+                  "Line",
+                  "LineMarkers",
+                  "Pie",
+                  "PieExploded"
+                ]
+              },
+              "source": {
+                "type": "string",
+                "description": "A1 source range (create)."
+              },
+              "seriesBy": {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "rows",
+                  "columns"
+                ]
+              },
+              "categoryAxisTitle": {
+                "type": "string"
+              },
+              "valueAxisTitle": {
+                "type": "string"
+              },
+              "legend": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "visible": {
+                    "type": "boolean"
+                  },
+                  "position": {
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "top",
+                      "bottom",
+                      "left",
+                      "right"
+                    ]
+                  }
+                }
+              },
+              "position": {
+                "type": "string",
+                "description": "Top-left cell (setPosition)."
+              },
+              "endPosition": {
+                "type": "string",
+                "description": "Optional bottom-right cell to size."
+              },
+              "width": {
+                "type": "number"
+              },
+              "height": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        "required": [
+          "operation",
+          "sheetId"
+        ]
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "table",
+      "version": "1",
+      "description": "Create, update, or delete an Excel table (ListObject).",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "summary": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "4–8 words, active tense."
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "create",
+              "update",
+              "delete"
+            ]
+          },
+          "sheetId": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "description": "Table ID (update/delete)."
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Table properties. For create: range required (enforced by runtime).",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "range": {
+                "type": "string",
+                "description": "A1 range to convert to a table (create)."
+              },
+              "hasHeaders": {
+                "type": "boolean",
+                "description": "Default true."
+              },
+              "style": {
+                "type": "string",
+                "description": "TableStyleLight/Medium/Dark or custom name."
+              },
+              "showTotals": {
+                "type": "boolean"
+              },
+              "showHeaders": {
+                "type": "boolean"
+              },
+              "showFilterButton": {
+                "type": "boolean"
+              },
+              "highlightFirstColumn": {
+                "type": "boolean"
+              },
+              "highlightLastColumn": {
+                "type": "boolean"
+              },
+              "showBandedRows": {
+                "type": "boolean"
+              },
+              "showBandedColumns": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "required": [
+          "operation",
+          "sheetId"
+        ]
+      }
+    },
+    {
+      "surface": "excel",
+      "tool_name": "pivot_table",
+      "version": "1",
+      "description": "Create, update, or delete a pivot table.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "summary": {
+            "type": "string",
+            "maxLength": 40,
+            "description": "4–8 words, active tense."
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "create",
+              "update",
+              "delete"
+            ]
+          },
+          "sheetId": {
+            "type": "string",
+            "description": "Sheet ID where the pivot exists/will be created."
+          },
+          "id": {
+            "type": "string",
+            "description": "Pivot ID (required for update/delete)."
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Pivot properties. For create: source + destination required (enforced by runtime).",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "description": "A1 source range (create)."
+              },
+              "destination": {
+                "type": "string",
+                "description": "A1 top-left destination (create)."
+              },
+              "rows": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "field": {
+                      "type": "string"
+                    },
+                    "sort": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "ascending",
+                        "descending"
+                      ]
+                    },
+                    "showSubtotals": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "field"
+                  ]
+                }
+              },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "field": {
+                      "type": "string"
+                    },
+                    "sort": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "ascending",
+                        "descending"
+                      ]
+                    },
+                    "showSubtotals": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "field"
+                  ]
+                }
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "field": {
+                      "type": "string"
+                    },
+                    "aggregation": {
+                      "type": "string",
+                      "enum": [
+                        "sum",
+                        "count",
+                        "average",
+                        "min",
+                        "max"
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "numberFormat": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "field",
+                    "aggregation"
+                  ]
+                }
+              },
+              "filters": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "field": {
+                      "type": "string"
+                    },
+                    "include": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "exclude": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "field"
+                  ]
+                }
+              },
+              "layout": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "showRowHeaders": {
+                    "type": "boolean"
+                  },
+                  "showColumnHeaders": {
+                    "type": "boolean"
+                  },
+                  "showGrandTotalsRows": {
+                    "type": "boolean"
+                  },
+                  "showGrandTotalsColumns": {
+                    "type": "boolean"
+                  },
+                  "compactForm": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "required": [
+          "operation",
+          "sheetId"
+        ]
+      }
+    }
+  ]
+}

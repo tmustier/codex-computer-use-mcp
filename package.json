@@ -28,6 +28,7 @@
   },
   "files": [
     "dist",
+    "docs",
     "integrations/pi",
     "npm-shrinkwrap.json",
     "README.md",
