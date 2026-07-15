@@ -41,7 +41,7 @@ The exact captured registry result is in [`excel-live-tool-schemas.json`](excel-
 
 ### Live verification status
 
-The official Marketplace add-in was installed and opened in a real Excel workbook. Schema retrieval succeeded, but add-in authentication had not completed at the time of capture. Consequently, the observed `list_document_sessions` result was:
+The official Marketplace add-in was installed and opened in a real Excel workbook. Schema retrieval succeeded, but Google Workspace rejected the add-in's OpenAI OAuth flow before multifactor authentication with “Contact your domain admin for help”. OpenAI's direct email route resolved to the same Google flow. Consequently, the observed `list_document_sessions` result was:
 
 ```json
 {"executors":[]}
@@ -129,7 +129,7 @@ The deployed task pane calls the internal transport `Arc`.
 
 ### Executor registration
 
-Remote control requires an authenticated ChatGPT session, Excel or PowerPoint, and the `arc_control_transport_enabled` feature. The task pane's “Allow Codex control” setting must also remain enabled.
+Remote control requires an authenticated ChatGPT session, Excel or PowerPoint, and the `arc_control_transport_enabled` feature. The task pane's “Allow Codex control” setting must also remain enabled. API key authentication does not qualify: the deployed Arc gate requires `authMode === "chatgpt"`.
 
 For Excel, the task pane:
 
