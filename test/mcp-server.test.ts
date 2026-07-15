@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { OFFICIAL_METHODS } from "../src/tools.ts";
+import { EXPECTED_OFFICIAL_INPUT_SCHEMAS, OFFICIAL_METHODS, OFFICIAL_TOOL_METADATA } from "../src/tools.ts";
 
 test("stdio MCP advertises one unrestricted no-permissions interface with all ten direct tools", async () => {
 	const stateRoot = await mkdtemp(path.join(os.tmpdir(), "direct-computer-use-mcp-test."));
@@ -23,9 +23,12 @@ test("stdio MCP advertises one unrestricted no-permissions interface with all te
 		assert.deepEqual(listed.tools.map((tool) => tool.name).sort(), [...OFFICIAL_METHODS, "computer_use_status"].sort());
 		for (const method of OFFICIAL_METHODS) {
 			const tool = listed.tools.find((item) => item.name === method)!;
-			assert.match(tool.description ?? "", /unrestricted no-permissions interface/i);
-			assert.match(tool.description ?? "", /no wrapper approval prompt/i);
-			assert.equal(tool.annotations?.readOnlyHint, method === "list_apps" || method === "get_app_state");
+			assert.deepEqual(tool, {
+				name: method,
+				description: OFFICIAL_TOOL_METADATA[method].description,
+				inputSchema: EXPECTED_OFFICIAL_INPUT_SCHEMAS[method],
+				annotations: OFFICIAL_TOOL_METADATA[method].annotations,
+			});
 		}
 
 		const status = await client.callTool({ name: "computer_use_status", arguments: {} });

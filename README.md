@@ -20,8 +20,8 @@ Pi registers namespaced tools to avoid collisions with Pi's built-ins. The MCP s
 
 | Pi tool | MCP method | No-permissions | Purpose |
 |---|---|---:|---|
-| `computer_use_list_apps` | `list_apps` | yes | List apps known to official Computer Use |
-| `computer_use_get_app_state` | `get_app_state` | yes | Read accessibility state and imagery for one app |
+| `computer_use_list_apps` | `list_apps` | yes | List running and recently used apps |
+| `computer_use_get_app_state` | `get_app_state` | yes | Read the key-window screenshot and accessibility tree |
 | `computer_use_click` | `click` | yes | Click an element or screenshot coordinates |
 | `computer_use_perform_secondary_action` | `perform_secondary_action` | yes | Invoke a named accessibility action |
 | `computer_use_set_value` | `set_value` | yes | Assign an accessibility value |
@@ -31,7 +31,9 @@ Pi registers namespaced tools to avoid collisions with Pi's built-ins. The MCP s
 | `computer_use_press_key` | `press_key` | yes | Send a key or key combination |
 | `computer_use_type_text` | `type_text` | yes | Type literal text |
 
-Pi—not a nested planner—must call `computer_use_get_app_state`, choose a current element identifier or coordinates, execute one action, and inspect again when needed.
+The MCP façade preserves the official signed helper's tool descriptions, input schemas, and annotations exactly. The Pi façade preserves its descriptions and input schemas; Pi's tool API does not expose MCP annotations. In particular, all ten MCP methods have `destructiveHint: false`; the wrapper does not conflate changing UI state with destructive behavior or add argument restrictions absent from the official schemas.
+
+As the official contract specifies, Pi—not a nested planner—calls `computer_use_get_app_state` once per assistant turn before interacting with an app, then chooses and executes actions itself.
 
 ## Authorization policy: durable no-permissions
 

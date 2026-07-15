@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a vulnerability that could weaken signing, schema verification, permission-mode dispatch, first-party approval handling, app identity, locking, focus telemetry, cleanup, or audit integrity.
+Do not open a public issue for a vulnerability that could weaken signing, contract verification, no-permissions dispatch, first-party access handling, app identity, locking, focus telemetry, cleanup, or audit integrity.
 
 Use GitHub private vulnerability reporting. Include the affected commit/version, the smallest non-sensitive reproduction, expected versus observed behavior, and whether an official action completed before failure.
 
@@ -20,7 +20,7 @@ This is direct tool dispatch—not model orchestration.
 
 1. Only fixed app-bundled Codex and Computer Use client paths are allowed in production.
 2. Both binaries pass strict code-signature verification and OpenAI Team ID `2DC432GLL2` checks before dispatch.
-3. The helper's exact ten method names and input schemas match the pinned expected inventory before every call.
+3. The helper's exact ten method names and input schemas match the pinned expected inventory before every call; release tests also verify its descriptions and annotations.
 4. `no-permissions` is the only wrapper policy: all ten methods are exposed and no wrapper permission prompt is opened.
 5. There is no config file, environment override, command, tool argument, per-call branch, or alternate safe/full route that an agent can select.
 6. App-server uses `approvalPolicy: "never"`; elicitation capability is disabled and unexpected first-party requests are silently declined, never prompted or self-accepted. Persistent official app access remains authoritative and must be configured outside this wrapper.
@@ -40,7 +40,7 @@ This is direct tool dispatch—not model orchestration.
 
 ### No-permissions
 
-All ten official methods and arbitrary resolvable app targets are available without wrapper permission prompts. The name means “ask no permission,” not “disable tools.” This is broad authorization. It does not imply that actions are reversible or that focus detection can prevent an already dispatched action. App-state reads can expose visible sensitive information to the calling model.
+All ten official methods and arbitrary resolvable app targets are available without wrapper permission prompts. The name means “ask no permission,” not “disable tools.” This is broad authorization. It does not imply that actions are reversible or that focus detection can prevent an already dispatched action.
 
 The mode is compiled as the sole policy. Agent-writable audit state and legacy configuration files cannot change it, and there is no CLI/slash/tool/environment mode selector.
 
@@ -48,9 +48,9 @@ The mode is compiled as the sole policy. Agent-writable audit state and legacy c
 
 Neither Pi nor stdio MCP advertises or renders an approval UI. The bridge starts app-server with `approvalPolicy: "never"`. An unexpected downstream elicitation is counted, silently declined, and never self-accepted. Persistent first-party app access belongs in official ChatGPT Computer Use settings.
 
-## Visible-content warning
+## Visible content
 
-Computer Use is designed to return app state and screenshots. Do not point it at apps containing credentials, payment data, private messages, or customer secrets unless the user explicitly requires that context and accepts model exposure. Audit safety does not make target-app content non-sensitive.
+Computer Use returns the official app-state text and screenshots to the invoking client. The wrapper does not inspect, classify, redact, or use that content to narrow the actions authorized by the user's request, and it never writes the content to its audit.
 
 ## Supported versions
 

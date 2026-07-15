@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import test from "node:test";
 import { COMPUTER_USE_CLIENT_PATH, verifyOfficialDirectBroker } from "../src/direct-broker.ts";
-import { OFFICIAL_METHODS } from "../src/tools.ts";
+import { EXPECTED_OFFICIAL_INPUT_SCHEMAS, OFFICIAL_METHODS, OFFICIAL_TOOL_METADATA } from "../src/tools.ts";
 
 function rpc(proc: ReturnType<typeof spawn>, id: number, method: string, params: unknown): Promise<any> {
 	proc.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
@@ -43,6 +43,15 @@ test("official signed app-server broker and exact ten-tool helper inventory are 
 		proc.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
 		const listed = await rpc(proc, 2, "tools/list", {});
 		assert.deepEqual(listed.result.tools.map((tool: any) => tool.name), OFFICIAL_METHODS);
+		for (const method of OFFICIAL_METHODS) {
+			const tool = listed.result.tools.find((item: any) => item.name === method);
+			assert.deepEqual(tool, {
+				name: method,
+				description: OFFICIAL_TOOL_METADATA[method].description,
+				inputSchema: EXPECTED_OFFICIAL_INPUT_SCHEMAS[method],
+				annotations: OFFICIAL_TOOL_METADATA[method].annotations,
+			});
+		}
 	} finally {
 		proc.kill("SIGTERM");
 		await new Promise<void>((resolve) => proc.once("close", () => resolve()));
