@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -12,7 +13,10 @@ import {
 export const CODEX_PATH = "/Applications/ChatGPT.app/Contents/Resources/codex";
 export const COMPUTER_USE_PLUGIN_ROOT =
 	"/Applications/ChatGPT.app/Contents/Resources/plugins/openai-bundled/plugins/computer-use";
-export const COMPUTER_USE_CLIENT_PATH = `${COMPUTER_USE_PLUGIN_ROOT}/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient`;
+const COMPUTER_USE_APP_RELATIVE_PATH = "computer-use/Codex Computer Use.app";
+const CLIENT_RELATIVE_PATH = "Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient";
+export const COMPUTER_USE_CLIENT_PATH = path.join(os.userInfo().homedir, ".codex", COMPUTER_USE_APP_RELATIVE_PATH, CLIENT_RELATIVE_PATH);
+export const LEGACY_COMPUTER_USE_CLIENT_PATH = path.join(COMPUTER_USE_PLUGIN_ROOT, "Codex Computer Use.app", CLIENT_RELATIVE_PATH);
 const OPENAI_TEAM_ID = "2DC432GLL2";
 const MAX_PROTOCOL_LINE_BYTES = 8 * 1024 * 1024;
 const MAX_RESULT_BYTES = 25 * 1024 * 1024;
@@ -104,47 +108,97 @@ export class DirectBrokerCallError extends Error {
 	}
 }
 
-function verifySignedBinary(binaryPath: string): void {
-	const verify = spawnSync("/usr/bin/codesign", ["--verify", "--strict", binaryPath], {
-		encoding: "utf8",
-		timeout: 10_000,
-	});
+interface CommandResult {
+	status: number | null;
+	stdout?: string | Buffer;
+	stderr?: string | Buffer;
+}
+
+type RunSync = (command: string, args: string[]) => CommandResult;
+
+function productionRunSync(command: string, args: string[]): CommandResult {
+	return spawnSync(command, args, { encoding: "utf8", timeout: 10_000 });
+}
+
+function verifySignedBinary(binaryPath: string, runSync: RunSync): void {
+	const verify = runSync("/usr/bin/codesign", ["--verify", "--strict", binaryPath]);
 	if (verify.status !== 0) throw new BrokerVerificationError(`Signature verification failed for ${path.basename(binaryPath)}`);
-	const details = spawnSync("/usr/bin/codesign", ["-dv", "--verbose=2", binaryPath], {
-		encoding: "utf8",
-		timeout: 10_000,
-	});
+	const details = runSync("/usr/bin/codesign", ["-dv", "--verbose=2", binaryPath]);
 	const output = `${details.stdout ?? ""}\n${details.stderr ?? ""}`;
-	if (details.status !== 0 || !output.includes(`TeamIdentifier=${OPENAI_TEAM_ID}`)) {
+	if (details.status !== 0 || !new RegExp(`(?:^|\\n)TeamIdentifier=${OPENAI_TEAM_ID}(?:\\n|$)`).test(output)) {
 		throw new BrokerVerificationError(`${path.basename(binaryPath)} is not signed by the expected OpenAI team`);
 	}
 }
 
-function clientBuild(): string {
-	const plist = path.join(
-		COMPUTER_USE_PLUGIN_ROOT,
-		"Codex Computer Use.app",
-		"Contents",
-		"Info.plist",
-	);
-	const result = spawnSync("/usr/bin/plutil", ["-extract", "CFBundleVersion", "raw", plist], {
-		encoding: "utf8",
-		timeout: 5000,
-	});
-	if (result.status !== 0 || !(result.stdout ?? "").trim()) {
-		throw new BrokerVerificationError("Could not verify the official Computer Use client build");
-	}
-	return (result.stdout ?? "").trim();
+export interface OfficialComputerUseClient {
+	clientPath: string;
+	appPath: string;
+	layout: "installed-component" | "legacy-plugin-bundle";
 }
 
-export function verifyOfficialDirectBroker(): { brokerVersion: string; clientBuild: string } {
-	verifySignedBinary(CODEX_PATH);
-	verifySignedBinary(COMPUTER_USE_CLIENT_PATH);
-	const version = spawnSync(CODEX_PATH, ["--version"], { encoding: "utf8", timeout: 5000 });
-	if (version.status !== 0 || !/^codex-cli\s+\d+\./.test((version.stdout ?? "").trim())) {
+interface ResolveOfficialComputerUseClientOptions {
+	/** Test-only OS-account home override. Production never reads HOME or CODEX_HOME. */
+	userHome?: string;
+	/** Test-only legacy root override. */
+	legacyPluginRoot?: string;
+	runSync?: RunSync;
+}
+
+function checkedCandidate(appPath: string, clientPath: string, layout: OfficialComputerUseClient["layout"], runSync: RunSync): OfficialComputerUseClient | undefined {
+	if (!existsSync(clientPath)) return undefined;
+	let canonicalApp: string;
+	let canonicalClient: string;
+	try {
+		canonicalApp = realpathSync(appPath);
+		canonicalClient = realpathSync(clientPath);
+	} catch {
+		throw new BrokerVerificationError("Could not resolve the official Computer Use client path");
+	}
+	if (canonicalApp !== path.resolve(appPath) || canonicalClient !== path.resolve(clientPath) || !canonicalClient.startsWith(`${canonicalApp}${path.sep}`)) {
+		throw new BrokerVerificationError("Official Computer Use client path was not canonical");
+	}
+	verifySignedBinary(canonicalClient, runSync);
+	return { appPath: canonicalApp, clientPath: canonicalClient, layout };
+}
+
+/** Resolve only the two reviewed official layouts, preferring ChatGPT's current installed-component contract. */
+export function resolveOfficialComputerUseClient(options: ResolveOfficialComputerUseClientOptions = {}): OfficialComputerUseClient {
+	const runSync = options.runSync ?? productionRunSync;
+	const userHome = options.userHome ?? os.userInfo().homedir;
+	const canonicalUserHome = existsSync(userHome) ? realpathSync(userHome) : path.resolve(userHome);
+	const currentApp = path.join(canonicalUserHome, ".codex", COMPUTER_USE_APP_RELATIVE_PATH);
+	const current = checkedCandidate(currentApp, path.join(currentApp, CLIENT_RELATIVE_PATH), "installed-component", runSync);
+	if (current) return current;
+
+	const legacyRoot = options.legacyPluginRoot ?? COMPUTER_USE_PLUGIN_ROOT;
+	const canonicalLegacyRoot = existsSync(legacyRoot) ? realpathSync(legacyRoot) : path.resolve(legacyRoot);
+	const legacyApp = path.join(canonicalLegacyRoot, "Codex Computer Use.app");
+	const legacy = checkedCandidate(legacyApp, path.join(legacyApp, CLIENT_RELATIVE_PATH), "legacy-plugin-bundle", runSync);
+	if (legacy) return legacy;
+	throw new BrokerVerificationError("Official Computer Use client was not found in a supported location");
+}
+
+function clientBuild(appPath: string, runSync: RunSync): string {
+	const result = runSync("/usr/bin/plutil", ["-extract", "CFBundleVersion", "raw", path.join(appPath, "Contents", "Info.plist")]);
+	if (result.status !== 0 || !(result.stdout ?? "").toString().trim()) {
+		throw new BrokerVerificationError("Could not verify the official Computer Use client build");
+	}
+	return (result.stdout ?? "").toString().trim();
+}
+
+export function verifyOfficialDirectBroker(options: ResolveOfficialComputerUseClientOptions = {}): {
+	brokerVersion: string;
+	clientBuild: string;
+	client: OfficialComputerUseClient;
+} {
+	const runSync = options.runSync ?? productionRunSync;
+	verifySignedBinary(CODEX_PATH, runSync);
+	const client = resolveOfficialComputerUseClient({ ...options, runSync });
+	const version = runSync(CODEX_PATH, ["--version"]);
+	if (version.status !== 0 || !/^codex-cli\s+\d+\./.test((version.stdout ?? "").toString().trim())) {
 		throw new BrokerVerificationError("Could not verify the app-bundled Codex app-server version");
 	}
-	return { brokerVersion: (version.stdout ?? "").trim(), clientBuild: clientBuild() };
+	return { brokerVersion: (version.stdout ?? "").toString().trim(), clientBuild: clientBuild(client.appPath, runSync), client };
 }
 
 function buildBrokerEnv(codexHome: string, tempRoot: string): NodeJS.ProcessEnv {
@@ -162,8 +216,8 @@ function buildBrokerEnv(codexHome: string, tempRoot: string): NodeJS.ProcessEnv 
 	return env;
 }
 
-export function buildDirectAppServerArgs(mcpCwd = COMPUTER_USE_PLUGIN_ROOT): string[] {
-	const mcpTable = `{"computer-use" = { command = ${JSON.stringify(COMPUTER_USE_CLIENT_PATH)}, args = ["mcp"], cwd = ${JSON.stringify(mcpCwd)}, enabled = true, startup_timeout_sec = 30, tool_timeout_sec = 120 }}`;
+export function buildDirectAppServerArgs(mcpCwd = COMPUTER_USE_PLUGIN_ROOT, clientPath = COMPUTER_USE_CLIENT_PATH): string[] {
+	const mcpTable = `{"computer-use" = { command = ${JSON.stringify(clientPath)}, args = ["mcp"], cwd = ${JSON.stringify(mcpCwd)}, enabled = true, startup_timeout_sec = 30, tool_timeout_sec = 120 }}`;
 	const disabledProvider = '{ name = "Direct dispatch disabled provider", base_url = "http://127.0.0.1:9/v1", wire_api = "responses", request_max_retries = 0, stream_max_retries = 0, supports_websockets = false, requires_openai_auth = false }';
 	return [
 		"-c", 'model_provider="direct_disabled"',
@@ -430,7 +484,7 @@ export async function callOfficialDirectTool(
 ): Promise<DirectBrokerResult> {
 	const startedAt = Date.now();
 	const verification = options.skipSignatureVerification
-		? { brokerVersion: "test-app-server", clientBuild: "test-client" }
+		? { brokerVersion: "test-app-server", clientBuild: "test-client", client: undefined }
 		: verifyOfficialDirectBroker();
 	const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pi-direct-computer-use."));
 	const codexHome = path.join(tempRoot, "codex-home");
@@ -496,7 +550,7 @@ export async function callOfficialDirectTool(
 
 	try {
 		const command = options.appServerCommand ?? CODEX_PATH;
-		const commandArgs = options.appServerArgs ?? buildDirectAppServerArgs(workDir);
+		const commandArgs = options.appServerArgs ?? buildDirectAppServerArgs(workDir, verification.client!.clientPath);
 		proc = spawn(command, commandArgs, {
 			cwd: workDir,
 			detached: true,
@@ -606,7 +660,7 @@ export async function callOfficialDirectTool(
 		await request(
 			"initialize",
 			{
-				clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: "0.3.0" },
+				clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: "0.3.1" },
 				capabilities: { mcpServerOpenaiFormElicitation: options.supportsOpenAiFormElicitation === true && options.onElicitation !== undefined },
 			},
 			15_000,

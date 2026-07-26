@@ -94,7 +94,7 @@ nested prompts or result summaries
 
 | Released wrapper restriction | Classification | Direct design |
 |---|---|---|
-| Fixed ChatGPT/Codex/client paths | **official-required** | retained and verified |
+| Reviewed ChatGPT/Codex/client paths | **official-required** | current per-user installed-component contract plus exact legacy plugin layout; canonicalized and verified |
 | Strict signatures and OpenAI Team ID | **security-essential** | retained |
 | Signed-parent/responsible-process chain | **official-required** | retained through signed app-server |
 | Private Sky socket/native-pipe access | **unsupported/private** | prohibited |

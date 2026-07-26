@@ -18,8 +18,8 @@ This is direct tool dispatch—not model orchestration.
 
 ## Security invariants
 
-1. Only fixed app-bundled Codex and Computer Use client paths are allowed in production.
-2. Both binaries pass strict code-signature verification and OpenAI Team ID `2DC432GLL2` checks before dispatch.
+1. Only the fixed app-bundled Codex path and reviewed official Computer Use layouts are allowed in production. The current client is resolved from the OS account home under `~/.codex/computer-use/`; `HOME`, `CODEX_HOME`, arbitrary paths, and symlinked layouts are not accepted. The former exact plugin-bundle layout is considered only when the current component is absent.
+2. Both binaries pass strict code-signature verification and OpenAI Team ID `2DC432GLL2` checks before dispatch. A present current-layout client that fails verification never falls back.
 3. The helper's exact ten method names and input schemas match the pinned expected inventory before every call; release tests also verify its descriptions and annotations.
 4. `no-permissions` is the only wrapper policy: all ten methods are exposed and no wrapper permission prompt is opened.
 5. There is no config file, environment override, command, tool argument, per-call branch, or alternate safe/full route that an agent can select.
@@ -56,6 +56,6 @@ Computer Use returns the official app-state text and screenshots to the invoking
 
 ## Supported versions
 
-Only the latest approved release is supported. Version 0.3.0 supports direct local calls in an unlocked macOS session. Targeted local calls while the Mac is locked are not supported.
+Only the latest approved release is supported. Version 0.3.1 supports direct local calls in an unlocked macOS session. Targeted local calls while the Mac is locked are not supported.
 
 App-server is experimental and bundle paths or schemas can change. Drift fails closed until reviewed.

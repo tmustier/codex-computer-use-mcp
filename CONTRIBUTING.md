@@ -23,7 +23,7 @@ Development and live acceptance require macOS and the official ChatGPT Computer 
 - Add a regression test for every protocol, policy, focus, cleanup, or audit fix.
 - Never log or persist arguments, typed values, screenshots, app-state/result content, elicitation contents, prompts, credentials, or tokens.
 - Treat focus checks as post-action detection rather than preventive isolation.
-- Document fixed ChatGPT bundle paths and upstream schema/API assumptions.
+- Document reviewed ChatGPT component paths, launcher contracts, and upstream schema/API assumptions.
 - Include strict core/Pi type checks, tests, build, audit, package inspection, and real-app acceptance evidence.
 - Obtain independent exact-head review for security-boundary changes.
 

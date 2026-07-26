@@ -49,7 +49,9 @@ The public OpenAI source basis and permanent links are in `ARCHITECTURE.md`.
 Current branch tests cover:
 
 - strict TypeScript for core and Pi adapter;
-- fixed-path strict signature and Team ID checks;
+- current ChatGPT per-user component resolution plus exact legacy-layout compatibility;
+- missing, symlinked-path, invalid-signature, and wrong-Team-ID resolution failures, including no fallback from a present invalid current client;
+- strict signature and Team ID checks;
 - exact official ten-tool inventory/schema drift rejection before dispatch;
 - direct JSONL request sequence with no `turn/start`;
 - isolated credential-free `CODEX_HOME` even when the parent environment contains a model API key;

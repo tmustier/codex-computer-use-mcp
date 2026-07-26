@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import test from "node:test";
-import { COMPUTER_USE_CLIENT_PATH, verifyOfficialDirectBroker } from "../src/direct-broker.ts";
+import { verifyOfficialDirectBroker } from "../src/direct-broker.ts";
 import { EXPECTED_OFFICIAL_INPUT_SCHEMAS, OFFICIAL_METHODS, OFFICIAL_TOOL_METADATA } from "../src/tools.ts";
 
 function rpc(proc: ReturnType<typeof spawn>, id: number, method: string, params: unknown): Promise<any> {
@@ -32,7 +32,8 @@ test("official signed app-server broker and exact ten-tool helper inventory are 
 	const verified = verifyOfficialDirectBroker();
 	assert.match(verified.brokerVersion, /^codex-cli\s+\d+\./);
 	assert.match(verified.clientBuild, /^\d+$/);
-	const proc = spawn(COMPUTER_USE_CLIENT_PATH, ["mcp"], { stdio: ["pipe", "pipe", "ignore"] });
+	assert.equal(verified.client.layout, "installed-component");
+	const proc = spawn(verified.client.clientPath, ["mcp"], { stdio: ["pipe", "pipe", "ignore"] });
 	try {
 		const initialized = await rpc(proc, 1, "initialize", {
 			protocolVersion: "2025-11-25",
