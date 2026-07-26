@@ -1,6 +1,6 @@
 # Codex Computer Use MCP
 
-Version 0.3.0 exposes the official signed macOS Computer Use capabilities as direct typed tools for Pi and MCP clients. The calling agent chooses every tool and argument itself.
+Version 0.3.1 exposes the official signed macOS Computer Use capabilities as direct typed tools for Pi and MCP clients. The calling agent chooses every tool and argument itself.
 
 The primary path has:
 
@@ -12,7 +12,7 @@ The primary path has:
 
 It does use OpenAI's signed `codex app-server` as the official host for the bundled Computer Use MCP client. The current official `mcpServer/tool/call` API requires a loaded thread identifier, so the bridge creates an empty, in-memory, zero-turn context (`ephemeral: true`, `turns: []`, `path: null`). It never calls `turn/start` and fails closed if any `turn/*` or `item/*` model activity appears.
 
-> **Independent project.** This is not an OpenAI product and is not endorsed by OpenAI. The app-server API is marked experimental and fixed ChatGPT bundle paths may change.
+> **Independent project.** This is not an OpenAI product and is not endorsed by OpenAI. The app-server API is marked experimental and ChatGPT's reviewed component locations may change.
 
 ## Direct tools
 
@@ -69,22 +69,24 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for source links and the full restricti
 - Node.js 22 or newer
 - Pi 0.80.7 or newer for native progressive tool disclosure
 - official ChatGPT macOS app at `/Applications/ChatGPT.app`
-- official Computer Use component installed
+- official Computer Use component installed by ChatGPT under `~/.codex/computer-use/`
+
+The bridge follows ChatGPT's current launcher contract for `SkyComputerUseClient` under that per-user component directory. It does not honor `HOME`, `CODEX_HOME`, or an arbitrary path override when resolving the production client. The former exact app-in-plugin layout remains a strict compatibility candidate only when the current component is absent. Every selected client must be at a canonical reviewed path, pass strict code-signature verification, and carry OpenAI Team ID `2DC432GLL2`.
 
 The direct bridge starts app-server with a new private `CODEX_HOME` containing no account credentials and only one configured MCP server: official Computer Use. It does not inherit the user's Codex MCP servers, plugins, history, memories, API keys, or auth file. It selects a non-websocket dummy model provider bound to unreachable loopback, disables plugin/remote-control features, and never starts a turn; this prevents app-server model prewarm or Responses API traffic.
 
 ### Locked-screen limitation
 
-Version 0.3.0 supports direct local calls in an unlocked macOS session. It does not support window or accessibility actions after the Mac locks.
+Version 0.3.1 supports direct local calls in an unlocked macOS session. It does not support window or accessibility actions after the Mac locks.
 
-OpenAI's [locked Computer Use](https://developers.openai.com/codex/app/computer-use#use-computer-use-while-your-mac-is-locked) is limited to active, trusted ChatGPT turns started from a connected device. It does not authorize other apps or local processes to unlock the Mac. This package uses local zero-turn dispatch, so targeted calls can fail with official error `-10005` while the Mac is locked. Support for locked local use remains a follow-up and is not part of version 0.3.0.
+OpenAI's [locked Computer Use](https://developers.openai.com/codex/app/computer-use#use-computer-use-while-your-mac-is-locked) is limited to active, trusted ChatGPT turns started from a connected device. It does not authorize other apps or local processes to unlock the Mac. This package uses local zero-turn dispatch, so targeted calls can fail with official error `-10005` while the Mac is locked. Support for locked local use remains a follow-up and is not part of version 0.3.1.
 
 ## Pi integration
 
 Install the exact release from npm:
 
 ```bash
-pi install npm:codex-computer-use-mcp@0.3.0
+pi install npm:codex-computer-use-mcp@0.3.1
 ```
 
 To evaluate a source checkout instead:
