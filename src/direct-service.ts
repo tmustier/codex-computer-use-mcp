@@ -185,6 +185,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 	let frontBefore: string | undefined;
 	let targetBecameFrontmost = false;
 	let unrelatedFocusChanges = false;
+	let backgroundPreserved: boolean | null = null;
 	let broker: DirectBrokerResult | undefined;
 	let brokerFailure: DirectBrokerCallError | undefined;
 	let brokerDispatchAttempted = false;
@@ -197,18 +198,16 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 		if (identity) lock = await (deps.acquireLock ?? acquireAppLock)(globalAppLockRoot(), identity.leaseId, runId);
 		if (identity?.bundleId) {
 			frontBefore = (deps.frontmost ?? frontmostBundleId)();
-			if (!frontBefore) throw new DirectPolicyError("Could not observe the frontmost app before direct dispatch");
-			if (frontBefore.toLowerCase() === identity.bundleId.toLowerCase()) {
-				throw new DirectPolicyError("Target app is already frontmost; direct background-only dispatch was refused");
-			}
-			watcher = await (deps.watchFocus ?? watchTargetFrontmost)();
+			if (frontBefore?.toLowerCase() === identity.bundleId.toLowerCase()) targetBecameFrontmost = true;
+			try { watcher = await (deps.watchFocus ?? watchTargetFrontmost)(); }
+			catch { focusSamplingFailed = true; }
 			const sample = async (): Promise<void> => {
 				if (focusSample) return focusSample;
 				focusSample = (async () => {
 					const current = await (deps.frontmostAsync ?? frontmostBundleIdAsync)();
 					if (!current) return;
 					if (current.toLowerCase() === identity.bundleId!.toLowerCase()) targetBecameFrontmost = true;
-					else if (current !== frontBefore) unrelatedFocusChanges = true;
+					else if (frontBefore && current !== frontBefore) unrelatedFocusChanges = true;
 				})().finally(() => { focusSample = undefined; });
 				return focusSample;
 			};
@@ -279,12 +278,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			else if (frontAfter.toLowerCase() === identity.bundleId.toLowerCase()) targetBecameFrontmost = true;
 			else if (frontBefore && frontAfter !== frontBefore) unrelatedFocusChanges = true;
 		}
-		const backgroundPreserved = identity ? !targetBecameFrontmost && !watcherFailed : null;
-		if (identity && backgroundPreserved !== true && !thrown) {
-			outcome = "focus_violation";
-			thrown = new DirectPolicyError("Target focus changed or focus telemetry failed; the completed tool call is not trusted as background-safe");
-			response = undefined;
-		}
+		backgroundPreserved = identity ? !targetBecameFrontmost && !watcherFailed : null;
 		let releaseFailed = false;
 		try { await lock?.release(); } catch { releaseFailed = true; }
 		if (releaseFailed) {
@@ -321,7 +315,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 	}
 	if (thrown) throw thrown;
 	if (!response) throw new Error("Direct Computer Use ended without a result");
-	response.details.backgroundPreserved = identity ? true : null;
+	response.details.backgroundPreserved = backgroundPreserved;
 	response.details.unrelatedFocusChanges = unrelatedFocusChanges;
 	response.details.brokerCleanupVerified = brokerCleanupVerified;
 	return response;

@@ -1,6 +1,6 @@
 # Migration and rollback
 
-Version 0.2.0 was the breaking direct-tool architecture change from version 0.1.0. Version 0.3.0 added Pi progressive disclosure, version 0.3.1 followed ChatGPT's current per-user Computer Use component layout, version 0.3.2 restored one complete direct Pi surface with shared inspection-action session continuity, and version 0.3.3 adds macOS 27 compatibility. Use the relevant section below.
+Version 0.2.0 was the breaking direct-tool architecture change from version 0.1.0. Version 0.3.0 added Pi progressive disclosure, version 0.3.1 followed ChatGPT's current per-user Computer Use component layout, version 0.3.2 restored one complete direct Pi surface with shared inspection-action session continuity, version 0.3.3 added macOS 27 compatibility, and version 0.3.4 aligns focus behavior with native Computer Use. Use the relevant section below.
 
 ## What changes
 
@@ -102,11 +102,20 @@ The exact schemas, strict signature and OpenAI Team ID checks, canonical client 
 
 ## Upgrade from version 0.3.2 to 0.3.3
 
-Version 0.3.3 accepts both the legacy `CFBundleIdentifier` key and the macOS 27 `bundleID` key from `lsappinfo`. This prevents frontmost-app detection from rejecting official Computer Use dispatch on macOS 27. No configuration migration is required.
+Version 0.3.3 accepts both the legacy `CFBundleIdentifier` key and the macOS 27 `bundleID` key from `lsappinfo`.
 
 1. Verify that npm resolves `codex-computer-use-mcp@0.3.3` exactly, then install that exact package.
 2. Start a fresh Pi process so it loads the updated extension code.
 3. On an unlocked Mac, run `computer_use_get_app_state` against a benign background app and verify that the result succeeds without moving focus.
+
+## Upgrade from version 0.3.3 to 0.3.4
+
+Version 0.3.4 removes the legacy background-only focus gate. Calls now match native Computer Use when a target is already frontmost, changes focus, or focus telemetry is unavailable. Focus observations remain metadata-only telemetry. No configuration migration is required.
+
+1. Verify that npm resolves `codex-computer-use-mcp@0.3.4` exactly, then install that exact package.
+2. Start a fresh Pi process so it loads the updated extension code.
+3. On an unlocked Mac, make a benign app frontmost, then run `computer_use_get_app_state` followed by `computer_use_press_key` with `ESC` against that same app.
+4. Verify both calls succeed, `backgroundPreserved` records `false`, the pair uses one zero-turn ephemeral session, and cleanup completes.
 
 ## Rollback
 
@@ -122,4 +131,4 @@ Direct state can be removed only after rollback evidence is captured and no proc
 
 ## Generic MCP gateway
 
-If Pi uses `mcp.json`, retain `directTools: false`. Use the exact `0.3.3` package shown in `integrations/pi/mcp.json.example`. During source acceptance, use a distinct temporary server name and source path, then remove it. The direct Pi adapter is the primary live path; do not leave the version 0.1 aggregate server active after the switch.
+If Pi uses `mcp.json`, retain `directTools: false`. Use the exact `0.3.4` package shown in `integrations/pi/mcp.json.example`. During source acceptance, use a distinct temporary server name and source path, then remove it. The direct Pi adapter is the primary live path; do not leave the version 0.1 aggregate server active after the switch.

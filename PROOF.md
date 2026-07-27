@@ -66,7 +66,7 @@ Current branch tests cover:
 - unrestricted read and mutation dispatch under the single no-permissions policy;
 - absence of wrapper app/intent/action gates and permission prompts;
 - canonical bundle-ID dispatch;
-- target focus violation fail-closed behavior;
+- native-compatible focus behavior for already-frontmost targets, focus changes, and unavailable legacy telemetry;
 - official error preservation;
 - private metadata-only audits with no arguments/results and truthful separate broker/lease cleanup evidence;
 - secure audit-directory/file no-follow and mode checks;
@@ -79,6 +79,12 @@ Current branch tests cover:
 - Pi session-start registration and activation of all ten direct definitions while preserving unrelated active tools;
 - one retained broker/client session across `get_app_state` and the following action, with deterministic active-app lease continuity and verified close;
 - Pi form, opaque OpenAI-form, URL, decline, and headless-cancel elicitation handling.
+
+## Version 0.3.4 native focus compatibility
+
+Before the change, a live installed-path call targeting frontmost TextEdit was rejected with `Target app is already frontmost; direct background-only dispatch was refused`; the official broker was never called. The same signed official path accepted a state read when hosted by native ChatGPT, confirming the rejection was wrapper-only.
+
+After the change, a retained signed-client session targeted the app that was already frontmost and completed `get_app_state` followed by harmless `ESC`. Both audits recorded `outcome=ok`, `directCalls=1`, `modelTurnsStarted=0`, `ephemeralThread=true`, `backgroundPreserved=false`, and `appLeaseReleased=true`; cleanup was verified when the retained session closed after the action. No app-state text or screenshot was retained.
 
 ## Official Full access approval probe
 

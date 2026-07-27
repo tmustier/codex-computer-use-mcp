@@ -1,6 +1,6 @@
 # Codex Computer Use MCP
 
-Version 0.3.3 exposes the official signed macOS Computer Use capabilities as direct typed tools for Pi and MCP clients. The calling agent chooses every tool and argument itself.
+Version 0.3.4 exposes the official signed macOS Computer Use capabilities as direct typed tools for Pi and MCP clients. The calling agent chooses every tool and argument itself.
 
 The primary path has:
 
@@ -77,16 +77,16 @@ The direct bridge starts app-server with a new private `CODEX_HOME` containing n
 
 ### Locked-screen limitation
 
-Version 0.3.3 supports direct local calls in an unlocked macOS session. It does not support window or accessibility actions after the Mac locks.
+Version 0.3.4 supports direct local calls in an unlocked macOS session. It does not support window or accessibility actions after the Mac locks.
 
-OpenAI's [locked Computer Use](https://developers.openai.com/codex/app/computer-use#use-computer-use-while-your-mac-is-locked) is limited to active, trusted ChatGPT turns started from a connected device. It does not authorize other apps or local processes to unlock the Mac. This package uses local zero-turn dispatch, so targeted calls can fail with official error `-10005` while the Mac is locked. Support for locked local use remains a follow-up and is not part of version 0.3.3.
+OpenAI's [locked Computer Use](https://developers.openai.com/codex/app/computer-use#use-computer-use-while-your-mac-is-locked) is limited to active, trusted ChatGPT turns started from a connected device. It does not authorize other apps or local processes to unlock the Mac. This package uses local zero-turn dispatch, so targeted calls can fail with official error `-10005` while the Mac is locked. Support for locked local use remains a follow-up and is not part of version 0.3.4.
 
 ## Pi integration
 
 Install the exact release from npm:
 
 ```bash
-pi install npm:codex-computer-use-mcp@0.3.3
+pi install npm:codex-computer-use-mcp@0.3.4
 ```
 
 To evaluate a source checkout instead:
@@ -148,7 +148,7 @@ For the current released implementation, each call:
 11. rejects any model-turn notification, including during teardown;
 12. combines partial-preserving ancestry enumeration with private-working-directory ownership recovery, then freezes, terminates, and verifies the app-server plus separately grouped or reparented helpers; finally it removes temporary state, releases the lock, and writes a content-safe audit with separate broker/lease cleanup evidence.
 
-Focus telemetry is legacy completion behavior from the earlier background-computer-use wrapper. It does not provide an official Codex access control or a preventive macOS sandbox. The current release reports the call as failed if the target becomes frontmost. An individual official action may already have completed. Do not use this telemetry as a reason to add further defensive policy.
+Focus telemetry is legacy observational behavior from the earlier background-computer-use wrapper. It does not provide an official Codex access control or a preventive macOS sandbox. Matching native Computer Use, the wrapper permits calls when the target is already frontmost and does not convert a completed official call into an error when focus changes or telemetry is unavailable. `backgroundPreserved` records the observation without gating the result. Do not use this telemetry as a reason to add further defensive policy.
 
 Tool results may contain visible target-app text or screenshots because that is the purpose of Computer Use. They return only to the invoking Pi/MCP client. Audits never retain arguments, typed values, screenshots, app-state payloads, result text, prompts, credentials, or tokens—only bounded metadata such as method, canonical/hashed app identity, byte counts, content types, outcome, focus, broker version, and zero-turn evidence.
 

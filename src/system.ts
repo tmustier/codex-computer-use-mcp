@@ -11,9 +11,7 @@ const execFileAsync = promisify(execFile);
  * Upstream API assumption: LaunchServices changed the emitted key across macOS
  * releases. macOS <= 26 prints `"CFBundleIdentifier"="com.example"`; macOS 27+
  * (Darwin 27) prints `bundleID="com.example"` and drops `CFBundleIdentifier`.
- * Accept both spellings so frontmost detection survives the rename; otherwise
- * `frontmostBundleId()` returns `undefined` and every direct dispatch throws
- * "Could not observe the frontmost app" before reaching the broker.
+ * Accept both spellings so retained focus telemetry survives the rename.
  */
 export function parseLsappinfoBundleId(stdout: string): string | undefined {
 	return stdout.match(/(?:"CFBundleIdentifier"|bundleID)="([^"]+)"/)?.[1];

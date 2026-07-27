@@ -138,18 +138,38 @@ test("no-permissions has no wrapper app, intent, or action gate", async () => {
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("focus telemetry fails closed after a completed direct action", async () => {
+test("an already-frontmost target dispatches like native Computer Use", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-frontmost-test."));
+	let dispatched = false;
+	try {
+		const testDeps = deps(root, async () => { dispatched = true; return brokerResult("pressed"); });
+		testDeps.frontmost = () => "com.apple.TextEdit";
+		testDeps.frontmostAsync = async () => "com.apple.TextEdit";
+		const response = await executeDirectTool(
+			{ method: "press_key", arguments: { app: "TextEdit", key: "ESC" } },
+			testDeps,
+		);
+		assert.equal(response.ok, true);
+		assert.equal(dispatched, true);
+		assert.equal(response.details.backgroundPreserved, false);
+		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
+		assert.equal(audit.outcome, "ok");
+		assert.equal(audit.backgroundPreserved, false);
+		assert.equal(audit.directCalls, 1);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("focus changes remain non-blocking telemetry after a completed direct action", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-focus-test."));
 	try {
-		await assert.rejects(
-			executeDirectTool(
-				{ method: "press_key", arguments: { app: "TextEdit", key: "ESC" } },
-				deps(root, async () => brokerResult("pressed"), true),
-			),
-			/background-safe/,
+		const response = await executeDirectTool(
+			{ method: "press_key", arguments: { app: "TextEdit", key: "ESC" } },
+			deps(root, async () => brokerResult("pressed"), true),
 		);
+		assert.equal(response.ok, true);
+		assert.equal(response.details.backgroundPreserved, false);
 		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
-		assert.equal(audit.outcome, "focus_violation");
+		assert.equal(audit.outcome, "ok");
 		assert.equal(audit.backgroundPreserved, false);
 		assert.equal(audit.directCalls, 1);
 	} finally { await rm(root, { recursive: true, force: true }); }
@@ -184,24 +204,26 @@ test("broker failures preserve content-safe architecture evidence in audit", asy
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("asynchronous focus sampling failures are handled and fail closed", async () => {
+test("focus telemetry failures do not block native-compatible dispatch", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-sample-test."));
 	try {
 		const testDeps = deps(root, async () => {
 			await new Promise((resolve) => setTimeout(resolve, 150));
 			return brokerResult("pressed");
 		});
+		testDeps.frontmost = () => undefined;
 		testDeps.frontmostAsync = async () => { throw new Error("sample failed"); };
-		await assert.rejects(
-			executeDirectTool(
-				{ method: "press_key", arguments: { app: "TextEdit", key: "ESC" } },
-				testDeps,
-			),
-			/background-safe/,
+		testDeps.watchFocus = async () => { throw new Error("watcher failed"); };
+		const response = await executeDirectTool(
+			{ method: "press_key", arguments: { app: "TextEdit", key: "ESC" } },
+			testDeps,
 		);
+		assert.equal(response.ok, true);
+		assert.equal(response.details.backgroundPreserved, false);
 		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
-		assert.equal(audit.outcome, "focus_violation");
+		assert.equal(audit.outcome, "ok");
 		assert.equal(audit.backgroundPreserved, false);
+		assert.equal(audit.directCalls, 1);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
