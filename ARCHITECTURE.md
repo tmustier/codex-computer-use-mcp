@@ -61,7 +61,7 @@ The relevant construction difference is the macOS responsible-process chain:
 - unsupported: ad-hoc/no-Team-ID Node parent → signed helper;
 - supported: Node/Pi → strict-valid OpenAI-signed app-bundled Codex (`2DC432GLL2`) → strict-valid OpenAI-signed helper (`2DC432GLL2`).
 
-Process sampling confirmed the helper children were direct descendants of signed app-server; helper processes may create their own process groups. App-server and helper therefore share one private per-call cwd. Cleanup preserves partial ancestry results, recovers any reparented process by that unique cwd, freezes the owned set to stability, then kills and verifies every process rather than assuming one PGID. Enumeration, freeze, or exit uncertainty fails cleanup closed. The app-server has the expected sandbox/application-group entitlement keys; the helper has OpenAI application/team identifiers, application groups, and keychain-access-group entitlements. Ordinary Node has no Team ID or entitlement set. The service's peer audit token is not exposed through the supported MCP layer. No private socket inspection, identity spoofing, copied signing material, re-signing, injection, or TCC change was attempted. The remaining enforcement boundary is therefore OS peer/responsible-process identity, not a missing public JSON field.
+Process sampling confirmed the helper children were direct descendants of signed app-server; helper processes may create their own process groups. App-server and helper therefore share one private broker-session cwd. One-shot MCP calls close that session after the call; Pi retains it only across the required `get_app_state` and following action. Cleanup preserves partial ancestry results, recovers any reparented process by that unique cwd, freezes the owned set to stability, then kills and verifies every process rather than assuming one PGID. Enumeration, freeze, or exit uncertainty fails cleanup closed. The app-server has the expected sandbox/application-group entitlement keys; the helper has OpenAI application/team identifiers, application groups, and keychain-access-group entitlements. Ordinary Node has no Team ID or entitlement set. The service's peer audit token is not exposed through the supported MCP layer. No private socket inspection, identity spoofing, copied signing material, re-signing, injection, or TCC change was attempted. The remaining enforcement boundary is therefore OS peer/responsible-process identity, not a missing public JSON field.
 
 Command, environment, cwd, and config differences were also isolated: both paths invoke the same signed helper with `mcp`; the accepted path gives it a signed parent plus a private fixed cwd/config environment. Matching public MCP fields did not alter the raw error, while the signed-parent path succeeds without model credentials.
 
@@ -119,7 +119,7 @@ nested prompts or result summaries
 | Automatic background app launch | **accidental** | removed; the official tool owns app behavior |
 | Global focus watcher and final sample | **security-essential detection** | retained |
 | Timeout/cancellation process-tree termination | **security-essential** | retained with strict enumeration, freeze, kill, stdio-close, and exit verification |
-| Per-call temporary worker cleanup | **security-essential** | retained with isolated `CODEX_HOME` |
+| Temporary broker-session cleanup | **security-essential** | retained with isolated `CODEX_HOME`; Pi closes after the inspection-action pair, replacement inspection, or session shutdown |
 | Codex token usage accounting | **compatibility-only** | removed; no model turn exists |
 | Content-safe private audit | **security-essential** | retained with direct-call fields |
 | Full-result spill files | **unsafe/accidental** | prohibited; truncation is in-memory only |
@@ -133,11 +133,13 @@ App-server is created with `approvalPolicy: "never"` and `sandbox: "danger-full-
 
 The broker still handles any `mcpServer/elicitation/request` that app-server emits. Pi advertises OpenAI-form support and renders emitted form, OpenAI-form, and URL requests. Generic stdio MCP forwards supported standard modes as `elicitation/create`. The response path preserves `accept`, `decline`, `cancel`, structured content, and response metadata; no callback or compatible UI yields `cancel`, never an invented decision.
 
-## Pi tool disclosure boundary
+## Pi tool and session boundary
 
-The Pi extension registers all ten official definitions. On `session_start` it preserves active tools owned by Pi and other extensions, keeps `computer_use_list_apps` and `computer_use_get_app_state` active, and removes only the eight Computer Use interaction definitions from the initial active set. After a successful `get_app_state` result, it additively activates those eight definitions without removing any currently active tool.
+The Pi extension registers and activates all ten official definitions on `session_start`, additively preserving active tools owned by Pi and other extensions. Keeping inspection and interaction methods on the same direct surface avoids provider-bound tool discovery creating a second, incompatible client binding.
 
-This is context disclosure, not a wrapper permission gate. The schemas, execution path, and no-permissions policy do not change. Loader and interaction definitions remain registered throughout the session. The interaction definitions omit `promptSnippet` and `promptGuidelines`, allowing Pi 0.80.7's native deferred-loading representation to add schemas at the tool-result position without changing the system-prompt prefix. Providers without native support use Pi's next-request fallback.
+For `get_app_state`, Pi starts one verified zero-turn app-server runtime and signed Computer Use client. The following direct interaction is serialized through that same runtime and thread, preserving the official active-app lease. The retained process tree is closed and verified after the action, before a replacement inspection, or during `session_shutdown`. One-shot MCP calls still start and close a broker session within the call. Exact inventory and schemas are revalidated before every dispatch in either path.
+
+This lifecycle changes neither the schemas nor the no-permissions policy. Interaction definitions omit extra `promptSnippet` and `promptGuidelines` metadata and rely on their official descriptions.
 
 ## Output boundary
 

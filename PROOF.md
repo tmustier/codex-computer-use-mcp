@@ -76,8 +76,8 @@ Current branch tests cover:
 - signed app-server elicitation forwarding, exact user responses, headless cancellation, and cancellation while a UI callback is pending;
 - standard form/URL forwarding across a real MCP SDK client/server transport;
 - Pi source registration for every direct capability with no nested planner, permission command, or wrapper-generated approval UI;
-- Pi session-start disclosure of only the two inspection definitions while preserving unrelated active tools;
-- purely additive activation of all eight interaction definitions after successful `get_app_state`, with no lazy-tool prompt metadata;
+- Pi session-start registration and activation of all ten direct definitions while preserving unrelated active tools;
+- one retained broker/client session across `get_app_state` and the following action, with deterministic active-app lease continuity and verified close;
 - Pi form, opaque OpenAI-form, URL, decline, and headless-cancel elicitation handling.
 
 ## Official Full access approval probe
@@ -119,7 +119,10 @@ Evidence:
 
 Earlier exploratory attempts exposed and fixed two acceptance-quality issues rather than being counted as proof: common `CMD+A` needed normalization to the official `Meta_L+a` key form, and TextEdit state restoration had to be reset before a fresh run. The final evidence above is from the corrected direct path.
 
-## Pi 0.80.7 progressive-disclosure measurement
+## Historical Pi 0.80.7 progressive-disclosure measurement
+
+This measurement describes version 0.3.0 and 0.3.1. Version 0.3.2 intentionally supersedes progressive disclosure because it could leave direct interaction tools absent or make a provider-discovered interaction use a different client from direct `get_app_state`.
+
 
 A fresh Pi 0.80.7 process loaded only the source Computer Use extension plus a read-only observer. All ten definitions were registered. The initial active Computer Use set was exactly:
 
@@ -130,7 +133,7 @@ Serializing names, descriptions, schemas, and prompt guidelines measured 6,063 b
 
 A second fresh process exercised the exported activation path from inside a tool execution. Pi's tool result recorded the exact eight interaction names in `addedToolNames`; the before/after active sets retained both inspection tools and removed zero tools. The lazily activated definitions had no `promptSnippet` or `promptGuidelines`.
 
-With `openai-codex/gpt-5.6-sol`, the first request reported 5,723 uncached input tokens. The immediately following request after additive activation reported 1,008 uncached input tokens and 5,632 cache-read tokens. This is live provider evidence that the initial prefix remained reusable while Pi inserted the eight definitions at the tool-result load point. The activation probe used the same `activateInteractionTools` function called after a successful production `get_app_state`; automated tests bind that successful-result branch and exact additive set.
+With `openai-codex/gpt-5.6-sol`, the first request reported 5,723 uncached input tokens. The immediately following request after additive activation reported 1,008 uncached input tokens and 5,632 cache-read tokens. This was live provider evidence that the initial prefix remained reusable while Pi inserted the eight definitions at the tool-result load point. Version 0.3.2 removes that activation path in favor of complete direct registration and signed-client session continuity.
 
 ## Review and release status
 

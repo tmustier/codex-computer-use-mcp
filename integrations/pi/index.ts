@@ -4,9 +4,11 @@ import { getAgentDir, truncateHead, type ExtensionAPI } from "@earendil-works/pi
 import { Text } from "@earendil-works/pi-tui";
 import { Type, type TSchema } from "typebox";
 import { executeDirectTool, getDirectStatus } from "../../dist/direct-service.js";
-import type {
-  DirectBrokerElicitationRequest,
-  DirectBrokerElicitationResponse,
+import {
+  createOfficialDirectToolSession,
+  type DirectBrokerElicitationRequest,
+  type DirectBrokerElicitationResponse,
+  type OfficialDirectToolSession,
 } from "../../dist/direct-broker.js";
 import { OFFICIAL_TOOL_METADATA, type DirectMethod } from "../../dist/tools.js";
 
@@ -82,15 +84,94 @@ export const INTERACTION_TOOL_NAMES = [
   "computer_use_type_text",
 ] as const;
 
+export const COMPUTER_USE_TOOL_NAMES = [
+  ...INSPECTION_TOOL_NAMES,
+  ...INTERACTION_TOOL_NAMES,
+] as const;
+
 export function setInitialComputerUseTools(pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">): void {
-  const interactionTools = new Set<string>(INTERACTION_TOOL_NAMES);
-  const preserved = pi.getActiveTools().filter((name) => !interactionTools.has(name));
-  pi.setActiveTools([...new Set([...preserved, ...INSPECTION_TOOL_NAMES])]);
+  pi.setActiveTools([...new Set([...pi.getActiveTools(), ...COMPUTER_USE_TOOL_NAMES])]);
 }
 
-export function activateInteractionTools(pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">): void {
-  const active = pi.getActiveTools();
-  pi.setActiveTools([...new Set([...active, ...INTERACTION_TOOL_NAMES])]);
+interface SessionExecutorDependencies {
+  createSession?: typeof createOfficialDirectToolSession;
+  executeTool?: typeof executeDirectTool;
+}
+
+/** Keep the signed app-server/client alive across the required state -> action pair. */
+export class PiDirectSessionExecutor {
+  private session: OfficialDirectToolSession | undefined;
+  private queue: Promise<void> = Promise.resolve();
+  private readonly dependencies: SessionExecutorDependencies;
+
+  constructor(dependencies: SessionExecutorDependencies = {}) {
+    this.dependencies = dependencies;
+  }
+
+  private async closeSession(): Promise<void> {
+    const session = this.session;
+    this.session = undefined;
+    await session?.close();
+  }
+
+  async execute(
+    method: DirectMethod,
+    params: Record<string, unknown>,
+    dependencies: Parameters<typeof executeDirectTool>[1],
+  ): Promise<Awaited<ReturnType<typeof executeDirectTool>>> {
+    const previous = this.queue;
+    let release!: () => void;
+    this.queue = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      const executeTool = this.dependencies.executeTool ?? executeDirectTool;
+      if (method === "list_apps") return await executeTool({ method, arguments: params }, dependencies);
+      if (method === "get_app_state") {
+        await this.closeSession();
+        const createSession = this.dependencies.createSession ?? createOfficialDirectToolSession;
+        try {
+          const response = await executeTool(
+            { method, arguments: params },
+            {
+              ...dependencies,
+              callTool: async (directMethod, args, options) => {
+                this.session = await createSession({ supportsOpenAiFormElicitation: true });
+                return this.session.call(directMethod, args, options);
+              },
+            },
+          );
+          if (response.isError) await this.closeSession();
+          return response;
+        } catch (error) {
+          await this.closeSession();
+          throw error;
+        }
+      }
+      const session = this.session;
+      try {
+        return await executeTool(
+          { method, arguments: params },
+          session ? {
+            ...dependencies,
+            callTool: async (directMethod, args, options) => {
+              const result = await session.call(directMethod, args, options);
+              await this.closeSession();
+              return { ...result, brokerCleanupVerified: true };
+            },
+          } : dependencies,
+        );
+      } finally {
+        await this.closeSession();
+      }
+    } finally {
+      release();
+    }
+  }
+
+  async close(): Promise<void> {
+    await this.queue;
+    await this.closeSession();
+  }
 }
 
 function toPiContent(content: Array<Record<string, unknown>>): Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> {
@@ -188,6 +269,7 @@ export async function handleOfficialElicitation(
 
 export default function directComputerUse(pi: ExtensionAPI) {
   const stateRoot = process.env.CODEX_COMPUTER_USE_HOME || path.join(getAgentDir(), "direct-computer-use");
+  const sessionExecutor = new PiDirectSessionExecutor();
 
   pi.registerCommand("computer-use-status", {
     description: "Show the direct-call architecture, durable no-permissions policy, signed broker, and private audit path",
@@ -214,8 +296,9 @@ export default function directComputerUse(pi: ExtensionAPI) {
       ...inspectionPromptMetadata,
       parameters: ToolParameters[method] as any,
       async execute(_toolCallId, params, signal, onUpdate, ctx) {
-        const response = await executeDirectTool(
-          { method, arguments: params as Record<string, unknown> },
+        const response = await sessionExecutor.execute(
+          method,
+          params as Record<string, unknown>,
           {
             stateRoot,
             signal,
@@ -232,7 +315,6 @@ export default function directComputerUse(pi: ExtensionAPI) {
           },
         );
         if (response.isError) throw new Error(errorText(response.content));
-        if (method === "get_app_state") activateInteractionTools(pi);
         return { content: toPiContent(response.content), details: response.details };
       },
       renderCall(args, theme) {
@@ -244,4 +326,5 @@ export default function directComputerUse(pi: ExtensionAPI) {
   }
 
   pi.on("session_start", () => setInitialComputerUseTools(pi));
+  pi.on("session_shutdown", () => sessionExecutor.close());
 }

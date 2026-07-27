@@ -1,6 +1,6 @@
 # Codex Computer Use MCP
 
-Version 0.3.1 exposes the official signed macOS Computer Use capabilities as direct typed tools for Pi and MCP clients. The calling agent chooses every tool and argument itself.
+Version 0.3.2 exposes the official signed macOS Computer Use capabilities as direct typed tools for Pi and MCP clients. The calling agent chooses every tool and argument itself.
 
 The primary path has:
 
@@ -33,9 +33,9 @@ Pi registers namespaced tools to avoid collisions with Pi's built-ins. The MCP s
 
 The MCP façade preserves the official signed helper's tool descriptions, input schemas, and annotations exactly. The Pi façade preserves its descriptions and input schemas; Pi's tool API does not expose MCP annotations. In particular, all ten MCP methods have `destructiveHint: false`; the wrapper does not conflate changing UI state with destructive behavior or add argument restrictions absent from the official schemas.
 
-Pi 0.80.7 and newer registers all ten definitions but initially activates only `computer_use_list_apps` and `computer_use_get_app_state`. A successful `get_app_state` call additively activates the eight interaction definitions for the following model request. Other active Pi and extension tools remain active. The lazily activated tools omit `promptSnippet` and `promptGuidelines`, allowing Pi's native deferred-loading path to preserve the stable system-prompt prefix.
+Pi registers and activates all ten definitions together in every fresh session, while preserving active tools owned by Pi and other extensions. This prevents interaction methods from being absent or loaded through an incompatible provider binding.
 
-As the official contract specifies, Pi—not a nested planner—calls `computer_use_get_app_state` once per assistant turn before interacting with an app, then chooses and executes actions itself.
+As the official contract specifies, Pi—not a nested planner—calls `computer_use_get_app_state` once per assistant turn before interacting with an app, then chooses and executes actions itself. The adapter retains one verified app-server runtime and signed Computer Use client for that inspection-action pair, so the action reuses the official active-app session established by `get_app_state`. It closes and verifies the retained process tree after the action, when a new inspection supersedes it, or on Pi session shutdown.
 
 ## Authorization policy: durable no-permissions
 
@@ -67,7 +67,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for source links and the full restricti
 
 - macOS
 - Node.js 22 or newer
-- Pi 0.80.7 or newer for native progressive tool disclosure
+- Pi 0.80.7 or newer
 - official ChatGPT macOS app at `/Applications/ChatGPT.app`
 - official Computer Use component installed by ChatGPT under `~/.codex/computer-use/`
 
@@ -77,16 +77,16 @@ The direct bridge starts app-server with a new private `CODEX_HOME` containing n
 
 ### Locked-screen limitation
 
-Version 0.3.1 supports direct local calls in an unlocked macOS session. It does not support window or accessibility actions after the Mac locks.
+Version 0.3.2 supports direct local calls in an unlocked macOS session. It does not support window or accessibility actions after the Mac locks.
 
-OpenAI's [locked Computer Use](https://developers.openai.com/codex/app/computer-use#use-computer-use-while-your-mac-is-locked) is limited to active, trusted ChatGPT turns started from a connected device. It does not authorize other apps or local processes to unlock the Mac. This package uses local zero-turn dispatch, so targeted calls can fail with official error `-10005` while the Mac is locked. Support for locked local use remains a follow-up and is not part of version 0.3.1.
+OpenAI's [locked Computer Use](https://developers.openai.com/codex/app/computer-use#use-computer-use-while-your-mac-is-locked) is limited to active, trusted ChatGPT turns started from a connected device. It does not authorize other apps or local processes to unlock the Mac. This package uses local zero-turn dispatch, so targeted calls can fail with official error `-10005` while the Mac is locked. Support for locked local use remains a follow-up and is not part of version 0.3.2.
 
 ## Pi integration
 
 Install the exact release from npm:
 
 ```bash
-pi install npm:codex-computer-use-mcp@0.3.1
+pi install npm:codex-computer-use-mcp@0.3.2
 ```
 
 To evaluate a source checkout instead:
@@ -103,7 +103,7 @@ Command:
 /computer-use-status
 ```
 
-The native Pi adapter is the primary product path. It registers all ten typed tools directly, starts each session with the two inspection tools active, and additively activates the eight interaction tools after successful app inspection. It exposes no mode-changing command or wrapper-generated approval UI. Official app-access approval elicitations are resolved by Codex Full access before they reach Pi. Any elicitation that app-server does emit is shown through Pi's UI, and only the user's choice is returned to the service.
+The native Pi adapter is the primary product path. It registers and activates all ten typed tools directly, and routes the required `get_app_state` and following action through one retained signed-client session. It exposes no mode-changing command or wrapper-generated approval UI. Official app-access approval elicitations are resolved by Codex Full access before they reach Pi. Any elicitation that app-server does emit is shown through Pi's UI, and only the user's choice is returned to the service.
 
 ## MCP server
 
