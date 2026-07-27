@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { buildDirectAppServerArgs, callOfficialDirectTool } from "../src/direct-broker.ts";
+import { buildDirectAppServerArgs, callOfficialDirectTool, createOfficialDirectToolSession } from "../src/direct-broker.ts";
 import { EXPECTED_OFFICIAL_INPUT_SCHEMAS, OFFICIAL_METHODS } from "../src/tools.ts";
 
 async function makeFake(root: string): Promise<{ script: string; log: string }> {
@@ -18,7 +18,7 @@ import { createInterface } from "node:readline";
 const log=${JSON.stringify(log)}; const mode=process.argv[2]||"ok"; const inventory=${JSON.stringify(inventory)};
 const send=x=>process.stdout.write(JSON.stringify(x)+"\\n");
 const rl=createInterface({input:process.stdin});
-let pendingTool;
+let pendingTool; let activeApp;
 if(mode==="child-hang"||mode==="orphan-exit"){const child=spawn(process.execPath,["-e","process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{detached:true,stdio:"ignore"});child.unref();appendFileSync(log,JSON.stringify({childPid:child.pid})+"\\n");if(mode==="orphan-exit")process.exit(0);}
 rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify({method:m.method,id:m.id,params:m.params,result:m.result,codexHome:process.env.CODEX_HOME,home:process.env.HOME,tmpdir:process.env.TMPDIR,hasOpenAIKey:Boolean(process.env.OPENAI_API_KEY)})+"\\n");
  if(m.method==="initialize"){if(mode==="oversized-line"){process.stdout.write("x".repeat(${8 * 1024 * 1024 + 1}));return;} return send({id:m.id,result:{userAgent:"fake",platformFamily:"unix",platformOs:"macos"}});}
@@ -27,6 +27,11 @@ rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify(
  if(m.method==="mcpServerStatus/list"){const tools=JSON.parse(JSON.stringify(inventory)); if(mode==="schema-drift")tools.list_apps.inputSchema.properties={drift:{type:"string"}}; send({id:m.id,result:{data:[{name:"computer-use",tools}]}});if(mode==="close-before-tool"){process.stdin.destroy();setTimeout(()=>process.exit(0),100);}return;}
  if(m.method==="mcpServer/tool/call"){
    if(mode==="hang"||mode==="child-hang") return;
+   if(mode==="lease"){
+     if(m.params.tool==="get_app_state") activeApp=m.params.arguments.app;
+     else if(activeApp!==m.params.arguments.app) return send({id:m.id,result:{content:[{type:"text",text:"Computer Use is not active"}],isError:true}});
+     return send({id:m.id,result:{content:[{type:"text",text:m.params.tool+":"+activeApp}],isError:false}});
+   }
    if(mode==="elicit"){pendingTool=m.id; return send({id:"elicitation-1",method:"mcpServer/elicitation/request",params:{mode:"form",message:"Choose access",serverName:"computer-use",requestedSchema:{type:"object",properties:{choice:{type:"string",enum:["allow","deny"]}},required:["choice"]},_meta:{source:"official-test"}}});}
    if(mode==="late-model-event"){send({id:m.id,result:{content:[{type:"text",text:"direct-ok"}],isError:false}});return send({method:"turn/started",params:{late:true}});}
    return send({id:m.id,result:{content:[{type:"text",text:"direct-ok"}],isError:false}});
@@ -83,6 +88,24 @@ test("direct broker uses only zero-turn app-server MCP methods and an isolated c
 	}
 });
 
+test("one broker session preserves the official active-app lease across inspection and action", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-lease-test."));
+	try {
+		const { script, log } = await makeFake(root);
+		const session = await createOfficialDirectToolSession(options(script, "lease"));
+		try {
+			const state = await session.call("get_app_state", { app: "com.google.Chrome" });
+			const action = await session.call("press_key", { app: "com.google.Chrome", key: "Escape" });
+			assert.equal(state.content[0].text, "get_app_state:com.google.Chrome");
+			assert.equal(action.content[0].text, "press_key:com.google.Chrome");
+		} finally { await session.close(); }
+		const records = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+		assert.equal(records.filter((item) => item.method === "initialize").length, 1);
+		assert.equal(records.filter((item) => item.method === "thread/start").length, 1);
+		assert.equal(records.filter((item) => item.method === "mcpServer/tool/call").length, 2);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("direct broker rejects upstream schema drift before tool dispatch", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-drift-test."));
 	try {
@@ -93,6 +116,22 @@ test("direct broker rejects upstream schema drift before tool dispatch", async (
 		);
 		const methods = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line).method);
 		assert.equal(methods.includes("mcpServer/tool/call"), false);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("one-shot wrapper preserves a setup-phase cleanup failure", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-setup-cleanup-test."));
+	try {
+		const { script } = await makeFake(root);
+		let observed: unknown;
+		try {
+			await callOfficialDirectTool("list_apps", {}, {
+				...options(script, "schema-drift"),
+				processEnumeratorCommand: path.join(root, "missing-enumerator"),
+			});
+		} catch (error) { observed = error; }
+		assert.match((observed as Error)?.message ?? "", /cleanup failed/);
+		assert.equal((observed as any)?.cleanupVerified, false);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 

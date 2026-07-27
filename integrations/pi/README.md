@@ -1,6 +1,6 @@
 # Pi integration
 
-The native Pi adapter is the primary 0.3 path. It registers ten namespaced typed tools so Pi itself chooses each official Computer Use method and argument. Pi 0.80.7 or newer exposes them progressively without changing the ten-tool contract.
+The native Pi adapter is the primary 0.3 path. It registers and activates ten namespaced typed tools together so Pi itself chooses each official Computer Use method and argument.
 
 ## Source checkout acceptance
 
@@ -13,23 +13,20 @@ CODEX_COMPUTER_USE_HOME="$(mktemp -d)" \
 
 `-ne` prevents an installed 0.1 adapter from loading at the same time. This source workflow does not install or switch live Pi configuration.
 
-For normal installation, use the exact version 0.3.1 npm package:
+For normal installation, use the exact version 0.3.2 npm package:
 
 ```bash
-pi install npm:codex-computer-use-mcp@0.3.1
+pi install npm:codex-computer-use-mcp@0.3.2
 ```
 
 Use the source workflow only when you need to test an exact reviewed commit. Follow the rollback procedure in `MIGRATION.md` when replacing version 0.1.
 
 ## Registered surface
 
-Initially active:
+All ten tools are registered and active from session start:
 
 - `computer_use_list_apps`
 - `computer_use_get_app_state`
-
-Registered and activated after a successful `get_app_state` call:
-
 - `computer_use_click`
 - `computer_use_perform_secondary_action`
 - `computer_use_set_value`
@@ -43,13 +40,15 @@ Command:
 
 - `/computer-use-status`
 
-The session-start narrowing preserves every active tool owned by Pi or another extension. Activation after inspection is purely additive: both inspection tools remain active, and the adapter does not remove or replace any tool in that call. The lazily activated tools rely on their official descriptions and omit `promptSnippet` and `promptGuidelines`, so native deferred schema loading does not rebuild the system prompt. Supported Anthropic and OpenAI models receive the definitions at the inspection result; other models receive Pi's normal active-tool fallback on the next request.
+Session-start activation is purely additive and preserves every active tool owned by Pi or another extension. The interaction definitions rely on their official descriptions and omit extra prompt metadata.
+
+A successful `get_app_state` retains its verified app-server runtime, thread, and signed Computer Use client. The following direct interaction uses that same client and official active-app lease, then closes the retained process tree with strict cleanup verification. A new inspection replaces and closes any earlier retained session; Pi `session_shutdown` also closes it.
 
 No-permissions is the only policy: all ten tools are registered and available through this lifecycle with no wrapper permission prompts, mode selector, or app/intent/action gate. The signed host runs with Codex Full access (`approvalPolicy: "never"`, `sandbox: "danger-full-access"`), so normal empty-schema Computer Use app approvals are accepted by Codex before they reach Pi. Pi renders any form, OpenAI-form, or URL elicitation app-server does emit. The user's `accept`, `decline`, or `cancel` response is returned unchanged; the adapter never fabricates one.
 
 ## Generic MCP gateway
 
-Merge `mcp.json.example` only for the exact 0.3.1 package or after building an exact reviewed source commit. `directTools: false` is intentional; it keeps this powerful generic MCP surface behind Pi's gateway.
+Merge `mcp.json.example` only for the exact 0.3.2 package or after building an exact reviewed source commit. `directTools: false` is intentional; it keeps this powerful generic MCP surface behind Pi's gateway.
 
 For a source checkout:
 

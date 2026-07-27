@@ -45,7 +45,7 @@ export interface DirectBrokerResult {
 	elicitationRequests: number;
 	modelTurnsStarted: 0;
 	ephemeralThread: true;
-	brokerCleanupVerified: true;
+	brokerCleanupVerified: boolean;
 }
 
 export interface DirectBrokerOptions {
@@ -477,12 +477,23 @@ async function terminateGroup(
 	if (cleanupError) throw cleanupError;
 }
 
-export async function callOfficialDirectTool(
-	method: DirectMethod,
-	args: DirectToolArguments,
+export interface OfficialDirectToolSession {
+	call(
+		method: DirectMethod,
+		args: DirectToolArguments,
+		options?: Pick<DirectBrokerOptions, "timeoutMs" | "signal" | "onElicitation" | "supportsOpenAiFormElicitation">,
+	): Promise<DirectBrokerResult>;
+	close(): Promise<void>;
+}
+
+/**
+ * Start one verified app-server runtime and retain its signed Computer Use MCP
+ * client across calls. Pi uses this for the required get_app_state -> action
+ * sequence; one-shot callers continue to use callOfficialDirectTool below.
+ */
+export async function createOfficialDirectToolSession(
 	options: DirectBrokerOptions = {},
-): Promise<DirectBrokerResult> {
-	const startedAt = Date.now();
+): Promise<OfficialDirectToolSession> {
 	const verification = options.skipSignatureVerification
 		? { brokerVersion: "test-app-server", clientBuild: "test-client", client: undefined }
 		: verifyOfficialDirectBroker();
@@ -497,17 +508,17 @@ export async function callOfficialDirectTool(
 	let proc: ChildProcessWithoutNullStreams | undefined;
 	let processClosed: Promise<void> | undefined;
 	let termination: Promise<void> | undefined;
-	let abortHandler: (() => void) | undefined;
 	let fatalError: Error | undefined;
 	let stderr = "";
 	let nextId = 1;
-	let elicitationRequests = 0;
 	let modelTurnsStarted = 0;
-	let directCalls = 0;
 	let ephemeralThread = false;
-	let finalResult: DirectBrokerResult | undefined;
-	let primaryError: Error | undefined;
-	let cleanupVerified = false;
+	let threadId = "";
+	let closed = false;
+	let closePromise: Promise<void> | undefined;
+	let callActive = false;
+	let currentElicitation: DirectBrokerOptions["onElicitation"];
+	let currentElicitationCount = 0;
 	const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
 	const rejectAll = (error: Error): void => {
 		for (const waiter of pending.values()) {
@@ -534,18 +545,42 @@ export async function callOfficialDirectTool(
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
 				pending.delete(id);
-				reject(new Error(`Official app-server request timed out: ${methodName}`));
-				void ensureTerminated().catch(() => undefined);
+				const error = new Error(`Official app-server request timed out: ${methodName}`);
+				reject(error);
+				fail(error);
 			}, timeoutMs);
 			pending.set(id, { resolve, reject, timer });
-			try {
-				send({ method: methodName, id, params });
-			} catch (error) {
+			try { send({ method: methodName, id, params }); }
+			catch (error) {
 				clearTimeout(timer);
 				pending.delete(id);
 				reject(error instanceof Error ? error : new Error(String(error)));
 			}
 		});
+	};
+
+	const close = (): Promise<void> => {
+		closePromise ??= (async () => {
+			closed = true;
+			rejectAll(new Error("Official app-server closed"));
+			let cleanupError: Error | undefined;
+			try {
+				await ensureTerminated();
+				if (processClosed) {
+					await new Promise<void>((resolve, reject) => {
+						const timer = setTimeout(() => reject(new Error("Official app-server stdio did not close")), 1_000);
+						processClosed!.then(() => { clearTimeout(timer); resolve(); });
+					});
+				}
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				await rm(tempRoot, { recursive: true, force: true });
+			} catch (error) {
+				cleanupError = error instanceof Error ? error : new Error(String(error));
+			}
+			if (cleanupError) throw new Error("Official direct Computer Use broker cleanup failed", { cause: cleanupError });
+			if (fatalError || modelTurnsStarted !== 0) throw fatalError ?? new BrokerVerificationError("Model-turn activity was observed during broker teardown");
+		})();
+		return closePromise;
 	};
 
 	try {
@@ -560,24 +595,15 @@ export async function callOfficialDirectTool(
 		});
 		processClosed = new Promise((resolve) => proc!.once("close", () => resolve()));
 		if (proc.pid) options.onSpawn?.(proc.pid);
-		proc.stdin.on("error", (error: NodeJS.ErrnoException) => {
-			if (error.code !== "EPIPE") fail(error);
-		});
+		proc.stdin.on("error", (error: NodeJS.ErrnoException) => { if (error.code !== "EPIPE") fail(error); });
 		proc.stderr.setEncoding("utf8");
-		proc.stderr.on("data", (chunk: string) => {
-			if (stderr.length < 16_384) stderr += chunk.slice(0, 16_384 - stderr.length);
-		});
+		proc.stderr.on("data", (chunk: string) => { if (stderr.length < 16_384) stderr += chunk.slice(0, 16_384 - stderr.length); });
 		proc.once("error", (error) => fail(error));
-		proc.once("close", (code) => {
-			if (pending.size > 0) fail(new Error(`Official app-server exited before completing the request (${code ?? "unknown"})`));
-		});
+		proc.once("close", (code) => { if (!closed && pending.size > 0) fail(new Error(`Official app-server exited before completing the request (${code ?? "unknown"})`)); });
 
 		const processProtocolLine = (line: string): void => {
 			let message: any;
-			try { message = JSON.parse(line); } catch {
-				fail(new Error("Official app-server emitted malformed JSONL"));
-				return;
-			}
+			try { message = JSON.parse(line); } catch { fail(new Error("Official app-server emitted malformed JSONL")); return; }
 			if (typeof message?.method === "string" && (message.method.startsWith("turn/") || message.method.startsWith("item/"))) {
 				modelTurnsStarted += 1;
 				fail(new Error("Official app-server unexpectedly emitted model-turn activity during direct dispatch"));
@@ -599,28 +625,22 @@ export async function callOfficialDirectTool(
 						send({ id: message.id, error: { code: -32601, message: "Unsupported server request" } });
 						return;
 					}
-					elicitationRequests += 1;
+					currentElicitationCount += 1;
 					const requestParams = message.params && typeof message.params === "object" && !Array.isArray(message.params)
-						? message.params as DirectBrokerElicitationRequest
-						: {};
+						? message.params as DirectBrokerElicitationRequest : {};
 					void (async () => {
 						let response: DirectBrokerElicitationResponse = { action: "cancel" };
-						if (options.onElicitation) {
+						if (currentElicitation) {
 							try {
-								const candidate = await options.onElicitation(requestParams);
+								const candidate = await currentElicitation(requestParams);
 								if (candidate && ["accept", "decline", "cancel"].includes(candidate.action)) response = candidate;
-							} catch {
-								response = { action: "cancel" };
-							}
+							} catch { response = { action: "cancel" }; }
 						}
-						if (fatalError || !proc?.stdin.writable) return;
+						if (fatalError || closed || !proc?.stdin.writable) return;
 						send({ id: message.id, result: response });
 					})().catch((error) => fail(error instanceof Error ? error : new Error(String(error))));
-					return;
 				}
-			} catch (error) {
-				fail(error instanceof Error ? error : new Error(String(error)));
-			}
+			} catch (error) { fail(error instanceof Error ? error : new Error(String(error))); }
 		};
 		let stdoutBuffer = "";
 		proc.stdout.setEncoding("utf8");
@@ -631,123 +651,129 @@ export async function callOfficialDirectTool(
 				const end = newline === -1 ? chunk.length : newline;
 				const segment = chunk.slice(offset, end);
 				if (Buffer.byteLength(stdoutBuffer, "utf8") + Buffer.byteLength(segment, "utf8") > MAX_PROTOCOL_LINE_BYTES) {
-					fail(new Error("Official app-server protocol line exceeded the 8MB safety bound"));
-					return;
+					fail(new Error("Official app-server protocol line exceeded the 8MB safety bound")); return;
 				}
-				if (newline === -1) {
-					stdoutBuffer += segment;
-					return;
-				}
+				if (newline === -1) { stdoutBuffer += segment; return; }
 				const line = stdoutBuffer + segment;
 				stdoutBuffer = "";
 				if (line.length > 0) processProtocolLine(line);
 				offset = newline + 1;
 			}
 		});
-		proc.stdout.on("end", () => {
-			if (stdoutBuffer.length > 0) processProtocolLine(stdoutBuffer);
-			stdoutBuffer = "";
-		});
+		proc.stdout.on("end", () => { if (stdoutBuffer.length > 0) processProtocolLine(stdoutBuffer); stdoutBuffer = ""; });
 
-		if (options.signal) {
-			abortHandler = () => {
-				fail(new Error("Direct Computer Use request cancelled"));
-			};
-			if (options.signal.aborted) abortHandler();
-			else options.signal.addEventListener("abort", abortHandler, { once: true });
-		}
-		if (fatalError) throw fatalError;
-		await request(
-			"initialize",
-			{
-				clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: "0.3.1" },
-				capabilities: { mcpServerOpenaiFormElicitation: options.supportsOpenAiFormElicitation === true && options.onElicitation !== undefined },
-			},
-			15_000,
-		);
+		await request("initialize", {
+			clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: "0.3.2" },
+			capabilities: { mcpServerOpenaiFormElicitation: options.supportsOpenAiFormElicitation === true },
+		}, 15_000);
 		send({ method: "initialized" });
-		// Codex Full access requires both values: with `never` plus a restricted sandbox,
-		// core declines the signed service's app approval instead of prompting or accepting it.
-		const started = (await request(
-			"thread/start",
-			{ cwd: workDir, approvalPolicy: "never", sandbox: "danger-full-access", ephemeral: true, serviceName: "pi_direct_computer_use" },
-			30_000,
-		)) as any;
+		const started = (await request("thread/start", {
+			cwd: workDir, approvalPolicy: "never", sandbox: "danger-full-access", ephemeral: true, serviceName: "pi_direct_computer_use",
+		}, 30_000)) as any;
 		const thread = started?.thread;
-		const threadId = thread?.id;
-		if (
-			typeof threadId !== "string"
-			|| thread.ephemeral !== true
-			|| !Object.prototype.hasOwnProperty.call(thread, "path")
-			|| thread.path !== null
-			|| !Array.isArray(thread.turns)
-			|| thread.turns.length !== 0
-		) {
+		threadId = thread?.id;
+		if (typeof threadId !== "string" || thread.ephemeral !== true || !Object.prototype.hasOwnProperty.call(thread, "path") || thread.path !== null || !Array.isArray(thread.turns) || thread.turns.length !== 0) {
 			throw new BrokerVerificationError("App-server did not attest an empty pathless ephemeral runtime context");
 		}
 		ephemeralThread = true;
-		const inventory = await request(
-			"mcpServerStatus/list",
-			{ threadId, detail: "toolsAndAuthOnly" },
-			45_000,
-		);
-		validateInventory(inventory);
-		const raw = await request(
-			"mcpServer/tool/call",
-			{ threadId, server: "computer-use", tool: method, arguments: args },
-			options.timeoutMs ?? 120_000,
-		);
-		directCalls = 1;
-		if (modelTurnsStarted !== 0) throw new BrokerVerificationError("Model-turn activity was observed during direct dispatch");
-		const result = validateResult(raw);
-		finalResult = {
-			...result,
-			brokerVersion: verification.brokerVersion,
-			clientBuild: verification.clientBuild,
-			durationMs: Date.now() - startedAt,
-			elicitationRequests,
-			modelTurnsStarted: 0,
-			ephemeralThread: true,
-			brokerCleanupVerified: true,
-		};
 	} catch (error) {
 		const base = error instanceof Error ? error : new Error(String(error));
-		primaryError = /authentication|bearer|token/i.test(`${base.message}\n${stderr}`)
-			? new Error("Official direct Computer Use broker reported an authentication failure")
-			: base;
-	} finally {
-		if (abortHandler && options.signal) options.signal.removeEventListener("abort", abortHandler);
-		rejectAll(new Error("Official app-server closed"));
-		try {
-			await ensureTerminated();
-			if (processClosed) {
-				await new Promise<void>((resolve, reject) => {
-					const timer = setTimeout(() => reject(new Error("Official app-server stdio did not close")), 1_000);
-					processClosed!.then(() => {
-						clearTimeout(timer);
-						resolve();
-					});
-				});
+		const primary = /authentication|bearer|token/i.test(`${base.message}\n${stderr}`)
+			? new Error("Official direct Computer Use broker reported an authentication failure") : base;
+		try { await close(); }
+		catch (closeError) {
+			const closeFailure = closeError instanceof Error ? closeError : new Error(String(closeError));
+			if (closeFailure.message === "Official direct Computer Use broker cleanup failed") {
+				throw new DirectBrokerCallError(closeFailure.message, false, primary);
 			}
-			await new Promise<void>((resolve) => setImmediate(resolve));
-			if (fatalError || modelTurnsStarted !== 0) {
-				primaryError = fatalError ?? new BrokerVerificationError("Model-turn activity was observed during broker teardown");
-			}
-			await rm(tempRoot, { recursive: true, force: true });
-			cleanupVerified = true;
-		} catch (cleanupError) {
-			primaryError = new Error("Official direct Computer Use broker cleanup failed", { cause: cleanupError });
 		}
+		throw new DirectBrokerCallError(primary.message, true, primary, { modelTurnsStarted, ephemeralThread, brokerVersion: verification.brokerVersion, clientBuild: verification.clientBuild });
 	}
-	const failureEvidence = {
-		directCalls,
-		modelTurnsStarted,
-		ephemeralThread,
-		elicitationRequests,
-		brokerVersion: verification.brokerVersion,
-		clientBuild: verification.clientBuild,
+
+	return {
+		async call(method, args, callOptions = {}) {
+			if (closed) throw new DirectBrokerCallError("Official direct Computer Use session is closed", true);
+			if (callActive) throw new DirectBrokerCallError("Official direct Computer Use session does not allow concurrent calls", false);
+			callActive = true;
+			currentElicitation = callOptions.onElicitation;
+			currentElicitationCount = 0;
+			const startedAt = Date.now();
+			let directCalls = 0;
+			let abortHandler: (() => void) | undefined;
+			try {
+				if (callOptions.signal) {
+					abortHandler = () => fail(new Error("Direct Computer Use request cancelled"));
+					if (callOptions.signal.aborted) abortHandler();
+					else callOptions.signal.addEventListener("abort", abortHandler, { once: true });
+				}
+				if (fatalError) throw fatalError;
+				const inventory = await request("mcpServerStatus/list", { threadId, detail: "toolsAndAuthOnly" }, 45_000);
+				validateInventory(inventory);
+				const raw = await request("mcpServer/tool/call", { threadId, server: "computer-use", tool: method, arguments: args }, callOptions.timeoutMs ?? 120_000);
+				directCalls = 1;
+				if (modelTurnsStarted !== 0) throw new BrokerVerificationError("Model-turn activity was observed during direct dispatch");
+				const result = validateResult(raw);
+				return {
+					...result,
+					brokerVersion: verification.brokerVersion,
+					clientBuild: verification.clientBuild,
+					durationMs: Date.now() - startedAt,
+					elicitationRequests: currentElicitationCount,
+					modelTurnsStarted: 0,
+					ephemeralThread: true,
+					brokerCleanupVerified: false,
+				};
+			} catch (error) {
+				const base = error instanceof Error ? error : new Error(String(error));
+				const primary = /authentication|bearer|token/i.test(`${base.message}\n${stderr}`)
+					? new Error("Official direct Computer Use broker reported an authentication failure") : base;
+				throw new DirectBrokerCallError(primary.message, false, primary, {
+					directCalls, modelTurnsStarted, ephemeralThread, elicitationRequests: currentElicitationCount,
+					brokerVersion: verification.brokerVersion, clientBuild: verification.clientBuild,
+				});
+			} finally {
+				if (abortHandler && callOptions.signal) callOptions.signal.removeEventListener("abort", abortHandler);
+				currentElicitation = undefined;
+				callActive = false;
+			}
+		},
+		close,
 	};
-	if (primaryError) throw new DirectBrokerCallError(primaryError.message, cleanupVerified, primaryError, failureEvidence);
-	if (!finalResult) throw new DirectBrokerCallError("Official direct Computer Use ended without a result", cleanupVerified, undefined, failureEvidence);
-	return finalResult;
+}
+
+export async function callOfficialDirectTool(
+	method: DirectMethod,
+	args: DirectToolArguments,
+	options: DirectBrokerOptions = {},
+): Promise<DirectBrokerResult> {
+	let session: OfficialDirectToolSession | undefined;
+	let result: DirectBrokerResult | undefined;
+	let failure: unknown;
+	try {
+		session = await createOfficialDirectToolSession(options);
+		result = await session.call(method, args, options);
+	} catch (error) {
+		failure = error;
+	}
+	let cleanupVerified = failure instanceof DirectBrokerCallError ? failure.cleanupVerified : false;
+	try {
+		if (session) {
+			await session.close();
+			cleanupVerified = true;
+		}
+	} catch (cleanupError) {
+		const closeFailure = cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError));
+		if (closeFailure.message !== "Official direct Computer Use broker cleanup failed") {
+			throw new DirectBrokerCallError(closeFailure.message, true, closeFailure, failure instanceof DirectBrokerCallError ? failure : {});
+		}
+		throw new DirectBrokerCallError(closeFailure.message, false, closeFailure, failure instanceof DirectBrokerCallError ? failure : {});
+	}
+	if (failure) {
+		if (failure instanceof DirectBrokerCallError) {
+			throw new DirectBrokerCallError(failure.message, cleanupVerified, failure, failure);
+		}
+		throw failure;
+	}
+	if (!result) throw new DirectBrokerCallError("Official direct Computer Use ended without a result", cleanupVerified);
+	return { ...result, brokerCleanupVerified: true };
 }

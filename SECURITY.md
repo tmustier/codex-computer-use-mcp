@@ -28,11 +28,11 @@ This is direct tool dispatch—not model orchestration.
 8. Same-app work is excluded across native Pi, generic MCP, and custom state roots with one fixed per-user kernel `lockf` lease namespace.
 9. Target focus events, periodic samples, watcher health, queued ASN resolution, and final state are checked. This is post-action detection, not a preventive OS sandbox.
 10. One direct request emits one official `mcpServer/tool/call`; no model turn, subagent, shell, web, plugin, prompt, or reachable model transport is available.
-11. App-server and helper share one private per-call working directory. Cleanup combines strict ancestry enumeration (preserving partial results) with working-directory ownership recovery, freezes processes to a stable set, kills every owned process, awaits stdio closure, and verifies exit. This still finds a helper reparented by an early app-server exit; enumeration/freeze/exit uncertainty is fatal.
+11. App-server and helper share one private broker-session working directory. One-shot calls close it immediately; Pi retains it only across the required `get_app_state` and following action, then closes it after the action, before replacement inspection, or on session shutdown. Cleanup combines strict ancestry enumeration (preserving partial results) with working-directory ownership recovery, freezes processes to a stable set, kills every owned process, awaits stdio closure, and verifies exit. This still finds a helper reparented by an early app-server exit; enumeration/freeze/exit uncertainty is fatal.
 12. Protocol JSONL is bounded before an unterminated line can exceed 8 MB in memory.
 13. Per-call `CODEX_HOME` and work directories are mode-private and recursively removed.
 14. Only validated text/image result blocks cross to the invoking client. No full-result spill file is written.
-15. Audits contain metadata only, including separate `brokerCleanupVerified` and `appLeaseReleased` evidence; lease-release failure changes the audited outcome before surfacing. Arguments, values, screenshots, app-state text, result content, prompts, approvals, credentials, and tokens are forbidden.
+15. Audits contain metadata only, including separate `brokerCleanupVerified` and `appLeaseReleased` evidence. A retained Pi inspection truthfully records broker cleanup as pending (`false`); the paired action does not return if final retained-session cleanup fails. Lease-release failure changes the audited outcome before surfacing. Arguments, values, screenshots, app-state text, result content, prompts, approvals, credentials, and tokens are forbidden.
 16. Policy rejections are audited; audit failure is fatal once a secure state path exists.
 17. Runtime and development dependency tarballs are exact-pinned with integrity in `npm-shrinkwrap.json`.
 
@@ -56,6 +56,6 @@ Computer Use returns the official app-state text and screenshots to the invoking
 
 ## Supported versions
 
-Only the latest approved release is supported. Version 0.3.1 supports direct local calls in an unlocked macOS session. Targeted local calls while the Mac is locked are not supported.
+Only the latest approved release is supported. Version 0.3.2 supports direct local calls in an unlocked macOS session. Targeted local calls while the Mac is locked are not supported.
 
 App-server is experimental and bundle paths or schemas can change. Drift fails closed until reviewed.
