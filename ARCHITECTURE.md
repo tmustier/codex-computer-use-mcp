@@ -2,6 +2,14 @@
 
 Code Mode remains outside this package. See [ADR 0001: Keep Code Mode in a standalone MCP process](docs/adr/0001-standalone-code-mode-mcp.md).
 
+## Design intent
+
+This package is a thin transport adapter to the official signed Computer Use tools. It has no independent policy or security role. Codex and macOS remain authoritative for tool behavior, access decisions, and platform controls.
+
+Preserve the official capability surface. Add adapter code only when the transport, zero-model-turn architecture, component compatibility, or process lifecycle requires it.
+
+Canonical app resolution, same-app locking, focus completion telemetry, and metadata-only audit came from the earlier background-computer-use wrapper. The current release retains them for compatibility. They do not provide extra authorization or sandbox boundaries. This inventory does not justify extending them. A maintainer must explicitly approve their removal or material simplification.
+
 ## Official API evidence
 
 The architecture uses public source and the installed signed binaries; it does not speak a private Computer Use socket protocol.
@@ -90,40 +98,42 @@ codex mcp-server model tools
 nested prompts or result summaries
 ```
 
-## Restriction inventory
+## Current adapter inventory
 
-| Released wrapper restriction | Classification | Direct design |
+| Mechanism or former restriction | Role in the direct design | Current treatment |
 |---|---|---|
-| Reviewed ChatGPT/Codex/client paths | **official-required** | current per-user installed-component contract plus exact legacy plugin layout; canonicalized and verified |
-| Strict signatures and OpenAI Team ID | **security-essential** | retained |
-| Signed-parent/responsible-process chain | **official-required** | retained through signed app-server |
-| Private Sky socket/native-pipe access | **unsupported/private** | prohibited |
-| Nested Codex model and prompt | **compatibility-only** | removed |
-| Model selection and reasoning effort | **compatibility-only** | removed; dummy unreachable provider prevents model transport |
-| Responses websocket prewarm on empty thread | **accidental app-server behavior** | disabled with non-websocket dummy provider |
-| Plugin/remote-control startup networking | **accidental app-server behavior** | corresponding features disabled |
-| Model-written multi-step task plan | **compatibility-only** | removed |
-| Model result schema/summary | **compatibility-only** | removed |
-| Streamed model-event target/method validation | **compatibility-only** | replaced by pre-dispatch typed call validation |
-| Per-operation tool allowlists and call budgets | **compatibility-only** | one typed method per direct request |
-| Task text, cleanup instructions, required-capabilities fields | **compatibility-only** | removed |
-| Dictionary-only special policy | **accidental** | removed |
-| Wrapper app/intent allowlists in full mode | **accidental** | absent |
-| Safe/full wrapper modes | **compatibility-only** | removed; one durable no-permissions interface exposes all ten methods |
-| Wrapper approval prompts/configuration | **compatibility-only** | removed; no command, config, environment, or per-call selector remains |
-| Official first-party app access | **official-required** | official Codex Full access auto-accepts normal empty-schema app approval elicitations; any elicitation app-server emits is forwarded unchanged |
-| macOS TCC | **official-required** | retained; never modified |
-| Exact ten-tool inventory/schema | **security-essential** | retained and checked before each call |
-| Canonical bundle identity | **security-essential** | retained before targeted dispatch |
-| Same-app kernel lock | **security-essential** | retained in one fixed per-user namespace shared across Pi/MCP state roots |
-| Automatic background app launch | **accidental** | removed; the official tool owns app behavior |
-| Global focus watcher and final sample | **security-essential detection** | retained |
-| Timeout/cancellation process-tree termination | **security-essential** | retained with strict enumeration, freeze, kill, stdio-close, and exit verification |
-| Temporary broker-session cleanup | **security-essential** | retained with isolated `CODEX_HOME`; Pi closes after the inspection-action pair, replacement inspection, or session shutdown |
-| Codex token usage accounting | **compatibility-only** | removed; no model turn exists |
-| Content-safe private audit | **security-essential** | retained with direct-call fields |
-| Full-result spill files | **unsafe/accidental** | prohibited; truncation is in-memory only |
-| Browser-host integration | **out of scope** | unchanged |
+| Reviewed ChatGPT/Codex/client paths | official transport compatibility | current per-user installed-component contract plus exact legacy plugin layout; canonicalized and verified |
+| Strict signatures and OpenAI Team ID | official component verification | retained to verify the selected signed transport components |
+| Signed-parent/responsible-process chain | official transport requirement | retained through signed app-server |
+| Private Sky socket/native-pipe access | unsupported/private route | prohibited |
+| Nested Codex model and prompt | former compatibility layer | removed |
+| Model selection and reasoning effort | former compatibility layer | removed; dummy unreachable provider prevents model transport |
+| Responses websocket prewarm on empty thread | accidental app-server behavior | disabled with non-websocket dummy provider |
+| Plugin/remote-control startup networking | accidental app-server behavior | corresponding features disabled |
+| Model-written multi-step task plan | former compatibility layer | removed |
+| Model result schema/summary | former compatibility layer | removed |
+| Streamed model-event target/method validation | former compatibility layer | replaced by pre-dispatch typed call validation |
+| Per-operation tool allowlists and call budgets | former wrapper policy | removed; one typed method per direct request |
+| Task text, cleanup instructions, required-capabilities fields | former compatibility layer | removed |
+| Dictionary-only special policy | former wrapper policy | removed |
+| Wrapper app/intent allowlists in full mode | former wrapper policy | absent |
+| Safe/full wrapper modes | former wrapper policy | removed; one durable no-permissions interface exposes all ten methods |
+| Wrapper approval prompts/configuration | former wrapper policy | removed; no command, config, environment, or per-call selector remains |
+| Official first-party app access | official Codex control | official Codex Full access auto-accepts normal empty-schema app approval elicitations; any elicitation app-server emits is forwarded unchanged |
+| macOS TCC | official platform control | retained; never modified |
+| Exact ten-tool inventory/schema | protocol compatibility check | retained and checked before each call |
+| Canonical bundle identity | legacy wrapper behavior | retained for the current release contract; not an independent authorization boundary |
+| Same-app kernel lock | legacy wrapper coordination | retained in one fixed per-user namespace shared across Pi/MCP state roots |
+| Automatic background app launch | accidental wrapper behavior | removed; the official tool owns app behavior |
+| Global focus watcher and final sample | legacy completion telemetry | retained for the current release contract; not a preventive sandbox |
+| Timeout/cancellation process-tree termination | operational lifecycle | retained with strict enumeration, freeze, kill, stdio-close, and exit verification |
+| Temporary broker-session cleanup | operational lifecycle | retained with isolated `CODEX_HOME`; Pi closes after the inspection-action pair, replacement inspection, or session shutdown |
+| Codex token usage accounting | former compatibility layer | removed; no model turn exists |
+| Content-safe private audit | legacy observability behavior | retained with direct-call fields; not an authorization mechanism |
+| Full-result spill files | output hygiene | prohibited; truncation is in-memory only |
+| Browser-host integration | out of scope | unchanged |
+
+These roles explain the current code. They do not authorize new safeguards. Only propose hardening for a concrete, realistically reachable failure in the supported path.
 
 ## No-permissions and elicitation boundary
 

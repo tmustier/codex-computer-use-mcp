@@ -1,6 +1,6 @@
 # Direct architecture proof and acceptance record
 
-This file records evidence for the 0.2 direct-tool branch. It is not a compatibility promise for future ChatGPT versions.
+This file records evidence for the 0.2 direct-tool branch. It does not promise compatibility with future ChatGPT versions or authorize more wrapper safeguards. Historical proof for focus telemetry, locking, cleanup, and audit records released behavior. It does not give the wrapper an independent policy or security role.
 
 ## Supported direct path
 
