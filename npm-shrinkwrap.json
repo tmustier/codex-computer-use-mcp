@@ -1,12 +1,12 @@
 {
   "name": "codex-computer-use-mcp",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "codex-computer-use-mcp",
-      "version": "0.3.2",
+      "version": "0.3.3",
       "license": "MIT",
       "os": [
         "darwin"

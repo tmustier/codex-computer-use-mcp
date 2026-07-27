@@ -18,7 +18,7 @@ import {
 	OFFICIAL_TOOL_METADATA,
 } from "./tools.ts";
 
-const version = "0.3.2";
+const version = "0.3.3";
 
 async function handleCli(): Promise<boolean> {
 	const args = process.argv.slice(2);
