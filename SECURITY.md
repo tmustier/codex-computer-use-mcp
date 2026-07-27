@@ -2,9 +2,9 @@
 
 ## Reporting a vulnerability
 
-Do not open a public issue for a vulnerability that could weaken signing, contract verification, no-permissions dispatch, first-party access handling, app identity, locking, focus telemetry, cleanup, or audit integrity.
+Do not open a public issue for a concrete vulnerability in the supported production path. This includes realistic paths to untrusted component execution, unauthorized wrapper dispatch, credential or result-content exposure, or materially false completion reporting.
 
-Use GitHub private vulnerability reporting. Include the affected commit/version, the smallest non-sensitive reproduction, expected versus observed behavior, and whether an official action completed before failure.
+Use GitHub private vulnerability reporting. Include the affected commit and version, a small non-sensitive reproduction, and the expected and observed behavior. Provide evidence that the path is realistically reachable. State whether an official action completed before failure. Speculative hardening ideas without a reachable material effect are not vulnerability reports.
 
 Never include credentials, tokens, customer/private content, sensitive screenshots, raw app-state payloads, elicitation contents, or private audit files.
 
@@ -16,7 +16,15 @@ The API requires a loaded thread ID. The bridge creates an empty, pathless, ephe
 
 This is direct tool dispatch—not model orchestration.
 
-## Security invariants
+## Authority and non-goals
+
+This package is a thin adapter to official Codex Computer Use. Codex and macOS remain authoritative for tool behavior, app access, and platform permissions. The wrapper must not add permission policy, risk classification, app allowlists, action gates, content inspection, or speculative defence-in-depth.
+
+The earlier background-computer-use wrapper provided canonical app resolution, same-app locking, focus completion telemetry, and metadata-only audit. The current release retains these legacy behaviors. They do not provide independent security or authorization boundaries. Do not expand them because a hypothetical safeguard is possible. A maintainer must explicitly approve their removal or material simplification because this changes the release contract.
+
+## Current adapter invariants
+
+These invariants describe the supported transport, zero-model-turn architecture, current released behavior, process lifecycle, and privacy contract. They are not a general security framework or a mandate to add safeguards.
 
 1. Only the fixed app-bundled Codex path and reviewed official Computer Use layouts are allowed in production. The current client is resolved from the OS account home under `~/.codex/computer-use/`; `HOME`, `CODEX_HOME`, arbitrary paths, and symlinked layouts are not accepted. The former exact plugin-bundle layout is considered only when the current component is absent.
 2. Both binaries pass strict code-signature verification and OpenAI Team ID `2DC432GLL2` checks before dispatch. A present current-layout client that fails verification never falls back.
@@ -24,9 +32,9 @@ This is direct tool dispatch—not model orchestration.
 4. `no-permissions` is the only wrapper policy: all ten methods are exposed and no wrapper permission prompt is opened.
 5. There is no config file, environment override, command, tool argument, per-call branch, or alternate safe/full route that an agent can select.
 6. App-server uses the official Full access combination, `approvalPolicy: "never"` plus `sandbox: "danger-full-access"`. The pinned Codex host automatically accepts empty-schema MCP approval elicitations, so normal first-party app-access checks proceed without prompts. The wrapper does not synthesize this response or edit persistent per-app approvals. Any elicitation app-server emits is forwarded faithfully; an unavailable client cancels.
-7. Target selectors resolve to canonical installed bundle IDs before dispatch.
-8. Same-app work is excluded across native Pi, generic MCP, and custom state roots with one fixed per-user kernel `lockf` lease namespace.
-9. Target focus events, periodic samples, watcher health, queued ASN resolution, and final state are checked. This is post-action detection, not a preventive OS sandbox.
+7. As current legacy wrapper behavior, target selectors resolve to canonical installed bundle IDs before dispatch.
+8. As current legacy wrapper coordination, same-app work is excluded across native Pi, generic MCP, and custom state roots with one fixed per-user kernel `lockf` lease namespace.
+9. As current legacy completion telemetry, target focus events, periodic samples, watcher health, queued ASN resolution, and final state are checked. This is post-action reporting, not a preventive OS sandbox or an official Codex access control.
 10. One direct request emits one official `mcpServer/tool/call`; no model turn, subagent, shell, web, plugin, prompt, or reachable model transport is available.
 11. App-server and helper share one private broker-session working directory. One-shot calls close it immediately; Pi retains it only across the required `get_app_state` and following action, then closes it after the action, before replacement inspection, or on session shutdown. Cleanup combines strict ancestry enumeration (preserving partial results) with working-directory ownership recovery, freezes processes to a stable set, kills every owned process, awaits stdio closure, and verifies exit. This still finds a helper reparented by an early app-server exit; enumeration/freeze/exit uncertainty is fatal.
 12. Protocol JSONL is bounded before an unterminated line can exceed 8 MB in memory.

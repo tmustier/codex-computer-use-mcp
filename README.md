@@ -43,13 +43,13 @@ As the official contract specifies, Pi—not a nested planner—calls `computer_
 
 The app-server runtime uses the official Full access combination: `approvalPolicy: "never"` and `sandbox: "danger-full-access"`. In the pinned Codex host, that maps to a disabled permission profile and automatically accepts empty-schema MCP approval elicitations. Normal Computer Use app-access checks therefore proceed without a per-app prompt, just as they do in Codex Full access. The bridge does not edit the service's persistent per-bundle approval file. If app-server emits an elicitation instead of resolving it under Full access, the bridge still forwards it faithfully to the invoking client; unsupported clients return `cancel`, never a fabricated `accept` or `decline`.
 
-No-permissions does **not** bypass:
+No-permissions leaves the official and transport requirements unchanged:
 
-- macOS Screen Recording, Accessibility, or TCC controls;
-- strict OpenAI Team ID and code-signature checks;
-- exact upstream ten-tool schema verification;
-- canonical app identity resolution and per-user/per-app kernel locks shared across Pi and MCP state roots;
-- focus telemetry, timeouts, verified process-tree cleanup, or private audit logging.
+- macOS Screen Recording, Accessibility, and TCC controls remain authoritative;
+- the adapter still selects and verifies the official signed components required for the supported transport;
+- the wrapper verifies compatibility with the upstream ten-tool contract.
+
+The current release also retains behavior from the earlier background-computer-use wrapper. This includes canonical app resolution, per-user/per-app coordination, focus completion telemetry, process cleanup, and metadata-only audit. These provide compatibility, lifecycle management, and observability. They do not provide extra authorization or a sandbox. Do not use them as a foundation for more wrapper safeguards.
 
 ## Why the signed app-server is required
 
@@ -131,9 +131,9 @@ For Pi's generic MCP gateway, keep `directTools: false` so this powerful surface
 
 The generic MCP server exposes the same no-permissions behavior: official Codex Full access, no wrapper permission gate, and all ten methods. App-access approvals are resolved inside the official host. Any standard form or URL elicitation that app-server emits is forwarded as an MCP `elicitation/create` request. The upstream client response is returned unchanged; unsupported or headless clients cancel rather than fabricate a decision.
 
-## Security and privacy
+## Execution and privacy
 
-Each call:
+For the current released implementation, each call:
 
 1. validates typed arguments;
 2. applies the single durable no-permissions policy with no mode or prompt branch;
@@ -148,7 +148,7 @@ Each call:
 11. rejects any model-turn notification, including during teardown;
 12. combines partial-preserving ancestry enumeration with private-working-directory ownership recovery, then freezes, terminates, and verifies the app-server plus separately grouped or reparented helpers; finally it removes temporary state, releases the lock, and writes a content-safe audit with separate broker/lease cleanup evidence.
 
-Focus checks are detection/completion criteria, not a preventive macOS sandbox. If the target becomes frontmost, the call is reported as failed even though an individual official action may already have completed.
+Focus telemetry is legacy completion behavior from the earlier background-computer-use wrapper. It does not provide an official Codex access control or a preventive macOS sandbox. The current release reports the call as failed if the target becomes frontmost. An individual official action may already have completed. Do not use this telemetry as a reason to add further defensive policy.
 
 Tool results may contain visible target-app text or screenshots because that is the purpose of Computer Use. They return only to the invoking Pi/MCP client. Audits never retain arguments, typed values, screenshots, app-state payloads, result text, prompts, credentials, or tokens—only bounded metadata such as method, canonical/hashed app identity, byte counts, content types, outcome, focus, broker version, and zero-turn evidence.
 
@@ -172,7 +172,7 @@ npm pack --dry-run
 
 Registry dependency tarballs are exact-pinned with integrity and the package includes `npm-shrinkwrap.json`.
 
-See [`PROOF.md`](PROOF.md), [`SECURITY.md`](SECURITY.md), and [`CONTRIBUTING.md`](CONTRIBUTING.md).
+See [`PROOF.md`](PROOF.md), [`SECURITY.md`](SECURITY.md), and [`CONTRIBUTING.md`](CONTRIBUTING.md). Agent contributors must also follow [`AGENTS.md`](AGENTS.md). It records the maintainer's thin-adapter intent and review standard.
 
 ## License
 
