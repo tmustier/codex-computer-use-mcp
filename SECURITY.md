@@ -34,7 +34,7 @@ These invariants describe the supported transport, zero-model-turn architecture,
 6. App-server uses the official Full access combination, `approvalPolicy: "never"` plus `sandbox: "danger-full-access"`. The pinned Codex host automatically accepts empty-schema MCP approval elicitations, so normal first-party app-access checks proceed without prompts. The wrapper does not synthesize this response or edit persistent per-app approvals. Any elicitation app-server emits is forwarded faithfully; an unavailable client cancels.
 7. As current legacy wrapper behavior, target selectors resolve to canonical installed bundle IDs before dispatch.
 8. As current legacy wrapper coordination, same-app work is excluded across native Pi, generic MCP, and custom state roots with one fixed per-user kernel `lockf` lease namespace.
-9. As current legacy completion telemetry, target focus events, periodic samples, watcher health, queued ASN resolution, and final state are checked. This is post-action reporting, not a preventive OS sandbox or an official Codex access control.
+9. As legacy observational telemetry, target focus events, periodic samples, watcher health, queued ASN resolution, and final state are recorded without gating official dispatch or results. This is reporting, not a preventive OS sandbox or an official Codex access control.
 10. One direct request emits one official `mcpServer/tool/call`; no model turn, subagent, shell, web, plugin, prompt, or reachable model transport is available.
 11. App-server and helper share one private broker-session working directory. One-shot calls close it immediately; Pi retains it only across the required `get_app_state` and following action, then closes it after the action, before replacement inspection, or on session shutdown. Cleanup combines strict ancestry enumeration (preserving partial results) with working-directory ownership recovery, freezes processes to a stable set, kills every owned process, awaits stdio closure, and verifies exit. This still finds a helper reparented by an early app-server exit; enumeration/freeze/exit uncertainty is fatal.
 12. Protocol JSONL is bounded before an unterminated line can exceed 8 MB in memory.
@@ -64,6 +64,6 @@ Computer Use returns the official app-state text and screenshots to the invoking
 
 ## Supported versions
 
-Only the latest approved release is supported. Version 0.3.3 supports direct local calls in an unlocked macOS session. Targeted local calls while the Mac is locked are not supported.
+Only the latest approved release is supported. Version 0.3.4 supports direct local calls in an unlocked macOS session. Targeted local calls while the Mac is locked are not supported.
 
 App-server is experimental and bundle paths or schemas can change. Drift fails closed until reviewed.
