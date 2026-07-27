@@ -663,7 +663,7 @@ export async function createOfficialDirectToolSession(
 		proc.stdout.on("end", () => { if (stdoutBuffer.length > 0) processProtocolLine(stdoutBuffer); stdoutBuffer = ""; });
 
 		await request("initialize", {
-			clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: "0.3.2" },
+			clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: "0.3.3" },
 			capabilities: { mcpServerOpenaiFormElicitation: options.supportsOpenAiFormElicitation === true },
 		}, 15_000);
 		send({ method: "initialized" });

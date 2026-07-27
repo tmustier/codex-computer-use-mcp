@@ -2,7 +2,7 @@
 
 This changelog records user-visible changes from version 0.3.2 onwards.
 
-## Unreleased
+## 0.3.3 - 2026-07-27
 
 ### Fixed
 

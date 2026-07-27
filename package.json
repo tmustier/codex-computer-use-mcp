@@ -1,6 +1,6 @@
 {
   "name": "codex-computer-use-mcp",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Expose the official macOS Computer Use tools directly to Pi and MCP clients without a nested model.",
   "author": "Thomas Mustier",
   "license": "MIT",
@@ -31,6 +31,7 @@
     "integrations/pi",
     "npm-shrinkwrap.json",
     "README.md",
+    "CHANGELOG.md",
     "PROOF.md",
     "ARCHITECTURE.md",
     "MIGRATION.md",

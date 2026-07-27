@@ -1,6 +1,6 @@
 # Migration and rollback
 
-Version 0.2.0 was the breaking direct-tool architecture change from version 0.1.0. Version 0.3.0 added Pi progressive disclosure, version 0.3.1 followed ChatGPT's current per-user Computer Use component layout, and version 0.3.2 restores one complete direct Pi surface with shared inspection-action session continuity. Use the relevant section below.
+Version 0.2.0 was the breaking direct-tool architecture change from version 0.1.0. Version 0.3.0 added Pi progressive disclosure, version 0.3.1 followed ChatGPT's current per-user Computer Use component layout, version 0.3.2 restored one complete direct Pi surface with shared inspection-action session continuity, and version 0.3.3 adds macOS 27 compatibility. Use the relevant section below.
 
 ## What changes
 
@@ -100,6 +100,14 @@ Version 0.3.2 activates all ten direct Pi tools at session start and retains one
 
 The exact schemas, strict signature and OpenAI Team ID checks, canonical client and app resolution, Full access policy, zero-turn attestation, inventory validation, kernel lock, focus telemetry, process-tree cleanup, and content-safe audit remain mandatory.
 
+## Upgrade from version 0.3.2 to 0.3.3
+
+Version 0.3.3 accepts both the legacy `CFBundleIdentifier` key and the macOS 27 `bundleID` key from `lsappinfo`. This prevents frontmost-app detection from rejecting official Computer Use dispatch on macOS 27. No configuration migration is required.
+
+1. Verify that npm resolves `codex-computer-use-mcp@0.3.3` exactly, then install that exact package.
+2. Start a fresh Pi process so it loads the updated extension code.
+3. On an unlocked Mac, run `computer_use_get_app_state` against a benign background app and verify that the result succeeds without moving focus.
+
 ## Rollback
 
 1. Stop the current Pi process.
@@ -114,4 +122,4 @@ Direct state can be removed only after rollback evidence is captured and no proc
 
 ## Generic MCP gateway
 
-If Pi uses `mcp.json`, retain `directTools: false`. Use the exact `0.3.2` package shown in `integrations/pi/mcp.json.example`. During source acceptance, use a distinct temporary server name and source path, then remove it. The direct Pi adapter is the primary live path; do not leave the version 0.1 aggregate server active after the switch.
+If Pi uses `mcp.json`, retain `directTools: false`. Use the exact `0.3.3` package shown in `integrations/pi/mcp.json.example`. During source acceptance, use a distinct temporary server name and source path, then remove it. The direct Pi adapter is the primary live path; do not leave the version 0.1 aggregate server active after the switch.

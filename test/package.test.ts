@@ -11,6 +11,7 @@ test("package contains direct architecture, Pi adapter, docs, and shrinkwrap wit
 	const files = report.files.map((item: { path: string }) => item.path).sort();
 	for (const required of [
 		"ARCHITECTURE.md",
+		"CHANGELOG.md",
 		"MIGRATION.md",
 		"README.md",
 		"SECURITY.md",
