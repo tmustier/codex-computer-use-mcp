@@ -7,6 +7,7 @@ import {
 	frontmostApplicationToken,
 	frontmostBundleId,
 	frontmostBundleIdAsync,
+	parseLsappinfoBundleId,
 	resolveAppIdentity,
 	resolveAppLeaseId,
 	watchTargetFrontmost,
@@ -17,6 +18,16 @@ test("async focus sampling matches the synchronous frontmost bundle", async () =
 	const asyncValue = await frontmostBundleIdAsync();
 	assert.ok(sync);
 	assert.ok(asyncValue);
+});
+
+test("lsappinfo bundle-id parser accepts macOS 27 bundleID and legacy CFBundleIdentifier keys", () => {
+	// macOS 27 (Darwin 27) dropped `CFBundleIdentifier` from `lsappinfo info -only bundleID`
+	// output and now emits `bundleID=`. Both spellings must parse, or frontmost detection
+	// returns undefined and every direct dispatch throws before reaching the broker.
+	assert.equal(parseLsappinfoBundleId(`[ NULL ]  ASN:0x0-0x39039: (in front) \n\tbundleID="com.docker.docker"\n`), "com.docker.docker");
+	assert.equal(parseLsappinfoBundleId(`"CFBundleIdentifier"="com.apple.finder"\n`), "com.apple.finder");
+	assert.equal(parseLsappinfoBundleId(""), undefined);
+	assert.equal(parseLsappinfoBundleId("no bundle key here"), undefined);
 });
 
 test("app identity preserves the official bundle ID while canonicalizing leases", () => {

@@ -5,6 +5,20 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Parse the bundle identifier from `lsappinfo info -only bundleID <asn>` output.
+ *
+ * Upstream API assumption: LaunchServices changed the emitted key across macOS
+ * releases. macOS <= 26 prints `"CFBundleIdentifier"="com.example"`; macOS 27+
+ * (Darwin 27) prints `bundleID="com.example"` and drops `CFBundleIdentifier`.
+ * Accept both spellings so frontmost detection survives the rename; otherwise
+ * `frontmostBundleId()` returns `undefined` and every direct dispatch throws
+ * "Could not observe the frontmost app" before reaching the broker.
+ */
+export function parseLsappinfoBundleId(stdout: string): string | undefined {
+	return stdout.match(/(?:"CFBundleIdentifier"|bundleID)="([^"]+)"/)?.[1];
+}
+
 export function frontmostApplicationToken(): string | undefined {
 	const front = spawnSync("/usr/bin/lsappinfo", ["front"], { encoding: "utf8", timeout: 3000 });
 	const asn = (front.stdout ?? "").trim();
@@ -19,8 +33,7 @@ export function frontmostBundleId(): string | undefined {
 		timeout: 3000,
 	});
 	if (info.status !== 0) return undefined;
-	const match = (info.stdout ?? "").match(/"CFBundleIdentifier"="([^"]+)"/);
-	return match?.[1];
+	return parseLsappinfoBundleId(info.stdout ?? "");
 }
 
 export async function frontmostBundleIdAsync(): Promise<string | undefined> {
@@ -32,7 +45,7 @@ export async function frontmostBundleIdAsync(): Promise<string | undefined> {
 			encoding: "utf8",
 			timeout: 3000,
 		});
-		return info.stdout.match(/"CFBundleIdentifier"="([^"]+)"/)?.[1];
+		return parseLsappinfoBundleId(info.stdout);
 	} catch {
 		return undefined;
 	}
@@ -123,7 +136,7 @@ function bundleIdForAsn(asn: string, infoPath = "/usr/bin/lsappinfo"): string | 
 		timeout: 3000,
 	});
 	if (info.status !== 0) return undefined;
-	return (info.stdout ?? "").match(/"CFBundleIdentifier"="([^"]+)"/)?.[1];
+	return parseLsappinfoBundleId(info.stdout ?? "");
 }
 
 export async function watchTargetFrontmost(
