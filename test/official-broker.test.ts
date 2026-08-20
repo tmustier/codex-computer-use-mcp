@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { z } from "zod";
 import { callOfficialDirectTool } from "../src/direct-broker.ts";
 
 test("official signed broker completes a real Computer Use call", async () => {
@@ -8,5 +9,6 @@ test("official signed broker completes a real Computer Use call", async () => {
 	assert.equal(result.brokerCleanupVerified, true);
 	assert.equal(result.modelTurnsStarted, 0);
 	assert.equal(result.ephemeralThread, true);
-	assert.ok(result.content.some((block) => block.type === "text" && typeof block.text === "string"));
+	const textBlock = z.object({ type: z.literal("text"), text: z.string() });
+	assert.ok(result.content.some((block) => textBlock.safeParse(block).success));
 });

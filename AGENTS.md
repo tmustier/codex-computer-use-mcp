@@ -1,39 +1,23 @@
-# Repository agent guidance
+# Repository guidance
 
-## Product intent
+This package is a thin transport adapter to OpenAI's official signed macOS Computer Use tools. The calling agent selects each official method and its arguments. Codex and macOS remain authoritative for tool behaviour, app access and platform permissions.
 
-This repository exposes the official signed macOS Computer Use tools to Pi and MCP clients. It is a thin transport adapter. The calling agent selects the official method and arguments. OpenAI Codex and macOS control tool behavior, app access, and platform permissions.
+## Scope
 
-Preserve the official capability surface:
+- Preserve the official ten-tool surface and no-permissions behaviour.
+- Do not add wrapper permission prompts, app or intent allowlists, action gates, risk classifiers, content inspection, alternate modes or model-driven planning.
+- Do not reintroduce app rewriting, same-app locking or focus telemetry.
+- Add adapter logic only for transport compatibility, zero-model-turn execution, retained official sessions, process lifecycle, packaging or a concrete user-visible bug.
+- Keep signature and Team ID verification, isolated temporary state, model-turn rejection and process cleanup.
+- Preserve compatible additional tool arguments and pass app selectors through unchanged.
 
-- do not add wrapper permission prompts, app or intent allowlists, action gates, risk classifiers, content inspection, alternate safe modes, or other policy that narrows the official tools
-- do not add defence-in-depth because a hypothetical safeguard is possible
-- add wrapper logic only when the transport, official component compatibility, zero-model-turn architecture, process lifecycle, or a concrete user-visible bug requires it
-- prefer removing accidental wrapper policy when Thomas explicitly approves that contract change
+## Review
 
-## Existing wrapper behavior
+Review the exact production path and report material, reachable regressions. Do not block focused work on speculative hardening or malformed input that the official producer cannot emit.
 
-The earlier background-computer-use wrapper introduced canonical app resolution, same-app locking, focus completion telemetry, and metadata-only audit. Version 0.3.4 retained all four. The maintainer subsequently approved removing app rewriting, locking, and focus telemetry because they narrowed or complicated the official capability surface. Do not reintroduce them as wrapper policy. Metadata-only audit remains observability, not an authorization boundary.
+A request to review does not authorize posting to GitHub. Show Thomas the exact proposed review, comment or issue text and get approval before posting it.
 
-Fix concrete compatibility failures in the supported transport when needed. Do not broaden wrapper behavior based only on synthetic or adversarial possibilities.
-
-Signature and Team ID verification, the signed responsible-process path, schema compatibility checks, zero-turn attestation, isolated temporary state, and process cleanup support the official transport and architecture. Keep them within that role. Do not turn them into a general security framework.
-
-## Review standard
-
-Review for material user outcomes and realistic regressions in the supported production path.
-
-- only report a blocking finding when it is reachable under normal supported inputs, or when evidence shows realistic exploitability and material effect
-- distinguish correctness and compatibility bugs from optional robustness or defence-in-depth
-- do not block a focused compatibility fix on unrelated hardening, speculative malformed input, or a stronger wrapper boundary
-- validate the exact diff and relevant end-to-end path
-- do not infer failure from a synthetic parser case when the producing system cannot realistically emit it
-
-A request to review a pull request authorizes local inspection and a report to the requester. It does not authorize a GitHub post. Before submitting a review, comment, reaction, issue, or suggested change, show Thomas the exact proposed text and get his explicit approval to post it.
-
-## Development
-
-Use the documented verification chain:
+## Verification
 
 ```bash
 npm ci
@@ -43,4 +27,4 @@ npm test
 npm run build
 ```
 
-Use benign real applications for live acceptance. Keep changes tied to the requested outcome. Preserve the official ten-tool contract and no-permissions behavior unless Thomas explicitly asks to change them.
+Use benign applications for live acceptance.

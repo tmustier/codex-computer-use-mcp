@@ -1,60 +1,55 @@
 import type { RequestOptions } from "@modelcontextprotocol/sdk/shared/protocol.js";
-import type { ElicitRequestParams, ElicitResult } from "@modelcontextprotocol/sdk/types.js";
+import {
+	ElicitRequestParamsSchema,
+	type ElicitRequestParams,
+	type ElicitResult,
+} from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 import type {
 	DirectBrokerElicitationRequest,
 	DirectBrokerElicitationResponse,
 } from "./direct-broker.ts";
+import type { JsonObject } from "./tools.ts";
 
 export interface McpElicitationClient {
 	elicitInput(params: ElicitRequestParams, options?: RequestOptions): Promise<ElicitResult>;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-/** Forward a signed app-server elicitation over standard MCP without changing its meaning. */
 export async function forwardOfficialElicitationToMcpClient(
 	client: McpElicitationClient,
 	request: DirectBrokerElicitationRequest,
 	signal?: AbortSignal,
 ): Promise<DirectBrokerElicitationResponse> {
-	let params: ElicitRequestParams;
+	let candidate: JsonObject;
 	if (request.mode === "url") {
-		if (
-			typeof request.message !== "string"
-			|| typeof request.url !== "string"
-			|| typeof request.elicitationId !== "string"
-		) return { action: "cancel" };
-		params = {
+		candidate = {
 			mode: "url",
 			message: request.message,
 			url: request.url,
 			elicitationId: request.elicitationId,
-			...(isRecord(request._meta) ? { _meta: request._meta } : {}),
 		};
 	} else if (request.mode === undefined || request.mode === "form") {
-		if (typeof request.message !== "string" || !isRecord(request.requestedSchema)) return { action: "cancel" };
-		params = {
+		candidate = {
 			mode: "form",
 			message: request.message,
 			requestedSchema: request.requestedSchema,
-			...(isRecord(request._meta) ? { _meta: request._meta } : {}),
-		} as ElicitRequestParams;
+		};
 	} else {
-		// OpenAI's richer openai/form mode is advertised only by clients that can render it.
 		return { action: "cancel" };
 	}
+	if (request._meta !== undefined) candidate._meta = request._meta;
+	const parsedParams = ElicitRequestParamsSchema.safeParse(candidate);
+	if (!parsedParams.success) return { action: "cancel" };
 
 	try {
-		const response = await client.elicitInput(params, signal ? { signal } : undefined);
-		return {
-			action: response.action,
-			...(response.content !== undefined ? { content: response.content } : {}),
-			...(isRecord(response._meta) ? { _meta: response._meta } : {}),
-		};
+		const response = await client.elicitInput(parsedParams.data, signal ? { signal } : undefined);
+		const result: DirectBrokerElicitationResponse = { action: response.action };
+		const content = z.json().safeParse(response.content);
+		if (content.success) result.content = content.data;
+		const metadata = z.json().safeParse(response._meta);
+		if (metadata.success) result._meta = metadata.data;
+		return result;
 	} catch {
-		// This is the MCP headless/unsupported-client outcome, not a fabricated decline.
 		return { action: "cancel" };
 	}
 }

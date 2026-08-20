@@ -5,15 +5,17 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
+import { z } from "zod";
 
 const execFileAsync = promisify(execFile);
-
-function packReport(stdout: string): { filename: string; files: Array<{ path: string }> } {
-	const parsed = JSON.parse(stdout);
-	const report = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0];
-	assert.ok(report && typeof report === "object");
-	return report as { filename: string; files: Array<{ path: string }> };
-}
+const packReportSchema = z.object({
+	filename: z.string(),
+	files: z.array(z.object({ path: z.string() })),
+});
+const packOutputSchema = z.union([
+	z.array(packReportSchema).nonempty(),
+	z.record(z.string(), packReportSchema),
+]);
 
 test("packed package installs and starts from a plain npm consumer", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "computer-use-package-test."));
@@ -26,11 +28,13 @@ test("packed package installs and starts from a plain npm consumer", async () =>
 		});
 		await symlink(path.join(projectRoot, "node_modules"), path.join(sourceRoot, "node_modules"), "dir");
 		const { stdout } = await execFileAsync("npm", ["pack", "--json", "--pack-destination", root], { cwd: sourceRoot });
-		const report = packReport(stdout);
+		const parsedReport = packOutputSchema.parse(JSON.parse(stdout));
+		const report = Array.isArray(parsedReport) ? parsedReport[0] : Object.values(parsedReport)[0];
+		assert.ok(report);
 		const files = report.files.map((item) => item.path).sort();
 		for (const required of [
-			"ARCHITECTURE.md",
 			"README.md",
+			"SECURITY.md",
 			"dist/mcp-server.js",
 			"dist/version.js",
 			"integrations/pi/index.ts",
@@ -53,7 +57,7 @@ test("packed package installs and starts from a plain npm consumer", async () =>
 		await assert.rejects(access(path.join(consumer, "node_modules", "@types", "node")));
 
 		const status = await execFileAsync(process.execPath, [path.join(installedRoot, "dist", "mcp-server.js"), "--status"]);
-		assert.equal(JSON.parse(status.stdout).architecture, "official-codex-app-server-direct-mcp-tool-call");
+		assert.equal(JSON.parse(status.stdout).permissionMode, "no-permissions");
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

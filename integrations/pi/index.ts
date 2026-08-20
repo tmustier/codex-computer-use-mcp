@@ -7,10 +7,10 @@ import {
   formatSize,
   getAgentDir,
   truncateHead,
-  withFileMutationQueue,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { z } from "zod";
 import { getDirectStatus } from "../../dist/direct-service.js";
 import {
   type DirectBrokerElicitationRequest,
@@ -19,47 +19,25 @@ import {
 import { DirectSessionExecutor } from "../../dist/session-executor.js";
 import {
   TOOL_INPUT_SCHEMAS,
-  COMPUTER_USE_METHODS,
   TOOL_METADATA,
+  COMPUTER_USE_METHODS,
   type DirectMethod,
+  type JsonObject,
 } from "../../dist/tools.js";
+
+const jsonObjectSchema = z.record(z.string(), z.json());
+const toolNames = COMPUTER_USE_METHODS.map((method) => `computer_use_${method}`);
 
 function titleFor(method: DirectMethod): string {
   return method.split("_").map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`).join(" ");
 }
 
-const INSPECTION_METHODS = new Set<DirectMethod>(["list_apps", "get_app_state"]);
-export const INSPECTION_TOOL_NAMES = [
-  "computer_use_list_apps",
-  "computer_use_get_app_state",
-] as const;
-export const INTERACTION_TOOL_NAMES = [
-  "computer_use_click",
-  "computer_use_perform_secondary_action",
-  "computer_use_set_value",
-  "computer_use_select_text",
-  "computer_use_scroll",
-  "computer_use_drag",
-  "computer_use_press_key",
-  "computer_use_type_text",
-] as const;
-
-export const COMPUTER_USE_TOOL_NAMES = [
-  ...INSPECTION_TOOL_NAMES,
-  ...INTERACTION_TOOL_NAMES,
-] as const;
-
-export function setInitialComputerUseTools(pi: Pick<ExtensionAPI, "getActiveTools" | "setActiveTools">): void {
-  pi.setActiveTools([...new Set([...pi.getActiveTools(), ...COMPUTER_USE_TOOL_NAMES])]);
-}
-
-export { DirectSessionExecutor as PiDirectSessionExecutor };
-
-export async function toPiContent(content: Array<Record<string, unknown>>): Promise<{
+interface PiContentResult {
   content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>;
   fullOutputPath?: string;
-  fullOutputSaveFailed?: true;
-}> {
+}
+
+export async function toPiContent(content: JsonObject[]): Promise<PiContentResult> {
   const textBlocks = content
     .filter((block) => block.type !== "image")
     .map((block) => String(block.text ?? ""));
@@ -68,81 +46,48 @@ export async function toPiContent(content: Array<Record<string, unknown>>): Prom
     maxBytes: DEFAULT_MAX_BYTES,
   }));
   let fullOutputPath: string | undefined;
-  let fullOutputSaveFailed = false;
   if (truncations.some((result) => result.truncated)) {
-    try {
-      const tempDir = await mkdtemp(path.join(tmpdir(), "pi-computer-use-"));
-      fullOutputPath = path.join(tempDir, "output.txt");
-      await withFileMutationQueue(fullOutputPath, async () => {
-        await writeFile(fullOutputPath!, textBlocks.join("\n\n"), { encoding: "utf8", mode: 0o600 });
-      });
-    } catch {
-      fullOutputPath = undefined;
-      fullOutputSaveFailed = true;
-    }
+    const tempDir = await mkdtemp(path.join(tmpdir(), "pi-computer-use-"));
+    fullOutputPath = path.join(tempDir, "output.txt");
+    await writeFile(fullOutputPath, textBlocks.join("\n\n"), { encoding: "utf8", mode: 0o600 });
   }
 
-  const result: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [];
+  const result: PiContentResult = { content: [] };
   let textIndex = 0;
   for (const block of content) {
     if (block.type === "image") {
-      result.push({ type: "image", data: String(block.data), mimeType: String(block.mimeType) });
+      result.content.push({ type: "image", data: String(block.data), mimeType: String(block.mimeType) });
       continue;
     }
     const truncated = truncations[textIndex++];
     const suffix = truncated.truncated
-      ? `\n\n[Official Computer Use text truncated: showing ${truncated.outputLines} of ${truncated.totalLines} lines (${formatSize(truncated.outputBytes)} of ${formatSize(truncated.totalBytes)}). ${fullOutputPath ? `Full output saved to: ${fullOutputPath}` : "The complete output could not be saved."}]`
+      ? `\n\n[Official Computer Use text truncated: showing ${truncated.outputLines} of ${truncated.totalLines} lines (${formatSize(truncated.outputBytes)} of ${formatSize(truncated.totalBytes)}). Full output saved to: ${fullOutputPath}]`
       : "";
-    result.push({ type: "text", text: `${truncated.content}${suffix}` });
+    result.content.push({ type: "text", text: `${truncated.content}${suffix}` });
   }
-  return {
-    content: result,
-    ...(fullOutputPath ? { fullOutputPath } : {}),
-    ...(fullOutputSaveFailed ? { fullOutputSaveFailed: true as const } : {}),
+  if (fullOutputPath) result.fullOutputPath = fullOutputPath;
+  return result;
+}
+
+interface PiElicitationContext {
+  hasUI: boolean;
+  ui: {
+    select(title: string, options: string[]): Promise<string | undefined>;
+    editor(title: string, prefill?: string): Promise<string | undefined>;
+    notify(message: string, type?: "info" | "warning" | "error"): void;
   };
-}
-
-function errorText(content: Array<Record<string, unknown>>): string {
-  return content
-    .filter((block) => block.type === "text")
-    .map((block) => String(block.text ?? ""))
-    .join("\n")
-    .slice(0, 2_000) || "Official Computer Use returned an error";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function initialFormContent(schema: unknown): Record<string, unknown> {
-  if (!isRecord(schema) || !isRecord(schema.properties)) return {};
-  const content: Record<string, unknown> = {};
-  for (const [key, rawProperty] of Object.entries(schema.properties)) {
-    if (!isRecord(rawProperty)) continue;
-    if (rawProperty.default !== undefined) content[key] = rawProperty.default;
-    else if (Array.isArray(rawProperty.enum) && rawProperty.enum.length > 0) content[key] = rawProperty.enum[0];
-    else if (rawProperty.type === "boolean") content[key] = false;
-    else if (rawProperty.type === "number" || rawProperty.type === "integer") content[key] = 0;
-    else if (rawProperty.type === "array") content[key] = [];
-    else content[key] = "";
-  }
-  return content;
 }
 
 export async function handleOfficialElicitation(
   request: DirectBrokerElicitationRequest,
-  ctx: { hasUI: boolean; ui: {
-    select(title: string, options: string[]): Promise<string | undefined>;
-    editor(title: string, prefill?: string): Promise<string | undefined>;
-    notify(message: string, type?: "info" | "warning" | "error"): void;
-  } },
+  ctx: PiElicitationContext,
   openUrl: (url: string) => Promise<boolean>,
 ): Promise<DirectBrokerElicitationResponse> {
   if (!ctx.hasUI) return { action: "cancel" };
-  const message = typeof request.message === "string" ? request.message : "Official Computer Use requests input";
+  const message = request.message ?? "Official Computer Use requests input";
 
   if (request.mode === "url") {
-    if (typeof request.url !== "string") return { action: "cancel" };
+    if (!request.url) return { action: "cancel" };
     const choice = await ctx.ui.select(`${message}\n${request.url}`, ["Open URL", "Decline", "Cancel"]);
     if (choice === "Decline") return { action: "decline" };
     if (choice !== "Open URL") return { action: "cancel" };
@@ -158,19 +103,21 @@ export async function handleOfficialElicitation(
     return { action: "cancel" };
   }
   const openAiForm = request.mode === "openai/form";
-  if (request.requestedSchema === undefined || (!openAiForm && !isRecord(request.requestedSchema))) return { action: "cancel" };
+  if (request.requestedSchema === undefined || (!openAiForm && !jsonObjectSchema.safeParse(request.requestedSchema).success)) {
+    return { action: "cancel" };
+  }
   const choice = await ctx.ui.select(message, ["Respond", "Decline", "Cancel"]);
   if (choice === "Decline") return { action: "decline" };
   if (choice !== "Respond") return { action: "cancel" };
-  let prefill = JSON.stringify(initialFormContent(request.requestedSchema), null, 2);
   const title = `${message}\nSchema: ${JSON.stringify(request.requestedSchema)}`;
+  let prefill = "{}";
   while (true) {
     const edited = await ctx.ui.editor(title, prefill);
     if (edited === undefined) return { action: "cancel" };
     prefill = edited;
     try {
-      const content = JSON.parse(edited);
-      if (!openAiForm && !isRecord(content)) throw new Error("Response must be a JSON object");
+      const parsed = JSON.parse(edited);
+      const content = openAiForm ? parsed : jsonObjectSchema.parse(parsed);
       return { action: "accept", content };
     } catch (error) {
       ctx.ui.notify(error instanceof Error ? error.message : "Response must be valid JSON", "error");
@@ -183,68 +130,55 @@ export default function directComputerUse(pi: ExtensionAPI) {
   const sessionExecutor = new DirectSessionExecutor();
 
   pi.registerCommand("computer-use-status", {
-    description: "Show the direct-call architecture, durable no-permissions policy, signed broker, and private audit path",
+    description: "Show Computer Use status",
     handler: async (_args, ctx) => {
-      const status = getDirectStatus(stateRoot);
-      ctx.ui.notify(JSON.stringify(status, null, 2), "info");
+      ctx.ui.notify(JSON.stringify(getDirectStatus(stateRoot), null, 2), "info");
     },
   });
 
   for (const method of COMPUTER_USE_METHODS) {
     const piName = `computer_use_${method}`;
-    const baseDescription = TOOL_METADATA[method].description;
-    const inspectionPromptMetadata = INSPECTION_METHODS.has(method) ? {
-      promptSnippet: `${titleFor(method)} through the official signed macOS Computer Use service`,
-      promptGuidelines: [
-        `${piName} is a direct typed tool: choose its arguments yourself; it does not invoke a nested planner or model.`,
-        `Call computer_use_get_app_state once per assistant turn before interacting with an app.`,
-      ],
-    } : {};
     pi.registerTool({
       name: piName,
       label: titleFor(method),
-      description: `${baseDescription}${baseDescription.endsWith(".") ? "" : "."} Text output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}; full text is saved to a temporary file when truncated.`,
-      ...inspectionPromptMetadata,
+      description: TOOL_METADATA[method].description,
+      // SAFETY: Pi accepts standard JSON Schema objects; these schemas are generated directly from the tool's Zod parser.
       parameters: TOOL_INPUT_SCHEMAS[method] as any,
-      async execute(_toolCallId, params, signal, onUpdate, ctx) {
-        const response = await sessionExecutor.execute(
-          method,
-          params as Record<string, unknown>,
-          {
-            stateRoot,
-            signal,
-            supportsOpenAiFormElicitation: true,
-            onElicitation: (request) => handleOfficialElicitation(
-              request,
-              ctx,
-              async (url) => {
-                const result = await pi.exec("/usr/bin/open", ["--", url], { signal, timeout: 15_000 });
-                return result.code === 0;
-              },
-            ),
-            onProgress: (message) => onUpdate?.({ content: [{ type: "text", text: message }], details: { status: "running" } }),
-          },
-        );
-        if (response.isError) throw new Error(errorText(response.content));
+      async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+        const parsedParams = jsonObjectSchema.parse(params);
+        const response = await sessionExecutor.execute(method, parsedParams, {
+          stateRoot,
+          signal,
+          supportsOpenAiFormElicitation: true,
+          onElicitation: (request) => handleOfficialElicitation(
+            request,
+            ctx,
+            async (url) => (await pi.exec("/usr/bin/open", ["--", url], { signal, timeout: 15_000 })).code === 0,
+          ),
+        });
+        if (response.isError) {
+          const message = response.content
+            .filter((block) => block.type === "text")
+            .map((block) => String(block.text ?? ""))
+            .join("\n")
+            .slice(0, 2_000);
+          throw new Error(message || "Official Computer Use returned an error");
+        }
         const rendered = await toPiContent(response.content);
-        return {
-          content: rendered.content,
-          details: {
-            ...response.details,
-            ...(rendered.fullOutputPath ? { fullOutputPath: rendered.fullOutputPath } : {}),
-            ...(rendered.fullOutputSaveFailed ? { fullOutputSaveFailed: true } : {}),
-          },
-        };
+        const details: JsonObject = {};
+        if (response.structuredContent !== undefined) details.officialStructuredContent = response.structuredContent;
+        if (rendered.fullOutputPath) details.fullOutputPath = rendered.fullOutputPath;
+        return { content: rendered.content, details };
       },
       renderCall(args, theme) {
-        const renderedArgs = args as Record<string, unknown>;
-        const app = typeof renderedArgs.app === "string" ? ` ${renderedArgs.app}` : "";
+        const parsed = z.object({ app: z.string().optional() }).safeParse(args);
+        const app = parsed.success && parsed.data.app ? ` ${parsed.data.app}` : "";
         return new Text(theme.fg("toolTitle", theme.bold(`${piName} `)) + theme.fg("accent", app.trim()), 0, 0);
       },
     });
   }
 
-  pi.on("session_start", () => setInitialComputerUseTools(pi));
-  pi.on("agent_settled", () => { void sessionExecutor.close().catch(() => undefined); });
-  pi.on("session_shutdown", () => { void sessionExecutor.close().catch(() => undefined); });
+  pi.on("session_start", () => pi.setActiveTools([...new Set([...pi.getActiveTools(), ...toolNames])]));
+  pi.on("agent_settled", () => sessionExecutor.close());
+  pi.on("session_shutdown", () => sessionExecutor.close());
 }
