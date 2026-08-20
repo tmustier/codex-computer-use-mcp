@@ -2,6 +2,21 @@
 
 This changelog records user-visible changes from version 0.3.2 onwards.
 
+## Unreleased
+
+### Fixed
+
+- Remove the install-time build that could delete the published `dist` directory.
+- Report the package version from `package.json` in both MCP protocol identities.
+- Support npm 12 source installs and package inspection with `package-lock.json` and the current `npm pack --json` format.
+
+### Changed
+
+- Keep TypeScript and Node.js types in development dependencies instead of installing them for consumers.
+- Derive Pi tool parameters from the same schemas used by the MCP server.
+- Dispatch directly instead of blocking on helper inventory, descriptions, annotations, or compatible schema drift.
+- Remove arbitrary protocol-line and result-size limits, stale Dictionary verification, and redundant no-permissions configuration code.
+
 ## 0.3.4 - 2026-07-27
 
 ### Fixed

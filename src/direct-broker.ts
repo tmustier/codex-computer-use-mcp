@@ -3,12 +3,8 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-	EXPECTED_OFFICIAL_INPUT_SCHEMAS,
-	OFFICIAL_METHODS,
-	type DirectMethod,
-	type DirectToolArguments,
-} from "./tools.ts";
+import type { DirectMethod, DirectToolArguments } from "./tools.ts";
+import { PACKAGE_VERSION } from "./version.ts";
 
 export const CODEX_PATH = "/Applications/ChatGPT.app/Contents/Resources/codex";
 export const COMPUTER_USE_PLUGIN_ROOT =
@@ -18,8 +14,6 @@ const CLIENT_RELATIVE_PATH = "Contents/SharedSupport/SkyComputerUseClient.app/Co
 export const COMPUTER_USE_CLIENT_PATH = path.join(os.userInfo().homedir, ".codex", COMPUTER_USE_APP_RELATIVE_PATH, CLIENT_RELATIVE_PATH);
 export const LEGACY_COMPUTER_USE_CLIENT_PATH = path.join(COMPUTER_USE_PLUGIN_ROOT, "Codex Computer Use.app", CLIENT_RELATIVE_PATH);
 const OPENAI_TEAM_ID = "2DC432GLL2";
-const MAX_PROTOCOL_LINE_BYTES = 8 * 1024 * 1024;
-const MAX_RESULT_BYTES = 25 * 1024 * 1024;
 
 export interface DirectBrokerElicitationRequest extends Record<string, unknown> {
 	mode?: string;
@@ -243,45 +237,6 @@ export function buildDirectAppServerArgs(mcpCwd = COMPUTER_USE_PLUGIN_ROOT, clie
 	];
 }
 
-function normalizeSchema(value: unknown): unknown {
-	if (Array.isArray(value)) {
-		return value.map(normalizeSchema).sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
-	}
-	if (value && typeof value === "object") {
-		return Object.fromEntries(
-			Object.entries(value as Record<string, unknown>)
-				.sort(([left], [right]) => left.localeCompare(right))
-				.map(([key, child]) => [key, normalizeSchema(child)]),
-		);
-	}
-	return value;
-}
-
-function schemasEqual(left: unknown, right: unknown): boolean {
-	return JSON.stringify(normalizeSchema(left)) === JSON.stringify(normalizeSchema(right));
-}
-
-function validateInventory(result: unknown): void {
-	const data = (result as any)?.data;
-	if (!Array.isArray(data)) throw new BrokerVerificationError("App-server returned an invalid MCP inventory");
-	const server = data.find((entry: any) => entry?.name === "computer-use");
-	if (!server || !server.tools || typeof server.tools !== "object") {
-		throw new BrokerVerificationError("Official computer-use MCP server was not available");
-	}
-	const names = Object.keys(server.tools).sort();
-	const expectedNames = [...OFFICIAL_METHODS].sort();
-	if (JSON.stringify(names) !== JSON.stringify(expectedNames)) {
-		throw new BrokerVerificationError("Official Computer Use tool inventory drifted; refusing direct dispatch");
-	}
-	for (const method of OFFICIAL_METHODS) {
-		const upstream = server.tools[method];
-		const schema = upstream?.inputSchema ?? upstream?.input_schema;
-		if (!schemasEqual(schema, EXPECTED_OFFICIAL_INPUT_SCHEMAS[method])) {
-			throw new BrokerVerificationError(`Official Computer Use schema drifted for ${method}; refusing direct dispatch`);
-		}
-	}
-}
-
 function validateResult(value: unknown): {
 	content: Array<Record<string, unknown>>;
 	structuredContent?: unknown;
@@ -289,24 +244,10 @@ function validateResult(value: unknown): {
 } {
 	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Official Computer Use returned an invalid result");
 	const record = value as Record<string, unknown>;
-	if (!Array.isArray(record.content) || record.content.length > 100) throw new Error("Official Computer Use returned invalid content blocks");
+	if (!Array.isArray(record.content) || record.content.some((item) => !item || typeof item !== "object" || Array.isArray(item))) {
+		throw new Error("Official Computer Use returned invalid content blocks");
+	}
 	const content = record.content as Array<Record<string, unknown>>;
-	for (const item of content) {
-		if (!item || typeof item !== "object" || Array.isArray(item) || (item.type !== "text" && item.type !== "image")) {
-			throw new Error("Official Computer Use returned an unsupported content block");
-		}
-		if (item.type === "text" && typeof item.text !== "string") throw new Error("Official Computer Use returned malformed text content");
-		if (item.type === "image" && (typeof item.data !== "string" || typeof item.mimeType !== "string")) {
-			throw new Error("Official Computer Use returned malformed image content");
-		}
-	}
-	let encodedBytes = 0;
-	try {
-		encodedBytes = Buffer.byteLength(JSON.stringify({ content, structuredContent: record.structuredContent }), "utf8");
-	} catch {
-		throw new Error("Official Computer Use returned unserializable content");
-	}
-	if (encodedBytes > MAX_RESULT_BYTES) throw new Error("Official Computer Use result exceeded the 25MB safety bound");
 	return {
 		content,
 		...(record.structuredContent !== undefined ? { structuredContent: record.structuredContent } : {}),
@@ -650,9 +591,6 @@ export async function createOfficialDirectToolSession(
 				const newline = chunk.indexOf("\n", offset);
 				const end = newline === -1 ? chunk.length : newline;
 				const segment = chunk.slice(offset, end);
-				if (Buffer.byteLength(stdoutBuffer, "utf8") + Buffer.byteLength(segment, "utf8") > MAX_PROTOCOL_LINE_BYTES) {
-					fail(new Error("Official app-server protocol line exceeded the 8MB safety bound")); return;
-				}
 				if (newline === -1) { stdoutBuffer += segment; return; }
 				const line = stdoutBuffer + segment;
 				stdoutBuffer = "";
@@ -663,7 +601,7 @@ export async function createOfficialDirectToolSession(
 		proc.stdout.on("end", () => { if (stdoutBuffer.length > 0) processProtocolLine(stdoutBuffer); stdoutBuffer = ""; });
 
 		await request("initialize", {
-			clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: "0.3.3" },
+			clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: PACKAGE_VERSION },
 			capabilities: { mcpServerOpenaiFormElicitation: options.supportsOpenAiFormElicitation === true },
 		}, 15_000);
 		send({ method: "initialized" });
@@ -672,9 +610,7 @@ export async function createOfficialDirectToolSession(
 		}, 30_000)) as any;
 		const thread = started?.thread;
 		threadId = thread?.id;
-		if (typeof threadId !== "string" || thread.ephemeral !== true || !Object.prototype.hasOwnProperty.call(thread, "path") || thread.path !== null || !Array.isArray(thread.turns) || thread.turns.length !== 0) {
-			throw new BrokerVerificationError("App-server did not attest an empty pathless ephemeral runtime context");
-		}
+		if (typeof threadId !== "string") throw new BrokerVerificationError("App-server did not return a usable thread");
 		ephemeralThread = true;
 	} catch (error) {
 		const base = error instanceof Error ? error : new Error(String(error));
@@ -707,8 +643,6 @@ export async function createOfficialDirectToolSession(
 					else callOptions.signal.addEventListener("abort", abortHandler, { once: true });
 				}
 				if (fatalError) throw fatalError;
-				const inventory = await request("mcpServerStatus/list", { threadId, detail: "toolsAndAuthOnly" }, 45_000);
-				validateInventory(inventory);
 				const raw = await request("mcpServer/tool/call", { threadId, server: "computer-use", tool: method, arguments: args }, callOptions.timeoutMs ?? 120_000);
 				directCalls = 1;
 				if (modelTurnsStarted !== 0) throw new BrokerVerificationError("Model-turn activity was observed during direct dispatch");

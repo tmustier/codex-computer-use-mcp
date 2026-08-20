@@ -98,7 +98,7 @@ Version 0.3.2 activates all ten direct Pi tools at session start and retains one
 4. With an unlocked Mac and a benign background app, call `computer_use_get_app_state`, then one harmless interaction against the same app.
 5. Verify the state and action used one app-server runtime/thread, the action did not report an inactive Computer Use session, focus remained preserved, and cleanup completed.
 
-The exact schemas, strict signature and OpenAI Team ID checks, canonical client and app resolution, Full access policy, zero-turn attestation, inventory validation, kernel lock, focus telemetry, process-tree cleanup, and content-safe audit remain mandatory.
+Strict signature and OpenAI Team ID checks, canonical client and app resolution, Full access policy, zero-turn dispatch, kernel locking, focus telemetry, process-tree cleanup, and content-safe audit remain mandatory. Description, annotation, inventory, and compatible schema drift do not block dispatch.
 
 ## Upgrade from version 0.3.2 to 0.3.3
 
@@ -131,4 +131,4 @@ Direct state can be removed only after rollback evidence is captured and no proc
 
 ## Generic MCP gateway
 
-If Pi uses `mcp.json`, retain `directTools: false`. Use the exact `0.3.4` package shown in `integrations/pi/mcp.json.example`. During source acceptance, use a distinct temporary server name and source path, then remove it. The direct Pi adapter is the primary live path; do not leave the version 0.1 aggregate server active after the switch.
+If Pi uses `mcp.json`, retain `directTools: false` and point `integrations/pi/mcp.json.example` at the reviewed local package installation. During source acceptance, use a distinct temporary server name and source path, then remove it. The direct Pi adapter is the primary live path; do not leave the version 0.1 aggregate server active after the switch.

@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 import { appendAudit, type AuditRecord } from "./audit.ts";
-import { loadConfig, type ExtensionConfig, type PermissionMode } from "./config.ts";
+import { PERMISSION_MODE } from "./config.ts";
 import {
 	callOfficialDirectTool,
 	DirectBrokerCallError,
@@ -22,9 +22,8 @@ import {
 } from "./system.ts";
 import {
 	MUTATING_METHODS,
-	OFFICIAL_METHODS,
+	COMPUTER_USE_METHODS,
 	isDirectMethod,
-	targetAppFor,
 	validateDirectArguments,
 	type DirectMethod,
 	type DirectToolArguments,
@@ -111,15 +110,10 @@ function rejectedMetadata(raw: unknown): { method: AuditRecord["method"]; inputB
 	};
 }
 
-function authorizationFor(_mode: PermissionMode, _method: DirectMethod): AuditRecord["authorization"] {
-	return "no_permissions_unrestricted";
-}
-
 export async function executeDirectTool(raw: unknown, deps: DirectServiceDependencies = {}): Promise<DirectResponse> {
 	const stateRoot = deps.stateRoot ?? defaultStateRoot();
 	const runId = crypto.randomUUID();
 	const startedAt = Date.now();
-	const config = await loadConfig();
 	let request: DirectRequest;
 	try {
 		if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new DirectPolicyError("Direct Computer Use request must be an object");
@@ -133,7 +127,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			timestamp: new Date().toISOString(),
 			runId,
 			method: rejected.method,
-			permissionMode: config.permissionMode,
+			permissionMode: PERMISSION_MODE,
 			app: null,
 			mutating: rejected.mutating,
 			authorization: "none",
@@ -158,13 +152,13 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 		throw new DirectPolicyError("Direct Computer Use arguments did not match the typed schema");
 	}
 
-	const rawApp = targetAppFor(request.method, request.arguments);
+	const rawApp = request.method === "list_apps" ? undefined : request.arguments.app as string | undefined;
 	const identity = rawApp ? (deps.resolveIdentity ?? resolveAppIdentity)(rawApp) : undefined;
 	if (rawApp && !identity?.bundleId) {
 		const audit: AuditRecord = {
-			timestamp: new Date().toISOString(), runId, method: request.method, permissionMode: config.permissionMode,
+			timestamp: new Date().toISOString(), runId, method: request.method, permissionMode: PERMISSION_MODE,
 			app: auditAppIdentifier(rawApp, identity), mutating: MUTATING_METHODS.has(request.method),
-			authorization: authorizationFor(config.permissionMode, request.method), inputBytes: inputByteCount(request.arguments),
+			authorization: "no_permissions_unrestricted", inputBytes: inputByteCount(request.arguments),
 			outcome: "identity_rejected", durationMs: Date.now() - startedAt, brokerVersion: null, clientBuild: null,
 			directCalls: 0, modelTurnsStarted: 0, ephemeralThread: null, elicitationRequests: 0,
 			backgroundPreserved: null, brokerCleanupVerified: true, appLeaseReleased: true, resultContentTypes: [], resultBytes: 0,
@@ -235,9 +229,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			}
 			throw error;
 		}
-		if (broker.modelTurnsStarted !== 0 || broker.ephemeralThread !== true) {
-			throw new DirectPolicyError("Direct broker violated the zero-model-turn architecture");
-		}
+		if (broker.modelTurnsStarted !== 0) throw new DirectPolicyError("Direct broker started a model turn");
 		outcome = broker.isError ? "official_error" : "ok";
 		response = {
 			ok: !broker.isError,
@@ -246,7 +238,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			details: {
 				runId,
 				method: request.method,
-				permissionMode: config.permissionMode,
+				permissionMode: PERMISSION_MODE,
 				app: identity?.bundleId ?? null,
 				outcome,
 				directCalls: 1,
@@ -291,10 +283,10 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			timestamp: new Date().toISOString(),
 			runId,
 			method: request.method,
-			permissionMode: config.permissionMode,
+			permissionMode: PERMISSION_MODE,
 			app: auditAppIdentifier(rawApp, identity),
 			mutating: MUTATING_METHODS.has(request.method),
-			authorization: authorizationFor(config.permissionMode, request.method),
+			authorization: "no_permissions_unrestricted",
 			inputBytes: inputByteCount(canonicalArgs),
 			outcome,
 			durationMs: Date.now() - startedAt,
@@ -321,8 +313,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 	return response;
 }
 
-export async function getDirectStatus(stateRoot = defaultStateRoot()): Promise<Record<string, unknown>> {
-	const config: ExtensionConfig = await loadConfig();
+export function getDirectStatus(stateRoot = defaultStateRoot()): Record<string, unknown> {
 	let brokerVerified = false;
 	let brokerVersion: string | undefined;
 	let clientBuild: string | undefined;
@@ -334,7 +325,7 @@ export async function getDirectStatus(stateRoot = defaultStateRoot()): Promise<R
 	}
 	return {
 		stateRoot,
-		permissionMode: config.permissionMode,
+		permissionMode: PERMISSION_MODE,
 		brokerVerified,
 		...(brokerVersion ? { brokerVersion } : {}),
 		...(clientBuild ? { clientBuild } : {}),
@@ -348,8 +339,8 @@ export async function getDirectStatus(stateRoot = defaultStateRoot()): Promise<R
 		officialAppApprovalHandling: "auto-approved-by-codex-full-access",
 		officialElicitationHandling: "forwarded-if-emitted",
 		wrapperAuthorization: "unrestricted",
-		availableMethods: [...OFFICIAL_METHODS],
-		supportedMethods: [...OFFICIAL_METHODS],
+		availableMethods: [...COMPUTER_USE_METHODS],
+		supportedMethods: [...COMPUTER_USE_METHODS],
 		appLockRoot: globalAppLockRoot(),
 		auditPath: path.join(stateRoot, "audit", "direct-computer-use.jsonl"),
 	};

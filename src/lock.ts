@@ -32,18 +32,11 @@ export function globalAppLockRoot(): string {
 }
 
 async function ensurePrivateDirectory(directory: string): Promise<void> {
-	try {
-		const info = await lstat(directory);
-		if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("App-lock path must be a non-symlink directory");
-		if (process.getuid && info.uid !== process.getuid()) throw new Error("App-lock path must be owned by the current user");
-		if ((info.mode & 0o077) !== 0) throw new Error("App-lock path permissions must be private");
-	} catch (error: any) {
-		if (error?.code !== "ENOENT") throw error;
-		await mkdir(directory, { recursive: true, mode: 0o700 });
-		const info = await lstat(directory);
-		if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("App-lock path must be a non-symlink directory");
-		if (process.getuid && info.uid !== process.getuid()) throw new Error("App-lock path must be owned by the current user");
-	}
+	await mkdir(directory, { recursive: true, mode: 0o700 });
+	const info = await lstat(directory);
+	if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("App-lock path must be a non-symlink directory");
+	if (process.getuid && info.uid !== process.getuid()) throw new Error("App-lock path must be owned by the current user");
+	if ((info.mode & 0o077) !== 0) throw new Error("App-lock path permissions must be private");
 	await chmod(directory, 0o700);
 }
 
@@ -75,12 +68,7 @@ async function publishOwner(ownerPath: string, owner: LockOwner): Promise<void> 
 	}
 }
 
-export async function acquireAppLock(
-	stateDir: string,
-	app: string,
-	runId: string,
-	_staleAfterMs = 10 * 60_000,
-): Promise<AppLock> {
+export async function acquireAppLock(stateDir: string, app: string, runId: string): Promise<AppLock> {
 	await ensurePrivateDirectory(stateDir);
 	const locksDir = path.join(stateDir, "locks");
 	await ensurePrivateDirectory(locksDir);

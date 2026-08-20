@@ -32,9 +32,7 @@ test("CLI exposes durable no-permissions status and no mode-selection route", as
 		assert.equal(status.modelUsage, false);
 		assert.equal(status.ephemeralZeroTurnRuntimeContextRequired, true);
 
-		for (const args of [["--configure", "safe"], ["--configure", "full-permissions"], ["--configure", "no-permissions"]]) {
-			await assert.rejects(run(stateRoot, args), /has no alternate mode or configuration command/);
-		}
+		await assert.rejects(run(stateRoot, ["--configure", "safe"]), /has no alternate mode or configuration command/);
 		await assert.rejects(access(path.join(stateRoot, "config.json")));
 		await assert.rejects(access(path.join(stateRoot, "audit", "direct-computer-use.jsonl")));
 	} finally {

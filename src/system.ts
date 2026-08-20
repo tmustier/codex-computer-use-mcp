@@ -5,14 +5,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-/**
- * Parse the bundle identifier from `lsappinfo info -only bundleID <asn>` output.
- *
- * Upstream API assumption: LaunchServices changed the emitted key across macOS
- * releases. macOS <= 26 prints `"CFBundleIdentifier"="com.example"`; macOS 27+
- * (Darwin 27) prints `bundleID="com.example"` and drops `CFBundleIdentifier`.
- * Accept both spellings so retained focus telemetry survives the rename.
- */
+/** Accept the LaunchServices keys used before and after macOS 27. */
 export function parseLsappinfoBundleId(stdout: string): string | undefined {
 	return stdout.match(/(?:"CFBundleIdentifier"|bundleID)="([^"]+)"/)?.[1];
 }
@@ -52,25 +45,6 @@ export async function frontmostBundleIdAsync(): Promise<string | undefined> {
 export interface ResolvedAppIdentity {
 	bundleId?: string;
 	leaseId: string;
-	verifiedSystemDictionary: boolean;
-}
-
-const DICTIONARY_BUNDLE_ID = "com.apple.Dictionary";
-const DICTIONARY_PATH = "/System/Applications/Dictionary.app";
-
-function verifySystemDictionaryBundle(bundleId: string): boolean {
-	if (bundleId !== DICTIONARY_BUNDLE_ID) return false;
-	const verify = spawnSync("/usr/bin/codesign", ["--verify", "--strict", DICTIONARY_PATH], {
-		encoding: "utf8",
-		timeout: 10_000,
-	});
-	if (verify.status !== 0) return false;
-	const requirement = spawnSync("/usr/bin/codesign", ["-dr", "-", DICTIONARY_PATH], {
-		encoding: "utf8",
-		timeout: 10_000,
-	});
-	const output = `${requirement.stdout ?? ""}\n${requirement.stderr ?? ""}`;
-	return requirement.status === 0 && output.includes(`identifier "${DICTIONARY_BUNDLE_ID}"`) && output.includes("anchor apple");
 }
 
 export function resolveAppIdentity(app: string): ResolvedAppIdentity {
@@ -85,15 +59,11 @@ export function resolveAppIdentity(app: string): ResolvedAppIdentity {
 			});
 			const bundleId = (metadata.stdout ?? "").trim();
 			if (metadata.status === 0 && /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(bundleId)) {
-				return {
-					bundleId,
-					leaseId: bundleId.toLowerCase(),
-					verifiedSystemDictionary: verifySystemDictionaryBundle(bundleId),
-				};
+				return { bundleId, leaseId: bundleId.toLowerCase() };
 			}
-			return { leaseId: `path:${resolvedPath.toLowerCase()}`, verifiedSystemDictionary: false };
+			return { leaseId: `path:${resolvedPath.toLowerCase()}` };
 		} catch {
-			return { leaseId: `path:${trimmed.toLowerCase()}`, verifiedSystemDictionary: false };
+			return { leaseId: `path:${trimmed.toLowerCase()}` };
 		}
 	}
 	const isBundleId = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(trimmed);
@@ -108,18 +78,10 @@ export function resolveAppIdentity(app: string): ResolvedAppIdentity {
 	});
 	const resolvedBundleId = (result.stdout ?? "").trim();
 	if (result.status === 0 && /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(resolvedBundleId)) {
-		return {
-			bundleId: resolvedBundleId,
-			leaseId: resolvedBundleId.toLowerCase(),
-			verifiedSystemDictionary: verifySystemDictionaryBundle(resolvedBundleId),
-		};
+		return { bundleId: resolvedBundleId, leaseId: resolvedBundleId.toLowerCase() };
 	}
-	if (isBundleId) return { leaseId: trimmed.toLowerCase(), verifiedSystemDictionary: false };
-	return { leaseId: `name:${trimmed.toLowerCase()}`, verifiedSystemDictionary: false };
-}
-
-export function resolveAppLeaseId(app: string): string {
-	return resolveAppIdentity(app).leaseId;
+	if (isBundleId) return { leaseId: trimmed.toLowerCase() };
+	return { leaseId: `name:${trimmed.toLowerCase()}` };
 }
 
 export interface TargetFrontmostWatcher {
@@ -213,7 +175,6 @@ export async function watchTargetFrontmost(
 				}
 			}
 			clearInterval(retryTimer);
-			// Events may arrive only while SIGTERM is draining stdout. Resolve every queued ASN before returning.
 			for (let attempt = 0; unresolvedAsns.size > 0 && attempt < 10; attempt += 1) {
 				resolvePending();
 				if (unresolvedAsns.size > 0) await new Promise((resolve) => setTimeout(resolve, 25));

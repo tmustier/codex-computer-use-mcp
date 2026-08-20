@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { EXPECTED_OFFICIAL_INPUT_SCHEMAS, OFFICIAL_METHODS, OFFICIAL_TOOL_METADATA } from "../src/tools.ts";
+import { TOOL_INPUT_SCHEMAS, COMPUTER_USE_METHODS, TOOL_METADATA } from "../src/tools.ts";
+
+const packageVersion = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
 
 test("stdio MCP advertises one unrestricted no-permissions interface with all ten direct tools", async () => {
 	const stateRoot = await mkdtemp(path.join(os.tmpdir(), "direct-computer-use-mcp-test."));
@@ -19,15 +22,16 @@ test("stdio MCP advertises one unrestricted no-permissions interface with all te
 	});
 	try {
 		await client.connect(transport);
+		assert.deepEqual(client.getServerVersion(), { name: "codex-computer-use-mcp", version: packageVersion });
 		const listed = await client.listTools();
-		assert.deepEqual(listed.tools.map((tool) => tool.name).sort(), [...OFFICIAL_METHODS, "computer_use_status"].sort());
-		for (const method of OFFICIAL_METHODS) {
+		assert.deepEqual(listed.tools.map((tool) => tool.name).sort(), [...COMPUTER_USE_METHODS, "computer_use_status"].sort());
+		for (const method of COMPUTER_USE_METHODS) {
 			const tool = listed.tools.find((item) => item.name === method)!;
 			assert.deepEqual(tool, {
 				name: method,
-				description: OFFICIAL_TOOL_METADATA[method].description,
-				inputSchema: EXPECTED_OFFICIAL_INPUT_SCHEMAS[method],
-				annotations: OFFICIAL_TOOL_METADATA[method].annotations,
+				description: TOOL_METADATA[method].description,
+				inputSchema: TOOL_INPUT_SCHEMAS[method],
+				annotations: TOOL_METADATA[method].annotations,
 			});
 		}
 
@@ -40,7 +44,7 @@ test("stdio MCP advertises one unrestricted no-permissions interface with all te
 		assert.equal(details.officialAppApprovalHandling, "auto-approved-by-codex-full-access");
 		assert.equal(details.officialElicitationHandling, "forwarded-if-emitted");
 		assert.equal(details.wrapperAuthorization, "unrestricted");
-		assert.deepEqual(details.availableMethods, OFFICIAL_METHODS);
+		assert.deepEqual(details.availableMethods, COMPUTER_USE_METHODS);
 		assert.equal(details.brokerVerified, true);
 		assert.equal(details.nestedModel, false);
 		assert.equal(details.modelUsage, false);
