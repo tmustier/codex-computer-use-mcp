@@ -9,9 +9,9 @@ import {
   type OfficialDirectToolSession,
 } from "../../dist/direct-broker.js";
 import {
-  EXPECTED_OFFICIAL_INPUT_SCHEMAS,
-  OFFICIAL_METHODS,
-  OFFICIAL_TOOL_METADATA,
+  TOOL_INPUT_SCHEMAS,
+  COMPUTER_USE_METHODS,
+  TOOL_METADATA,
   type DirectMethod,
 } from "../../dist/tools.js";
 
@@ -230,7 +230,7 @@ export default function directComputerUse(pi: ExtensionAPI) {
     },
   });
 
-  for (const method of OFFICIAL_METHODS) {
+  for (const method of COMPUTER_USE_METHODS) {
     const piName = `computer_use_${method}`;
     const inspectionPromptMetadata = INSPECTION_METHODS.has(method) ? {
       promptSnippet: `${titleFor(method)} through the official signed macOS Computer Use service`,
@@ -242,9 +242,9 @@ export default function directComputerUse(pi: ExtensionAPI) {
     pi.registerTool({
       name: piName,
       label: titleFor(method),
-      description: OFFICIAL_TOOL_METADATA[method].description,
+      description: TOOL_METADATA[method].description,
       ...inspectionPromptMetadata,
-      parameters: EXPECTED_OFFICIAL_INPUT_SCHEMAS[method] as any,
+      parameters: TOOL_INPUT_SCHEMAS[method] as any,
       async execute(_toolCallId, params, signal, onUpdate, ctx) {
         const response = await sessionExecutor.execute(
           method,

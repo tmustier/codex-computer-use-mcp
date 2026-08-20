@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { EXPECTED_OFFICIAL_INPUT_SCHEMAS, OFFICIAL_METHODS, OFFICIAL_TOOL_METADATA } from "../src/tools.ts";
+import { TOOL_INPUT_SCHEMAS, COMPUTER_USE_METHODS, TOOL_METADATA } from "../src/tools.ts";
 
 test("Pi surfaces an official form elicitation and returns the user's structured response", async () => {
 	const { handleOfficialElicitation } = await import("../integrations/pi/index.ts");
@@ -85,7 +85,7 @@ test("Pi preserves explicit decline and uses cancel when no UI is available", as
 	assert.deepEqual(headless, { action: "cancel" });
 });
 
-test("Pi runtime registration exposes the exact official contract for all ten tools", async () => {
+test("Pi runtime registers all ten Computer Use tools", async () => {
 	const {
 		default: adapter,
 		INSPECTION_TOOL_NAMES,
@@ -100,7 +100,7 @@ test("Pi runtime registration exposes the exact official contract for all ten to
 	}> = [];
 	const commands: string[] = [];
 	const handlers = new Map<string, () => void>();
-	const active = new Set(["read", ...OFFICIAL_METHODS.map((method) => `computer_use_${method}`)]);
+	const active = new Set(["read", ...COMPUTER_USE_METHODS.map((method) => `computer_use_${method}`)]);
 	adapter({
 		registerTool(tool: typeof tools[number]) { tools.push(tool); },
 		registerCommand(name: string) { commands.push(name); },
@@ -109,11 +109,11 @@ test("Pi runtime registration exposes the exact official contract for all ten to
 		setActiveTools(names: string[]) { active.clear(); for (const name of names) active.add(name); },
 	} as any);
 	assert.deepEqual(commands, ["computer-use-status"]);
-	assert.deepEqual(tools.map((tool) => tool.name).sort(), OFFICIAL_METHODS.map((method) => `computer_use_${method}`).sort());
-	for (const method of OFFICIAL_METHODS) {
+	assert.deepEqual(tools.map((tool) => tool.name).sort(), COMPUTER_USE_METHODS.map((method) => `computer_use_${method}`).sort());
+	for (const method of COMPUTER_USE_METHODS) {
 		const tool = tools.find((item) => item.name === `computer_use_${method}`)!;
-		assert.equal(tool.description, OFFICIAL_TOOL_METADATA[method].description);
-		assert.deepEqual(tool.parameters, EXPECTED_OFFICIAL_INPUT_SCHEMAS[method]);
+		assert.equal(tool.description, TOOL_METADATA[method].description);
+		assert.deepEqual(tool.parameters, TOOL_INPUT_SCHEMAS[method]);
 		if (INSPECTION_TOOL_NAMES.includes(tool.name as any)) {
 			assert.ok(tool.promptSnippet);
 			assert.ok(tool.promptGuidelines?.length);

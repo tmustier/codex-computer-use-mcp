@@ -121,7 +121,7 @@ nested prompts or result summaries
 | Wrapper approval prompts/configuration | former wrapper policy | removed; no command, config, environment, or per-call selector remains |
 | Official first-party app access | official Codex control | official Codex Full access auto-accepts normal empty-schema app approval elicitations; any elicitation app-server emits is forwarded unchanged |
 | macOS TCC | official platform control | retained; never modified |
-| Exact ten-tool inventory/schema | protocol compatibility check | retained and checked before each call |
+| Helper descriptions, annotations, and schema metadata | upstream implementation detail | compatible drift does not block dispatch; the official call result is authoritative |
 | Canonical bundle identity | legacy wrapper behavior | retained for the current release contract; not an independent authorization boundary |
 | Same-app kernel lock | legacy wrapper coordination | retained in one fixed per-user namespace shared across Pi/MCP state roots |
 | Automatic background app launch | accidental wrapper behavior | removed; the official tool owns app behavior |
@@ -145,15 +145,15 @@ The broker still handles any `mcpServer/elicitation/request` that app-server emi
 
 ## Pi tool and session boundary
 
-The Pi extension registers and activates all ten official definitions on `session_start`, additively preserving active tools owned by Pi and other extensions. Keeping inspection and interaction methods on the same direct surface avoids provider-bound tool discovery creating a second, incompatible client binding.
+The Pi extension registers and activates all ten Computer Use definitions on `session_start`, additively preserving active tools owned by Pi and other extensions. Keeping inspection and interaction methods on the same direct surface avoids provider-bound tool discovery creating a second, incompatible client binding.
 
-For `get_app_state`, Pi starts one verified zero-turn app-server runtime and signed Computer Use client. The following direct interaction is serialized through that same runtime and thread, preserving the official active-app lease. The retained process tree is closed and verified after the action, before a replacement inspection, or during `session_shutdown`. One-shot MCP calls still start and close a broker session within the call. Exact inventory and schemas are revalidated before every dispatch in either path.
+For `get_app_state`, Pi starts one verified zero-turn app-server runtime and signed Computer Use client. The following direct interaction is serialized through that same runtime and thread, preserving the official active-app lease. The retained process tree is closed and verified after the action, before a replacement inspection, or during `session_shutdown`. One-shot MCP calls still start and close a broker session within the call. Both paths dispatch directly rather than imposing a separate inventory or schema-fidelity gate.
 
 This lifecycle changes neither the schemas nor the no-permissions policy. Interaction definitions omit extra `promptSnippet` and `promptGuidelines` metadata and rely on their official descriptions.
 
 ## Output boundary
 
-Only official `text` and `image` MCP blocks are accepted. They are returned to the invoking client because app state and screenshots are the requested capability. They are never copied to audit, logs, temp files, or structured metadata. Text is truncated in memory at Pi's standard 50KB/2000-line bound; the full text is not persisted.
+The current helper returns `text` and `image` MCP blocks. The broker does not impose an independent block-count or payload-size policy. Results are returned to the invoking client because app state and screenshots are the requested capability. They are never copied to audit, logs, temp files, or structured metadata. Text is truncated in memory at Pi's standard 50KB/2000-line bound; the full text is not persisted.
 
 ## Package name
 

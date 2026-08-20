@@ -64,9 +64,9 @@ export const DIRECT_TOOL_SCHEMAS = {
 export type DirectMethod = keyof typeof DIRECT_TOOL_SCHEMAS;
 export type DirectToolArguments = Record<string, unknown>;
 
-export const OFFICIAL_METHODS = Object.freeze(Object.keys(DIRECT_TOOL_SCHEMAS) as DirectMethod[]);
+export const COMPUTER_USE_METHODS = Object.freeze(Object.keys(DIRECT_TOOL_SCHEMAS) as DirectMethod[]);
 
-export interface OfficialToolMetadata {
+export interface ToolMetadata {
 	description: string;
 	annotations: {
 		destructiveHint: boolean;
@@ -89,8 +89,7 @@ const actionAnnotations = Object.freeze({
 	readOnlyHint: false,
 });
 
-/** Exact upstream descriptions and annotations exposed by the signed Computer Use helper. */
-export const OFFICIAL_TOOL_METADATA: Readonly<Record<DirectMethod, OfficialToolMetadata>> = Object.freeze({
+export const TOOL_METADATA: Readonly<Record<DirectMethod, ToolMetadata>> = Object.freeze({
 	list_apps: {
 		description: "List the apps on this computer. Returns the set of apps that are currently running, as well as any that have been used in the last 14 days, including details on usage frequency",
 		annotations: readAnnotations,
@@ -134,11 +133,11 @@ export const OFFICIAL_TOOL_METADATA: Readonly<Record<DirectMethod, OfficialToolM
 });
 
 export const MUTATING_METHODS = new Set<DirectMethod>(
-	OFFICIAL_METHODS.filter((method) => !OFFICIAL_TOOL_METADATA[method].annotations.readOnlyHint),
+	COMPUTER_USE_METHODS.filter((method) => !TOOL_METADATA[method].annotations.readOnlyHint),
 );
 
 export function isDirectMethod(value: string): value is DirectMethod {
-	return OFFICIAL_METHODS.includes(value as DirectMethod);
+	return COMPUTER_USE_METHODS.includes(value as DirectMethod);
 }
 
 const KEY_ALIASES: Readonly<Record<string, string>> = {
@@ -182,11 +181,9 @@ export function validateDirectArguments(method: DirectMethod, value: unknown): D
 	return parsed;
 }
 
-function officialInputSchema(schema: z.ZodType): unknown {
-	const { $schema: _, ...inputSchema } = z.toJSONSchema(schema);
-	return inputSchema;
-}
-
-export const EXPECTED_OFFICIAL_INPUT_SCHEMAS = Object.freeze(Object.fromEntries(
-	OFFICIAL_METHODS.map((method) => [method, officialInputSchema(DIRECT_TOOL_SCHEMAS[method])]),
+export const TOOL_INPUT_SCHEMAS = Object.freeze(Object.fromEntries(
+	COMPUTER_USE_METHODS.map((method) => {
+		const { $schema: _, ...inputSchema } = z.toJSONSchema(DIRECT_TOOL_SCHEMAS[method]);
+		return [method, inputSchema];
+	}),
 )) as Readonly<Record<DirectMethod, unknown>>;

@@ -31,11 +31,11 @@ Pi registers namespaced tools to avoid collisions with Pi's built-ins. The MCP s
 | `computer_use_press_key` | `press_key` | yes | Send a key or key combination |
 | `computer_use_type_text` | `type_text` | yes | Type literal text |
 
-The MCP façade preserves the official signed helper's tool descriptions, input schemas, and annotations exactly. The Pi façade preserves its descriptions and input schemas; Pi's tool API does not expose MCP annotations. In particular, all ten MCP methods have `destructiveHint: false`; the wrapper does not conflate changing UI state with destructive behavior or add argument restrictions absent from the official schemas.
+The MCP and Pi façades provide typed definitions for the ten Computer Use methods. Harmless changes to the signed helper's descriptions, annotations or schema metadata do not block calls. The official service remains authoritative when it executes a request.
 
 Pi registers and activates all ten definitions together in every fresh session, while preserving active tools owned by Pi and other extensions. This prevents interaction methods from being absent or loaded through an incompatible provider binding.
 
-As the official contract specifies, Pi—not a nested planner—calls `computer_use_get_app_state` once per assistant turn before interacting with an app, then chooses and executes actions itself. The adapter retains one verified app-server runtime and signed Computer Use client for that inspection-action pair, so the action reuses the official active-app session established by `get_app_state`. It closes and verifies the retained process tree after the action, when a new inspection supersedes it, or on Pi session shutdown.
+Pi—not a nested planner—calls `computer_use_get_app_state` once per assistant turn before interacting with an app, then chooses and executes actions itself. The adapter retains one verified app-server runtime and signed Computer Use client for that inspection-action pair, so the action reuses the official active-app session established by `get_app_state`. It closes and verifies the retained process tree after the action, when a new inspection supersedes it, or on Pi session shutdown.
 
 ## Authorization policy: durable no-permissions
 
@@ -47,7 +47,7 @@ No-permissions leaves the official and transport requirements unchanged:
 
 - macOS Screen Recording, Accessibility, and TCC controls remain authoritative;
 - the adapter still selects and verifies the official signed components required for the supported transport;
-- the wrapper verifies compatibility with the upstream ten-tool contract.
+- unsupported calls surface the official service's own error instead of failing an independent schema-fidelity gate.
 
 The current release also retains behavior from the earlier background-computer-use wrapper. This includes canonical app resolution, per-user/per-app coordination, focus completion telemetry, process cleanup, and metadata-only audit. These provide compatibility, lifecycle management, and observability. They do not provide extra authorization or a sandbox. Do not use them as a foundation for more wrapper safeguards.
 
@@ -152,11 +152,10 @@ For the current released implementation, each call:
 5. starts global focus telemetry;
 6. verifies fixed OpenAI-signed broker/client binaries;
 7. starts a credential-free isolated app-server process tree with model transport disabled;
-8. requires explicit `ephemeral: true`, `turns: []`, and `path: null` attestation;
-9. verifies the exact upstream ten-tool inventory and schemas;
-10. issues exactly one `mcpServer/tool/call`;
-11. rejects any model-turn notification, including during teardown;
-12. combines partial-preserving ancestry enumeration with private-working-directory ownership recovery, then freezes, terminates, and verifies the app-server plus separately grouped or reparented helpers; finally it removes temporary state, releases the lock, and writes a content-safe audit with separate broker/lease cleanup evidence.
+8. starts an ephemeral thread and requires a usable thread ID;
+9. issues exactly one `mcpServer/tool/call` without a separate schema-fidelity gate;
+10. rejects any model-turn notification, including during teardown;
+11. combines partial-preserving ancestry enumeration with private-working-directory ownership recovery, then freezes, terminates, and verifies the app-server plus separately grouped or reparented helpers; finally it removes temporary state, releases the lock, and writes a content-safe audit with separate broker/lease cleanup evidence.
 
 Focus telemetry is legacy observational behavior from the earlier background-computer-use wrapper. It does not provide an official Codex access control or a preventive macOS sandbox. Matching native Computer Use, the wrapper permits calls when the target is already frontmost and does not convert a completed official call into an error when focus changes or telemetry is unavailable. `backgroundPreserved` records the observation without gating the result. Do not use this telemetry as a reason to add further defensive policy.
 

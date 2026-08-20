@@ -31,7 +31,7 @@ Matching the app-server's observed public downstream MCP identity/capability/pro
 
 The same signed helper through official app-server `mcpServer/tool/call` succeeds. Repeated read-only probes established:
 
-- exact ten-tool inventory;
+- all ten Computer Use tools were present;
 - one direct `list_apps` call;
 - empty ephemeral context explicitly attested `ephemeral: true`, `turns: []`, and `path: null`;
 - no `turn/start`, `turn/*`, or `item/*` model activity;
@@ -52,7 +52,7 @@ Current branch tests cover:
 - current ChatGPT per-user component resolution plus exact legacy-layout compatibility;
 - missing, symlinked-path, invalid-signature, and wrong-Team-ID resolution failures, including no fallback from a present invalid current client;
 - strict signature and Team ID checks;
-- exact official ten-tool inventory/schema drift rejection before dispatch;
+- a real `list_apps` call through the signed broker, without a separate inventory or schema-fidelity gate;
 - direct JSONL request sequence with no `turn/start`;
 - isolated credential-free `CODEX_HOME` even when the parent environment contains a model API key;
 - production app-server arguments disable model transport, plugins, and remote control;
@@ -60,8 +60,7 @@ Current branch tests cover:
 - all ten methods available without wrapper prompts or mode gates;
 - exact `thread/start` Full access parameters (`approvalPolicy: "never"`, `sandbox: "danger-full-access"`);
 - fatal rejection of model-turn notifications, including a notification emitted during teardown;
-- strict `ephemeral: true` / `path: null` / `turns: []` response attestation before dispatch;
-- pre-buffer rejection of an oversized unterminated protocol line;
+- an ephemeral thread request and usable returned thread ID before dispatch;
 - partial-preserving ancestry enumeration plus private-cwd recovery, stable freeze/termination of separately grouped or reparented helpers, and stdio closure;
 - unrestricted read and mutation dispatch under the single no-permissions policy;
 - absence of wrapper app/intent/action gates and permission prompts;
@@ -75,7 +74,7 @@ Current branch tests cover:
 - stdio MCP all-ten inventory/status with no alternate mode route;
 - signed app-server elicitation forwarding, exact user responses, headless cancellation, and cancellation while a UI callback is pending;
 - standard form/URL forwarding across a real MCP SDK client/server transport;
-- Pi source registration for every direct capability with no nested planner, permission command, or wrapper-generated approval UI;
+- Pi runtime registration for every direct capability with no nested planner, permission command, or wrapper-generated approval UI;
 - Pi session-start registration and activation of all ten direct definitions while preserving unrelated active tools;
 - one retained broker/client session across `get_app_state` and the following action, with deterministic active-app lease continuity and verified close;
 - Pi form, opaque OpenAI-form, URL, decline, and headless-cancel elicitation handling.

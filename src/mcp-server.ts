@@ -12,10 +12,10 @@ import {
 import { executeDirectTool, getDirectStatus } from "./direct-service.ts";
 import { forwardOfficialElicitationToMcpClient } from "./mcp-elicitation.ts";
 import {
-	EXPECTED_OFFICIAL_INPUT_SCHEMAS,
+	TOOL_INPUT_SCHEMAS,
 	isDirectMethod,
-	OFFICIAL_METHODS,
-	OFFICIAL_TOOL_METADATA,
+	COMPUTER_USE_METHODS,
+	TOOL_METADATA,
 } from "./tools.ts";
 import { PACKAGE_VERSION } from "./version.ts";
 
@@ -41,11 +41,11 @@ const server = new Server(
 	{ capabilities: { logging: {}, tools: {} } },
 );
 
-const officialToolDefinitions = OFFICIAL_METHODS.map((method) => ({
+const toolDefinitions = COMPUTER_USE_METHODS.map((method) => ({
 	name: method,
-	description: OFFICIAL_TOOL_METADATA[method].description,
-	inputSchema: EXPECTED_OFFICIAL_INPUT_SCHEMAS[method],
-	annotations: OFFICIAL_TOOL_METADATA[method].annotations,
+	description: TOOL_METADATA[method].description,
+	inputSchema: TOOL_INPUT_SCHEMAS[method],
+	annotations: TOOL_METADATA[method].annotations,
 }));
 
 const statusToolDefinition = {
@@ -57,7 +57,7 @@ const statusToolDefinition = {
 };
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-	tools: [...officialToolDefinitions, statusToolDefinition],
+	tools: [...toolDefinitions, statusToolDefinition],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<CallToolResult> => {

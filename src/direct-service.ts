@@ -22,7 +22,7 @@ import {
 } from "./system.ts";
 import {
 	MUTATING_METHODS,
-	OFFICIAL_METHODS,
+	COMPUTER_USE_METHODS,
 	isDirectMethod,
 	validateDirectArguments,
 	type DirectMethod,
@@ -229,9 +229,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			}
 			throw error;
 		}
-		if (broker.modelTurnsStarted !== 0 || broker.ephemeralThread !== true) {
-			throw new DirectPolicyError("Direct broker violated the zero-model-turn architecture");
-		}
+		if (broker.modelTurnsStarted !== 0) throw new DirectPolicyError("Direct broker started a model turn");
 		outcome = broker.isError ? "official_error" : "ok";
 		response = {
 			ok: !broker.isError,
@@ -341,8 +339,8 @@ export function getDirectStatus(stateRoot = defaultStateRoot()): Record<string, 
 		officialAppApprovalHandling: "auto-approved-by-codex-full-access",
 		officialElicitationHandling: "forwarded-if-emitted",
 		wrapperAuthorization: "unrestricted",
-		availableMethods: [...OFFICIAL_METHODS],
-		supportedMethods: [...OFFICIAL_METHODS],
+		availableMethods: [...COMPUTER_USE_METHODS],
+		supportedMethods: [...COMPUTER_USE_METHODS],
 		appLockRoot: globalAppLockRoot(),
 		auditPath: path.join(stateRoot, "audit", "direct-computer-use.jsonl"),
 	};

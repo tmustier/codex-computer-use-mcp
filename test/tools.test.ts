@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { OFFICIAL_METHODS, OFFICIAL_TOOL_METADATA, normalizeKeyExpression, validateDirectArguments } from "../src/tools.ts";
+import { COMPUTER_USE_METHODS, TOOL_METADATA, normalizeKeyExpression, validateDirectArguments } from "../src/tools.ts";
 
 test("common Pi key aliases normalize to the official xdotool-style key table", () => {
 	assert.equal(normalizeKeyExpression("CMD+A"), "Meta_L+a");
@@ -14,8 +14,8 @@ test("common Pi key aliases normalize to the official xdotool-style key table", 
 	assert.deepEqual(validateDirectArguments("click", { app: "TextEdit" }), { app: "TextEdit" });
 });
 
-test("official action metadata does not conflate mutation with destruction", () => {
-	for (const method of OFFICIAL_METHODS) {
-		assert.equal(OFFICIAL_TOOL_METADATA[method].annotations.destructiveHint, false);
+test("action metadata does not conflate mutation with destruction", () => {
+	for (const method of COMPUTER_USE_METHODS) {
+		assert.equal(TOOL_METADATA[method].annotations.destructiveHint, false);
 	}
 });

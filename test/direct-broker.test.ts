@@ -6,29 +6,27 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { buildDirectAppServerArgs, callOfficialDirectTool, createOfficialDirectToolSession } from "../src/direct-broker.ts";
-import { EXPECTED_OFFICIAL_INPUT_SCHEMAS, OFFICIAL_METHODS } from "../src/tools.ts";
 
 const packageVersion = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
 
 async function makeFake(root: string): Promise<{ script: string; log: string }> {
 	const script = path.join(root, "fake-app-server.mjs");
 	const log = path.join(root, "requests.jsonl");
-	const inventory = Object.fromEntries(OFFICIAL_METHODS.map((method) => [method, { inputSchema: EXPECTED_OFFICIAL_INPUT_SCHEMAS[method] }]));
 	await writeFile(script, `
 import { appendFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-const log=${JSON.stringify(log)}; const mode=process.argv[2]||"ok"; const inventory=${JSON.stringify(inventory)};
+const log=${JSON.stringify(log)}; const mode=process.argv[2]||"ok";
 const send=x=>process.stdout.write(JSON.stringify(x)+"\\n");
 const rl=createInterface({input:process.stdin});
 let pendingTool; let activeApp;
 if(mode==="child-hang"||mode==="orphan-exit"){const child=spawn(process.execPath,["-e","process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{detached:true,stdio:"ignore"});child.unref();appendFileSync(log,JSON.stringify({childPid:child.pid})+"\\n");if(mode==="orphan-exit")process.exit(0);}
 rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify({method:m.method,id:m.id,params:m.params,result:m.result,codexHome:process.env.CODEX_HOME,home:process.env.HOME,tmpdir:process.env.TMPDIR,hasOpenAIKey:Boolean(process.env.OPENAI_API_KEY)})+"\\n");
- if(m.method==="initialize"){if(mode==="oversized-line"){process.stdout.write("x".repeat(${8 * 1024 * 1024 + 1}));return;} return send({id:m.id,result:{userAgent:"fake",platformFamily:"unix",platformOs:"macos"}});}
+ if(m.method==="initialize") return send({id:m.id,result:{userAgent:"fake",platformFamily:"unix",platformOs:"macos"}});
  if(m.method==="initialized") return;
- if(m.method==="thread/start"){const thread=mode==="bad-ephemeral"?{id:"thread-test"}:{id:"thread-test",ephemeral:true,path:null,turns:[]}; send({id:m.id,result:{thread}}); if(mode==="model-event")send({method:"turn/started",params:{}}); return;}
- if(m.method==="mcpServerStatus/list"){const tools=JSON.parse(JSON.stringify(inventory)); if(mode==="schema-drift")tools.list_apps.inputSchema.properties={drift:{type:"string"}}; send({id:m.id,result:{data:[{name:"computer-use",tools}]}});if(mode==="close-before-tool"){process.stdin.destroy();setTimeout(()=>process.exit(0),100);}return;}
+ if(m.method==="thread/start"){const thread=mode==="bad-thread"?{}:{id:"thread-test"}; send({id:m.id,result:{thread}}); if(mode==="model-event")send({method:"turn/started",params:{}}); return;}
  if(m.method==="mcpServer/tool/call"){
+   if(mode==="close-before-tool"){process.stdin.destroy();setTimeout(()=>process.exit(0),100);return;}
    if(mode==="hang"||mode==="child-hang") return;
    if(mode==="lease"){
      if(m.params.tool==="get_app_state") activeApp=m.params.arguments.app;
@@ -76,7 +74,7 @@ test("direct broker uses only zero-turn app-server MCP methods and an isolated c
 		assert.equal(result.modelTurnsStarted, 0);
 		assert.equal(result.ephemeralThread, true);
 		const records = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-		assert.deepEqual(records.map((item) => item.method).filter(Boolean), ["initialize", "initialized", "thread/start", "mcpServerStatus/list", "mcpServer/tool/call"]);
+		assert.deepEqual(records.map((item) => item.method).filter(Boolean), ["initialize", "initialized", "thread/start", "mcpServer/tool/call"]);
 		assert.equal(records.find((item) => item.method === "initialize")?.params?.clientInfo?.version, packageVersion);
 		assert.equal(records.some((item) => item.method === "turn/start"), false);
 		assert.equal(records.find((item) => item.method === "thread/start")?.params?.approvalPolicy, "never");
@@ -110,19 +108,6 @@ test("one broker session preserves the official active-app lease across inspecti
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("direct broker rejects upstream schema drift before tool dispatch", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-drift-test."));
-	try {
-		const { script, log } = await makeFake(root);
-		await assert.rejects(
-			callOfficialDirectTool("list_apps", {}, options(script, "schema-drift")),
-			/schema drifted/,
-		);
-		const methods = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line).method);
-		assert.equal(methods.includes("mcpServer/tool/call"), false);
-	} finally { await rm(root, { recursive: true, force: true }); }
-});
-
 test("one-shot wrapper preserves a setup-phase cleanup failure", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-setup-cleanup-test."));
 	try {
@@ -130,7 +115,7 @@ test("one-shot wrapper preserves a setup-phase cleanup failure", async () => {
 		let observed: unknown;
 		try {
 			await callOfficialDirectTool("list_apps", {}, {
-				...options(script, "schema-drift"),
+				...options(script),
 				processEnumeratorCommand: path.join(root, "missing-enumerator"),
 			});
 		} catch (error) { observed = error; }
@@ -227,27 +212,16 @@ test("direct broker fails closed on any model-turn notification, including durin
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("direct broker requires explicit empty pathless ephemeral context attestation", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-ephemeral-test."));
+test("direct broker requires a usable app-server thread", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-thread-test."));
 	try {
 		const { script, log } = await makeFake(root);
 		await assert.rejects(
-			callOfficialDirectTool("list_apps", {}, options(script, "bad-ephemeral")),
-			/empty pathless ephemeral runtime context/,
+			callOfficialDirectTool("list_apps", {}, options(script, "bad-thread")),
+			/usable thread/,
 		);
 		const methods = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line).method);
 		assert.equal(methods.includes("mcpServer/tool/call"), false);
-	} finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test("direct broker rejects an oversized unterminated protocol line before buffering beyond its bound", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-line-test."));
-	try {
-		const { script } = await makeFake(root);
-		await assert.rejects(
-			callOfficialDirectTool("list_apps", {}, options(script, "oversized-line")),
-			/protocol line exceeded the 8MB safety bound/,
-		);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 

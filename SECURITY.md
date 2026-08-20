@@ -28,7 +28,7 @@ These invariants describe the supported transport, zero-model-turn architecture,
 
 1. Only the fixed app-bundled Codex path and reviewed official Computer Use layouts are allowed in production. The current client is resolved from the OS account home under `~/.codex/computer-use/`; `HOME`, `CODEX_HOME`, arbitrary paths, and symlinked layouts are not accepted. The former exact plugin-bundle layout is considered only when the current component is absent.
 2. Both binaries pass strict code-signature verification and OpenAI Team ID `2DC432GLL2` checks before dispatch. A present current-layout client that fails verification never falls back.
-3. The helper's exact ten method names and input schemas match the pinned expected inventory before every call; release tests also verify its descriptions and annotations.
+3. The adapter exposes ten typed Computer Use methods. It does not block dispatch because the helper adds tools or changes compatible descriptions, annotations or schema metadata.
 4. `no-permissions` is the only wrapper policy: all ten methods are exposed and no wrapper permission prompt is opened.
 5. There is no config file, environment override, command, tool argument, per-call branch, or alternate safe/full route that an agent can select.
 6. App-server uses the official Full access combination, `approvalPolicy: "never"` plus `sandbox: "danger-full-access"`. The pinned Codex host automatically accepts empty-schema MCP approval elicitations, so normal first-party app-access checks proceed without prompts. The wrapper does not synthesize this response or edit persistent per-app approvals. Any elicitation app-server emits is forwarded faithfully; an unavailable client cancels.
@@ -37,12 +37,11 @@ These invariants describe the supported transport, zero-model-turn architecture,
 9. As legacy observational telemetry, target focus events, periodic samples, watcher health, queued ASN resolution, and final state are recorded without gating official dispatch or results. This is reporting, not a preventive OS sandbox or an official Codex access control.
 10. One direct request emits one official `mcpServer/tool/call`; no model turn, subagent, shell, web, plugin, prompt, or reachable model transport is available.
 11. App-server and helper share one private broker-session working directory. One-shot calls close it immediately; Pi retains it only across the required `get_app_state` and following action, then closes it after the action, before replacement inspection, or on session shutdown. Cleanup combines strict ancestry enumeration (preserving partial results) with working-directory ownership recovery, freezes processes to a stable set, kills every owned process, awaits stdio closure, and verifies exit. This still finds a helper reparented by an early app-server exit; enumeration/freeze/exit uncertainty is fatal.
-12. Protocol JSONL is bounded before an unterminated line can exceed 8 MB in memory.
-13. Per-call `CODEX_HOME` and work directories are mode-private and recursively removed.
-14. Only validated text/image result blocks cross to the invoking client. No full-result spill file is written.
-15. Audits contain metadata only, including separate `brokerCleanupVerified` and `appLeaseReleased` evidence. A retained Pi inspection truthfully records broker cleanup as pending (`false`); the paired action does not return if final retained-session cleanup fails. Lease-release failure changes the audited outcome before surfacing. Arguments, values, screenshots, app-state text, result content, prompts, approvals, credentials, and tokens are forbidden.
-16. Policy rejections are audited; audit failure is fatal once a secure state path exists.
-17. `package-lock.json` exact-pins source and CI dependencies with integrity. Published consumers use standard npm dependency resolution.
+12. Per-call `CODEX_HOME` and work directories are mode-private and recursively removed.
+13. Result blocks cross to the invoking client without content inspection. No full-result spill file is written.
+14. Audits contain metadata only, including separate `brokerCleanupVerified` and `appLeaseReleased` evidence. A retained Pi inspection truthfully records broker cleanup as pending (`false`); the paired action does not return if final retained-session cleanup fails. Lease-release failure changes the audited outcome before surfacing. Arguments, values, screenshots, app-state text, result content, prompts, approvals, credentials, and tokens are forbidden.
+15. Policy rejections are audited; audit failure is fatal once a secure state path exists.
+16. `package-lock.json` exact-pins source and CI dependencies with integrity. Published consumers use standard npm dependency resolution.
 
 ## Permission semantics
 
@@ -66,4 +65,4 @@ Computer Use returns the official app-state text and screenshots to the invoking
 
 Only the latest approved release is supported. Direct local calls require an unlocked macOS session. Targeted local calls while the Mac is locked are not supported.
 
-App-server is experimental and bundle paths or schemas can change. Drift fails closed until reviewed.
+App-server is experimental and bundle paths or schemas can change. Compatible drift does not block dispatch; incompatible calls surface the official service's error.
