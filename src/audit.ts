@@ -21,9 +21,7 @@ export interface AuditRecord {
 	modelTurnsStarted: number;
 	ephemeralThread: boolean | null;
 	elicitationRequests: number;
-	backgroundPreserved: boolean | null;
 	brokerCleanupVerified: boolean;
-	appLeaseReleased: boolean;
 	resultContentTypes: string[];
 	resultBytes: number;
 }

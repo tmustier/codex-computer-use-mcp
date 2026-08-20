@@ -1,6 +1,6 @@
 # Migration and rollback
 
-Version 0.2.0 was the breaking direct-tool architecture change from version 0.1.0. Version 0.3.0 added Pi progressive disclosure, version 0.3.1 followed ChatGPT's current per-user Computer Use component layout, version 0.3.2 restored one complete direct Pi surface with shared inspection-action session continuity, version 0.3.3 added macOS 27 compatibility, and version 0.3.4 aligns focus behavior with native Computer Use. Use the relevant section below.
+Version 0.2.0 was the breaking direct-tool architecture change from version 0.1.0. Version 0.3.0 added Pi progressive disclosure, version 0.3.1 followed ChatGPT's current per-user Computer Use component layout, version 0.3.2 restored one complete direct Pi surface with shared inspection-action session continuity, version 0.3.3 added macOS 27 compatibility, and version 0.3.4 aligned focus behavior with native Computer Use. The next release removes the remaining app rewrite, lock, and focus telemetry while extending session composition. Use the relevant section below.
 
 ## What changes
 
@@ -19,7 +19,7 @@ Version 0.2.0 was the breaking direct-tool architecture change from version 0.1.
 1. Stop all current aggregate Computer Use calls.
 2. Record the installed package/extension version and permission mode.
 3. Back up the Pi package/config files without copying audit content into tickets or chat.
-4. Confirm no `pi-native-app-worker.*`, `SkyComputerUseClient mcp`, `codex app-server`, `lockf`, or focus-listener process from the old adapter is active. The direct adapter uses one fixed private `/tmp/codex-computer-use-mcp-<uid>` lock namespace across Pi and MCP state roots.
+4. Confirm no `pi-native-app-worker.*`, `SkyComputerUseClient mcp`, `codex app-server`, `lockf`, or focus-listener process from the old adapter is active.
 5. Keep the old and new adapters from registering overlapping tools in one Pi process.
 
 ## Source acceptance without installation
@@ -98,7 +98,7 @@ Version 0.3.2 activates all ten direct Pi tools at session start and retains one
 4. With an unlocked Mac and a benign background app, call `computer_use_get_app_state`, then one harmless interaction against the same app.
 5. Verify the state and action used one app-server runtime/thread, the action did not report an inactive Computer Use session, focus remained preserved, and cleanup completed.
 
-Strict signature and OpenAI Team ID checks, canonical client and app resolution, Full access policy, zero-turn dispatch, kernel locking, focus telemetry, process-tree cleanup, and content-safe audit remain mandatory. Description, annotation, inventory, and compatible schema drift do not block dispatch.
+At version 0.3.2, strict signature and OpenAI Team ID checks, canonical client and app resolution, Full access policy, zero-turn dispatch, kernel locking, focus telemetry, process-tree cleanup, and content-safe audit remained mandatory. Description, annotation, inventory, and compatible schema drift did not block dispatch.
 
 ## Upgrade from version 0.3.2 to 0.3.3
 
@@ -117,17 +117,30 @@ Version 0.3.4 removes the legacy background-only focus gate. Calls now match nat
 3. On an unlocked Mac, make a benign app frontmost, then run `computer_use_get_app_state` followed by `computer_use_press_key` with `ESC` against that same app.
 4. Verify both calls succeed, `backgroundPreserved` records `false`, the pair uses one zero-turn ephemeral session, and cleanup completes.
 
+## Upgrade from version 0.3.4 to the next release
+
+The next release passes app selectors and key expressions through unchanged, accepts compatible additional arguments, removes app locks and focus telemetry, and retains official sessions across complete action sequences using the same app selector in Pi and generic MCP. Pi still truncates text at 50KB or 2,000 lines, but saves complete truncated text privately under `/tmp` and returns the file path.
+
+1. Install the reviewed release and start a fresh Pi process.
+2. Call `computer_use_get_app_state` on a benign app, then perform at least two harmless actions against the same selector.
+3. Verify all calls use one app-server runtime/thread and cleanup completes when the agent settles.
+4. Test an app full-path selector and an xdotool key expression; verify both arrive unchanged at the official service.
+5. Exercise a large app-state response and verify the displayed text is truncated, the complete text file is mode-0600 under `/tmp`, and no screenshot spill file exists.
+6. For generic MCP, repeat the multi-action sequence and verify the retained runtime closes on disconnect or after two minutes idle.
+
+No configuration migration is required. The state root now contains audit only; older lock directories can be removed after confirming no older adapter process is active.
+
 ## Rollback
 
 1. Stop the current Pi process.
-2. Confirm no direct app-server/client/focus/lock process remains.
+2. Confirm no direct app-server/client process remains.
 3. Remove or disable the current package registration.
 4. Restore the backed-up 0.1 package/config registration byte-for-byte.
 5. Start a fresh Pi process.
 6. Verify the old status command and installed hash.
 7. Preserve both private audit directories locally; never merge their content or publish it.
 
-Direct state can be removed only after rollback evidence is captured and no process references it. The fixed per-user lock directory can likewise be removed only when no direct call or `lockf` process exists. These paths contain configuration/content-safe metadata and hashed lock ownership—not credentials.
+Direct state can be removed only after rollback evidence is captured and no process references it. Older releases may also leave a fixed per-user lock directory; remove it only when no older direct call or `lockf` process exists. These paths contain content-safe metadata, not credentials.
 
 ## Generic MCP gateway
 

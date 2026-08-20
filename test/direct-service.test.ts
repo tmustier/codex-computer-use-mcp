@@ -20,36 +20,26 @@ function brokerResult(content = "ok", isError = false): DirectBrokerResult {
 	};
 }
 
-function deps(root: string, callTool: DirectServiceDependencies["callTool"], becameFrontmost = false): DirectServiceDependencies {
-	return {
-		stateRoot: root,
-		callTool,
-		resolveIdentity: (app) => ({ bundleId: app === "TextEdit" ? "com.apple.TextEdit" : app, leaseId: (app === "TextEdit" ? "com.apple.TextEdit" : app).toLowerCase() }),
-		frontmost: () => "com.google.Chrome",
-		frontmostAsync: async () => "com.google.Chrome",
-		watchFocus: async () => ({ healthy: () => true, becameFrontmost: () => becameFrontmost, stop: async () => undefined }),
-		acquireLock: async (_state, app, runId) => ({ path: "test", owner: { runId, pid: process.pid, app, startedAt: new Date().toISOString() }, release: async () => undefined }),
-	};
+function deps(root: string, callTool: DirectServiceDependencies["callTool"]): DirectServiceDependencies {
+	return { stateRoot: root, callTool };
 }
 
-test("no-permissions directly permits read methods and canonicalizes app identity", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-safe-test."));
+test("direct service passes app selectors, key expressions, and additional arguments through unchanged", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-passthrough-test."));
 	const calls: Array<{ method: string; args: Record<string, unknown> }> = [];
 	try {
 		const callTool: NonNullable<DirectServiceDependencies["callTool"]> = async (method, args) => {
 			calls.push({ method, args });
 			return brokerResult("state");
 		};
-		const listed = await executeDirectTool({ method: "list_apps", arguments: {} }, deps(root, callTool));
-		assert.equal(listed.ok, true);
-		const state = await executeDirectTool({ method: "get_app_state", arguments: { app: "TextEdit" } }, deps(root, callTool));
-		assert.equal(state.ok, true);
-		assert.deepEqual(calls, [
-			{ method: "list_apps", args: {} },
-			{ method: "get_app_state", args: { app: "com.apple.TextEdit" } },
-		]);
-		assert.equal(state.details.modelTurnsStarted, 0);
-		assert.equal(state.details.ephemeralRuntimeContext, true);
+		await executeDirectTool({
+			method: "press_key",
+			arguments: { app: "/Applications/Alternate App.app", key: "CMD+A", futureOption: true },
+		}, deps(root, callTool));
+		assert.deepEqual(calls, [{
+			method: "press_key",
+			args: { app: "/Applications/Alternate App.app", key: "CMD+A", futureOption: true },
+		}]);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -70,34 +60,26 @@ test("direct service passes client elicitation handling through to the signed br
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("same-app exclusion is global across different supported state roots", async () => {
-	const firstRoot = await mkdtemp(path.join(os.tmpdir(), "direct-service-global-lock-a."));
-	const secondRoot = await mkdtemp(path.join(os.tmpdir(), "direct-service-global-lock-b."));
-	let entered!: () => void;
+test("direct service does not serialize concurrent calls", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-concurrency-test."));
+	let entered = 0;
 	let release!: () => void;
-	const brokerEntered = new Promise<void>((resolve) => { entered = resolve; });
-	const holdBroker = new Promise<void>((resolve) => { release = resolve; });
+	const held = new Promise<void>((resolve) => { release = resolve; });
 	try {
-		const firstDeps = deps(firstRoot, async () => {
-			entered();
-			await holdBroker;
-			return brokerResult("state");
-		});
-		delete firstDeps.acquireLock;
-		const first = executeDirectTool({ method: "get_app_state", arguments: { app: "TextEdit" } }, firstDeps);
-		await brokerEntered;
-		const secondDeps = deps(secondRoot, async () => brokerResult("should-not-dispatch"));
-		delete secondDeps.acquireLock;
-		await assert.rejects(
-			executeDirectTool({ method: "get_app_state", arguments: { app: "TextEdit" } }, secondDeps),
-			/already leased/,
-		);
-		release();
-		assert.equal((await first).ok, true);
+		const callTool = async () => {
+			entered += 1;
+			if (entered === 2) release();
+			await held;
+			return brokerResult();
+		};
+		await Promise.all([
+			executeDirectTool({ method: "get_app_state", arguments: { app: "TextEdit" } }, deps(root, callTool)),
+			executeDirectTool({ method: "get_app_state", arguments: { app: "TextEdit" } }, deps(root, callTool)),
+		]);
+		assert.equal(entered, 2);
 	} finally {
 		release?.();
-		await rm(firstRoot, { recursive: true, force: true });
-		await rm(secondRoot, { recursive: true, force: true });
+		await rm(root, { recursive: true, force: true });
 	}
 });
 
@@ -110,51 +92,13 @@ test("no-permissions dispatches mutating methods without a wrapper gate or promp
 			deps(root, async (method, args) => { observed = { method, args }; return brokerResult("typed"); }),
 		);
 		assert.equal(response.ok, true);
-		assert.deepEqual(observed, { method: "type_text", args: { app: "com.apple.TextEdit", text: "arbitrary direct action" } });
+		assert.deepEqual(observed, { method: "type_text", args: { app: "TextEdit", text: "arbitrary direct action" } });
 		const auditText = await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8");
-		assert.doesNotMatch(auditText, /arbitrary direct action/);
+		assert.doesNotMatch(auditText, /arbitrary direct action|TextEdit/);
 		const audit = JSON.parse(auditText.trim());
 		assert.equal(audit.permissionMode, "no-permissions");
 		assert.equal(audit.authorization, "no_permissions_unrestricted");
 		assert.equal(audit.modelTurnsStarted, 0);
-		assert.equal(audit.directCalls, 1);
-		assert.equal(audit.backgroundPreserved, true);
-	} finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test("an already-frontmost target dispatches like native Computer Use", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-frontmost-test."));
-	let dispatched = false;
-	try {
-		const testDeps = deps(root, async () => { dispatched = true; return brokerResult("pressed"); });
-		testDeps.frontmost = () => "com.apple.TextEdit";
-		testDeps.frontmostAsync = async () => "com.apple.TextEdit";
-		const response = await executeDirectTool(
-			{ method: "press_key", arguments: { app: "TextEdit", key: "ESC" } },
-			testDeps,
-		);
-		assert.equal(response.ok, true);
-		assert.equal(dispatched, true);
-		assert.equal(response.details.backgroundPreserved, false);
-		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
-		assert.equal(audit.outcome, "ok");
-		assert.equal(audit.backgroundPreserved, false);
-		assert.equal(audit.directCalls, 1);
-	} finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test("focus changes remain non-blocking telemetry after a completed direct action", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-focus-test."));
-	try {
-		const response = await executeDirectTool(
-			{ method: "press_key", arguments: { app: "TextEdit", key: "ESC" } },
-			deps(root, async () => brokerResult("pressed"), true),
-		);
-		assert.equal(response.ok, true);
-		assert.equal(response.details.backgroundPreserved, false);
-		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
-		assert.equal(audit.outcome, "ok");
-		assert.equal(audit.backgroundPreserved, false);
 		assert.equal(audit.directCalls, 1);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -185,50 +129,6 @@ test("broker failures preserve content-safe architecture evidence in audit", asy
 		assert.equal(audit.ephemeralThread, true);
 		assert.equal(audit.elicitationRequests, 1);
 		assert.equal(audit.brokerCleanupVerified, true);
-	} finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test("focus telemetry failures do not block native-compatible dispatch", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-sample-test."));
-	try {
-		const testDeps = deps(root, async () => {
-			await new Promise((resolve) => setTimeout(resolve, 150));
-			return brokerResult("pressed");
-		});
-		testDeps.frontmost = () => undefined;
-		testDeps.frontmostAsync = async () => { throw new Error("sample failed"); };
-		testDeps.watchFocus = async () => { throw new Error("watcher failed"); };
-		const response = await executeDirectTool(
-			{ method: "press_key", arguments: { app: "TextEdit", key: "ESC" } },
-			testDeps,
-		);
-		assert.equal(response.ok, true);
-		assert.equal(response.details.backgroundPreserved, false);
-		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
-		assert.equal(audit.outcome, "ok");
-		assert.equal(audit.backgroundPreserved, false);
-		assert.equal(audit.directCalls, 1);
-	} finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test("app-lease release failure is audited as failure before surfacing", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-release-failure-test."));
-	try {
-		const testDeps = deps(root, async () => brokerResult("completed"));
-		testDeps.acquireLock = async (_state, app, runId) => ({
-			path: "test",
-			owner: { runId, pid: process.pid, app, startedAt: new Date().toISOString() },
-			release: async () => { throw new Error("release failed"); },
-		});
-		await assert.rejects(
-			executeDirectTool({ method: "get_app_state", arguments: { app: "TextEdit" } }, testDeps),
-			/lease did not release cleanly/,
-		);
-		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
-		assert.equal(audit.outcome, "lease_cleanup_failed");
-		assert.equal(audit.appLeaseReleased, false);
-		assert.equal(audit.brokerCleanupVerified, true);
-		assert.equal(audit.directCalls, 1);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 

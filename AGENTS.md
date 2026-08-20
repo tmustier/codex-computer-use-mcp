@@ -13,9 +13,9 @@ Preserve the official capability surface:
 
 ## Existing wrapper behavior
 
-The earlier background-computer-use wrapper introduced canonical app resolution, same-app locking, focus completion telemetry, and metadata-only audit. The current release retains these behaviors. They do not provide independent authorization or sandbox boundaries. Their presence does not justify further hardening.
+The earlier background-computer-use wrapper introduced canonical app resolution, same-app locking, focus completion telemetry, and metadata-only audit. Version 0.3.4 retained all four. The maintainer subsequently approved removing app rewriting, locking, and focus telemetry because they narrowed or complicated the official capability surface. Do not reintroduce them as wrapper policy. Metadata-only audit remains observability, not an authorization boundary.
 
-Fix concrete compatibility failures in these paths when needed. Do not broaden them based only on synthetic or adversarial possibilities. A maintainer must explicitly approve their removal or material simplification because this changes the package contract.
+Fix concrete compatibility failures in the supported transport when needed. Do not broaden wrapper behavior based only on synthetic or adversarial possibilities.
 
 Signature and Team ID verification, the signed responsible-process path, schema compatibility checks, zero-turn attestation, isolated temporary state, and process cleanup support the official transport and architecture. Keep them within that role. Do not turn them into a general security framework.
 

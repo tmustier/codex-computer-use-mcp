@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -112,7 +112,8 @@ test("Pi runtime registers all ten Computer Use tools", async () => {
 	assert.deepEqual(tools.map((tool) => tool.name).sort(), COMPUTER_USE_METHODS.map((method) => `computer_use_${method}`).sort());
 	for (const method of COMPUTER_USE_METHODS) {
 		const tool = tools.find((item) => item.name === `computer_use_${method}`)!;
-		assert.equal(tool.description, TOOL_METADATA[method].description);
+		assert.match(tool.description, new RegExp(`^${TOOL_METADATA[method].description.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+		assert.match(tool.description, /full text is saved to a temporary file/);
 		assert.deepEqual(tool.parameters, TOOL_INPUT_SCHEMAS[method]);
 		if (INSPECTION_TOOL_NAMES.includes(tool.name as any)) {
 			assert.ok(tool.promptSnippet);
@@ -139,13 +140,6 @@ test("Pi broker setup failures stay inside the audited direct-service path", asy
 		} as any);
 		await assert.rejects(executor.execute("get_app_state", { app: "TextEdit" }, {
 			stateRoot: root,
-			resolveIdentity: () => ({ bundleId: "com.apple.TextEdit", leaseId: "com.apple.textedit" }),
-			frontmost: () => "com.google.Chrome",
-			frontmostAsync: async () => "com.google.Chrome",
-			watchFocus: async () => ({ healthy: () => true, becameFrontmost: () => false, stop: async () => undefined }),
-			acquireLock: async (_state: string, app: string, runId: string) => ({
-				path: "test", owner: { runId, pid: process.pid, app, startedAt: new Date().toISOString() }, release: async () => undefined,
-			}),
 		} as any), /verified broker setup failed/);
 		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
 		assert.equal(audit.outcome, "broker_failed");
@@ -154,7 +148,7 @@ test("Pi broker setup failures stay inside the audited direct-service path", asy
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("Pi direct executor reuses one signed client session for get_app_state and the following action", async () => {
+test("Pi direct executor retains one signed client session across a multi-action sequence", async () => {
 	const { PiDirectSessionExecutor } = await import("../integrations/pi/index.ts");
 	const calls: Array<{ session: number; method: string }> = [];
 	let sessionsCreated = 0;
@@ -182,11 +176,148 @@ test("Pi direct executor reuses one signed client session for get_app_state and 
 	} as any);
 	await executor.execute("get_app_state", { app: "com.google.Chrome" }, {});
 	assert.equal(sessionsClosed, 0, "inspection retains the active-app client lease");
-	await executor.execute("press_key", { app: "com.google.Chrome", key: "ESC" }, {});
+	await executor.execute("click", { app: "com.google.Chrome", x: 10, y: 10 }, {});
+	await executor.execute("type_text", { app: "com.google.Chrome", text: "hello" }, {});
+	await executor.execute("press_key", { app: "com.google.Chrome", key: "Escape" }, {});
 	assert.deepEqual(calls, [
 		{ session: 1, method: "get_app_state" },
+		{ session: 1, method: "click" },
+		{ session: 1, method: "type_text" },
 		{ session: 1, method: "press_key" },
 	]);
 	assert.equal(sessionsCreated, 1);
-	assert.equal(sessionsClosed, 1, "the paired action closes the retained signed session");
+	assert.equal(sessionsClosed, 0, "actions retain the official app-use session");
+	await executor.close();
+	assert.equal(sessionsClosed, 1, "settled-agent cleanup closes the retained session");
+});
+
+test("idle expiry closes a retained session and later calls use a fresh entry", async () => {
+	const { PiDirectSessionExecutor } = await import("../integrations/pi/index.ts");
+	let sessionsCreated = 0;
+	let sessionsClosed = 0;
+	const calls: Array<{ session: number; method: string }> = [];
+	const executor = new PiDirectSessionExecutor({
+		idleTimeoutMs: 10,
+		createSession: async () => {
+			const session = ++sessionsCreated;
+			return {
+				async call(method: string) {
+					calls.push({ session, method });
+					return {
+						content: [{ type: "text", text: "ok" }], isError: false,
+						brokerVersion: "test", clientBuild: "test", durationMs: 1,
+						elicitationRequests: 0, modelTurnsStarted: 0, ephemeralThread: true,
+						brokerCleanupVerified: false,
+					};
+				},
+				async close() { sessionsClosed += 1; },
+			};
+		},
+		executeTool: async (request: any, dependencies: any) => {
+			if (!dependencies.callTool) return { ok: true, isError: false, content: [], details: {} };
+			const broker = await dependencies.callTool(request.method, request.arguments, {});
+			return { ok: true, isError: false, content: broker.content, details: {} };
+		},
+	} as any);
+	try {
+		await executor.execute("get_app_state", { app: "TextEdit" }, {});
+		await new Promise((resolve) => setTimeout(resolve, 40));
+		assert.equal(sessionsClosed, 1);
+		await executor.execute("get_app_state", { app: "TextEdit" }, {});
+		await executor.execute("press_key", { app: "TextEdit", key: "Escape" }, {});
+		assert.deepEqual(calls, [
+			{ session: 1, method: "get_app_state" },
+			{ session: 2, method: "get_app_state" },
+			{ session: 2, method: "press_key" },
+		]);
+	} finally {
+		await executor.close();
+	}
+	assert.equal(sessionsClosed, 2);
+});
+
+test("a retained-session cleanup failure blocks later dispatch", async () => {
+	const { PiDirectSessionExecutor } = await import("../integrations/pi/index.ts");
+	let executeCalls = 0;
+	const executor = new PiDirectSessionExecutor({
+		createSession: async () => ({
+			async call() {
+				return {
+					content: [{ type: "text", text: "state" }], isError: false,
+					brokerVersion: "test", clientBuild: "test", durationMs: 1,
+					elicitationRequests: 0, modelTurnsStarted: 0, ephemeralThread: true,
+					brokerCleanupVerified: false,
+				};
+			},
+			async close() { throw new Error("verified cleanup failed"); },
+		}),
+		executeTool: async (request: any, dependencies: any) => {
+			executeCalls += 1;
+			const broker = await dependencies.callTool(request.method, request.arguments, {});
+			return { ok: true, isError: false, content: broker.content, details: {} };
+		},
+	} as any);
+	await executor.execute("get_app_state", { app: "TextEdit" }, {});
+	await assert.rejects(executor.close(), /verified cleanup failed/);
+	await assert.rejects(executor.execute("list_apps", {}, {}), /verified cleanup failed/);
+	assert.equal(executeCalls, 1);
+});
+
+test("session composition does not globally serialize different app selectors", async () => {
+	const { PiDirectSessionExecutor } = await import("../integrations/pi/index.ts");
+	let entered = 0;
+	let release!: () => void;
+	const held = new Promise<void>((resolve) => { release = resolve; });
+	const safetyTimer = setTimeout(() => release(), 1_000);
+	const executor = new PiDirectSessionExecutor({
+		createSession: async () => ({
+			async call() {
+				entered += 1;
+				if (entered === 2) release();
+				await held;
+				return {
+					content: [{ type: "text", text: "state" }], isError: false,
+					brokerVersion: "test", clientBuild: "test", durationMs: 1,
+					elicitationRequests: 0, modelTurnsStarted: 0, ephemeralThread: true,
+					brokerCleanupVerified: false,
+				};
+			},
+			async close() {},
+		}),
+		executeTool: async (request: any, dependencies: any) => {
+			const broker = await dependencies.callTool(request.method, request.arguments, {});
+			return { ok: true, isError: false, content: broker.content, details: {} };
+		},
+	} as any);
+	try {
+		await Promise.all([
+			executor.execute("get_app_state", { app: "App A" }, {}),
+			executor.execute("get_app_state", { app: "App B" }, {}),
+		]);
+		assert.equal(entered, 2);
+	} finally {
+		clearTimeout(safetyTimer);
+		release?.();
+		await executor.close();
+	}
+});
+
+test("Pi truncates large Computer Use text and saves the complete output privately in tmp", async () => {
+	const { toPiContent } = await import("../integrations/pi/index.ts");
+	const original = "x".repeat(60 * 1024);
+	const rendered = await toPiContent([
+		{ type: "text", text: original },
+		{ type: "image", data: "image-data", mimeType: "image/png" },
+	]);
+	assert.ok(rendered.fullOutputPath);
+	try {
+		assert.equal(await readFile(rendered.fullOutputPath, "utf8"), original);
+		assert.equal((await stat(rendered.fullOutputPath)).mode & 0o777, 0o600);
+		assert.equal((await stat(path.dirname(rendered.fullOutputPath))).mode & 0o777, 0o700);
+		assert.deepEqual(await readdir(path.dirname(rendered.fullOutputPath)), ["output.txt"]);
+		assert.match((rendered.content[0] as any).text, /Full output saved to:/);
+		assert.deepEqual(rendered.content[1], { type: "image", data: "image-data", mimeType: "image/png" });
+	} finally {
+		await rm(path.dirname(rendered.fullOutputPath), { recursive: true, force: true });
+	}
 });

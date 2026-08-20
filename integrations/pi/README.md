@@ -42,7 +42,9 @@ Command:
 
 Session-start activation is purely additive and preserves every active tool owned by Pi or another extension. The interaction definitions rely on their official descriptions and omit extra prompt metadata.
 
-A successful `get_app_state` retains its verified app-server runtime, thread, and signed Computer Use client. The following direct interaction uses that same client and official active-app lease, then closes the retained process tree with strict cleanup verification. A new inspection replaces and closes any earlier retained session; Pi `session_shutdown` also closes it.
+A successful `get_app_state` retains its verified app-server runtime, thread, and signed Computer Use client. Subsequent actions using the same app selector use that official app-use session. Pi closes and verifies retained process trees when the agent settles, another inspection using that selector replaces one, an error occurs, or `session_shutdown` runs.
+
+Pi truncates text results at 50KB or 2,000 lines. When truncation occurs, the complete text is saved mode-0600 inside a private directory under `/tmp`, and the returned notice includes the path for use with `read`. Screenshots are not written to spill files.
 
 No-permissions is the only policy: all ten tools are registered and available through this lifecycle with no wrapper permission prompts, mode selector, or app/intent/action gate. The signed host runs with Codex Full access (`approvalPolicy: "never"`, `sandbox: "danger-full-access"`), so normal empty-schema Computer Use app approvals are accepted by Codex before they reach Pi. Pi renders any form, OpenAI-form, or URL elicitation app-server does emit. The user's `accept`, `decline`, or `cancel` response is returned unchanged; the adapter never fabricates one.
 
@@ -68,6 +70,6 @@ For a source checkout:
 
 Do not load the native adapter and generic MCP adapter into the same acceptance process unless tool names are intentionally isolated.
 
-The generic MCP path uses the same durable no-permissions and official Full access policy: all ten methods and no wrapper permission gate. App-access approvals resolve inside Codex. Any standard form or URL elicitation app-server emits is forwarded to the invoking MCP client; an unsupported or headless client returns `cancel` rather than a fabricated decision.
+The generic MCP path uses the same durable no-permissions and official Full access policy: all ten methods and no wrapper permission gate. It retains sessions across sequential calls using the same app selector, closes them after two minutes of inactivity, and cleans them up when the MCP connection closes. App-access approvals resolve inside Codex. Any standard form or URL elicitation app-server emits is forwarded to the invoking MCP client; an unsupported or headless client returns `cancel` rather than a fabricated decision.
 
 See the root `MIGRATION.md` before replacing an installed 0.1 adapter.

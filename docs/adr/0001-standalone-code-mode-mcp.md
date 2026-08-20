@@ -5,7 +5,7 @@
 
 ## Context
 
-Codex can compose MCP tools through JavaScript Code Mode. Pi's progressive tool disclosure reduces schema context but does not let generated code invoke arbitrary Pi tools. Adding an executor, loader, or batch method here would mix unrelated code execution into the focused Computer Use adapter.
+Codex can compose MCP tools through JavaScript Code Mode. Pi's progressive tool disclosure reduces schema context but does not let generated code invoke arbitrary Pi tools. This package supports ordinary Computer Use composition by retaining the official session across sequential typed calls. Adding a general executor, loader, or batch interpreter here would instead mix unrelated code execution into the focused adapter.
 
 We considered existing Pi and MCP implementations:
 
@@ -22,7 +22,7 @@ We considered existing Pi and MCP implementations:
 If we add Code Mode for Pi, implement it as a **separate stdio MCP server** loaded through Pi's existing MCP adapter.
 
 - Do not modify Pi core.
-- Do not add Code Mode methods to `codex-computer-use-mcp`; keep its public surface focused on Computer Use.
+- Do not add Code Mode methods to `codex-computer-use-mcp`; keep its public surface focused on Computer Use while preserving sequential tool composition.
 - Let the Code Mode process connect to upstream MCP servers and expose a compact code-execution surface for discovery and composition.
 - Give generated code the same filesystem, network, environment, and process authority as the Code Mode server's surrounding Pi environment. Do not add a stricter capability/security sandbox solely around Code Mode.
 - Use the standalone MCP process as the fault-containment boundary. Pi can time out, terminate, and restart it if generated code wedges the process. Do not add a child process or isolate per execution without operational evidence that the server boundary is insufficient.

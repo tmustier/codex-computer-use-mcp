@@ -10,7 +10,7 @@ The primary path has:
 - no prompt sent to Codex;
 - no separate model-token usage.
 
-It does use OpenAI's signed `codex app-server` as the official host for the bundled Computer Use MCP client. The current official `mcpServer/tool/call` API requires a loaded thread identifier, so the bridge creates an empty, in-memory, zero-turn context (`ephemeral: true`, `turns: []`, `path: null`). It never calls `turn/start` and fails closed if any `turn/*` or `item/*` model activity appears.
+It does use OpenAI's signed `codex app-server` as the official host for the bundled Computer Use MCP client. The current official `mcpServer/tool/call` API requires a loaded thread identifier, so the bridge requests an ephemeral, zero-turn context and requires a usable thread ID. It never calls `turn/start` and fails closed if any `turn/*` or `item/*` model activity appears.
 
 > **Independent project.** This is not an OpenAI product and is not endorsed by OpenAI. The app-server API is marked experimental and ChatGPT's reviewed component locations may change.
 
@@ -31,11 +31,11 @@ Pi registers namespaced tools to avoid collisions with Pi's built-ins. The MCP s
 | `computer_use_press_key` | `press_key` | yes | Send a key or key combination |
 | `computer_use_type_text` | `type_text` | yes | Type literal text |
 
-The MCP and Pi façades provide typed definitions for the ten Computer Use methods. Harmless changes to the signed helper's descriptions, annotations or schema metadata do not block calls. The official service remains authoritative when it executes a request.
+The MCP and Pi façades provide typed definitions for the ten current Computer Use methods. They accept additional arguments so compatible upstream additions can pass through. Harmless changes to the signed helper's descriptions, annotations or schema metadata do not block calls. The official service remains authoritative when it executes a request.
 
 Pi registers and activates all ten definitions together in every fresh session, while preserving active tools owned by Pi and other extensions. This prevents interaction methods from being absent or loaded through an incompatible provider binding.
 
-Pi—not a nested planner—calls `computer_use_get_app_state` once per assistant turn before interacting with an app, then chooses and executes actions itself. The adapter retains one verified app-server runtime and signed Computer Use client for that inspection-action pair, so the action reuses the official active-app session established by `get_app_state`. It closes and verifies the retained process tree after the action, when a new inspection supersedes it, or on Pi session shutdown.
+Pi—not a nested planner—calls `computer_use_get_app_state` before interacting with an app, then chooses and executes as many actions as the task needs. The adapter retains the verified app-server runtime and signed Computer Use client across the complete matching-app-selector sequence, preserving the official app-use session and element identifiers. It closes and verifies the retained process tree when the agent settles, another inspection using that selector replaces it, an error occurs, or Pi shuts down.
 
 ## Authorization policy: durable no-permissions
 
@@ -49,7 +49,7 @@ No-permissions leaves the official and transport requirements unchanged:
 - the adapter still selects and verifies the official signed components required for the supported transport;
 - unsupported calls surface the official service's own error instead of failing an independent schema-fidelity gate.
 
-The current release also retains behavior from the earlier background-computer-use wrapper. This includes canonical app resolution, per-user/per-app coordination, focus completion telemetry, process cleanup, and metadata-only audit. These provide compatibility, lifecycle management, and observability. They do not provide extra authorization or a sandbox. Do not use them as a foundation for more wrapper safeguards.
+App names, paths, bundle identifiers, key expressions, and compatible additional arguments pass to the official service unchanged. The adapter has no app allowlist, canonical app rewrite, same-app lock, or focus gate. Process cleanup and metadata-only audit remain operational behavior, not authorization or sandbox boundaries.
 
 ## Why the signed app-server is required
 
@@ -103,7 +103,7 @@ Command:
 /computer-use-status
 ```
 
-The native Pi adapter is the primary product path. It registers and activates all ten typed tools directly, and routes the required `get_app_state` and following action through one retained signed-client session. It exposes no mode-changing command or wrapper-generated approval UI. Official app-access approval elicitations are resolved by Codex Full access before they reach Pi. Any elicitation that app-server does emit is shown through Pi's UI, and only the user's choice is returned to the service.
+The native Pi adapter is the primary product path. It registers and activates all ten typed tools directly, and routes `get_app_state` plus subsequent actions using the same app selector through one retained signed-client session. It exposes no mode-changing command or wrapper-generated approval UI. Official app-access approval elicitations are resolved by Codex Full access before they reach Pi. Any elicitation that app-server does emit is shown through Pi's UI, and only the user's choice is returned to the service.
 
 ## MCP server
 
@@ -139,27 +139,26 @@ For Pi's generic MCP gateway, keep `directTools: false` so this powerful surface
 }
 ```
 
-The generic MCP server exposes the same no-permissions behavior: official Codex Full access, no wrapper permission gate, and all ten methods. App-access approvals are resolved inside the official host. Any standard form or URL elicitation that app-server emits is forwarded as an MCP `elicitation/create` request. The upstream client response is returned unchanged; unsupported or headless clients cancel rather than fabricate a decision.
+The generic MCP server exposes the same no-permissions behavior: official Codex Full access, no wrapper permission gate, and all ten methods. Sequential calls using the same app selector reuse one official app-use session; inactive sessions close after two minutes or when the MCP connection closes. App-access approvals are resolved inside the official host. Any standard form or URL elicitation that app-server emits is forwarded as an MCP `elicitation/create` request. The upstream client response is returned unchanged; unsupported or headless clients cancel rather than fabricate a decision.
 
 ## Execution and privacy
 
-For the current released implementation, each call:
+For each direct call, the adapter:
 
-1. validates typed arguments;
+1. validates the known typed arguments while preserving additional fields;
 2. applies the single durable no-permissions policy with no mode or prompt branch;
-3. resolves a target to a canonical installed bundle ID;
-4. acquires a fixed per-user/per-app kernel lock shared across all supported clients and state roots;
-5. starts global focus telemetry;
-6. verifies fixed OpenAI-signed broker/client binaries;
-7. starts a credential-free isolated app-server process tree with model transport disabled;
-8. starts an ephemeral thread and requires a usable thread ID;
-9. issues exactly one `mcpServer/tool/call` without a separate schema-fidelity gate;
-10. rejects any model-turn notification, including during teardown;
-11. combines partial-preserving ancestry enumeration with private-working-directory ownership recovery, then freezes, terminates, and verifies the app-server plus separately grouped or reparented helpers; finally it removes temporary state, releases the lock, and writes a content-safe audit with separate broker/lease cleanup evidence.
+3. passes app selectors and key expressions through unchanged;
+4. verifies fixed OpenAI-signed broker/client binaries when starting a session;
+5. starts a credential-free isolated app-server process tree with model transport disabled;
+6. starts an ephemeral thread and requires a usable thread ID;
+7. issues one `mcpServer/tool/call` without a separate schema-fidelity gate;
+8. rejects any model-turn notification, including during teardown;
+9. retains the official session for composition, then combines partial-preserving ancestry enumeration with private-working-directory ownership recovery to terminate and verify every owned process;
+10. removes temporary broker state and writes a content-safe audit.
 
-Focus telemetry is legacy observational behavior from the earlier background-computer-use wrapper. It does not provide an official Codex access control or a preventive macOS sandbox. Matching native Computer Use, the wrapper permits calls when the target is already frontmost and does not convert a completed official call into an error when focus changes or telemetry is unavailable. `backgroundPreserved` records the observation without gating the result. Do not use this telemetry as a reason to add further defensive policy.
+Foreground apps are allowed. The adapter neither forces nor prevents focus changes, and it does not monitor focus.
 
-Tool results may contain visible target-app text or screenshots because that is the purpose of Computer Use. They return only to the invoking Pi/MCP client. Audits never retain arguments, typed values, screenshots, app-state payloads, result text, prompts, credentials, or tokens—only bounded metadata such as method, canonical/hashed app identity, byte counts, content types, outcome, focus, broker version, and zero-turn evidence.
+Tool results may contain visible target-app text or screenshots because that is the purpose of Computer Use. They return to the invoking Pi/MCP client. Pi truncates text at 50KB or 2,000 lines to protect model context; when truncation occurs, it writes the complete text to a mode-0600 file in a private directory under `/tmp` and includes that path in the result. Image data is never spilled. Audits never retain arguments, typed values, screenshots, app-state payloads, result text, prompts, credentials, or tokens—only bounded metadata such as method, hashed app identity, byte counts, content types, outcome, broker version, and zero-turn evidence.
 
 ## State and migration
 

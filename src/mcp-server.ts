@@ -9,7 +9,7 @@ import {
 	type CallToolResult,
 	type ContentBlock,
 } from "@modelcontextprotocol/sdk/types.js";
-import { executeDirectTool, getDirectStatus } from "./direct-service.ts";
+import { getDirectStatus } from "./direct-service.ts";
 import { forwardOfficialElicitationToMcpClient } from "./mcp-elicitation.ts";
 import {
 	TOOL_INPUT_SCHEMAS,
@@ -17,6 +17,7 @@ import {
 	COMPUTER_USE_METHODS,
 	TOOL_METADATA,
 } from "./tools.ts";
+import { DirectSessionExecutor } from "./session-executor.ts";
 import { PACKAGE_VERSION } from "./version.ts";
 
 function handleCli(): boolean {
@@ -40,6 +41,10 @@ const server = new Server(
 	{ name: "codex-computer-use-mcp", version: PACKAGE_VERSION },
 	{ capabilities: { logging: {}, tools: {} } },
 );
+const sessionExecutor = new DirectSessionExecutor({ idleTimeoutMs: 120_000 });
+server.onclose = () => {
+	void sessionExecutor.close().catch(() => { process.exitCode = 1; });
+};
 
 const toolDefinitions = COMPUTER_USE_METHODS.map((method) => ({
 	name: method,
@@ -75,8 +80,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<
 	}
 
 	try {
-		const response = await executeDirectTool(
-			{ method: request.params.name, arguments: request.params.arguments ?? {} },
+		const response = await sessionExecutor.execute(
+			request.params.name,
+			request.params.arguments ?? {},
 			{
 				signal: extra.signal,
 				onElicitation: (elicitation) => forwardOfficialElicitationToMcpClient(server, elicitation, extra.signal),

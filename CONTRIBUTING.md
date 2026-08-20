@@ -21,9 +21,9 @@ Development and live acceptance require macOS and the official ChatGPT Computer 
 - Do not use private pipes/sockets, credential extraction, app injection, re-signing, sender impersonation, TCC automation, or automatic approval acceptance.
 - Keep app-server in a credential-free isolated `CODEX_HOME` with only official Computer Use configured.
 - Add a regression test for each concrete protocol, compatibility, lifecycle, or current-behavior fix.
-- Never log or persist arguments, typed values, screenshots, app-state/result content, elicitation contents, prompts, credentials, or tokens.
+- Never log arguments, typed values, screenshots, app-state/result content, elicitation contents, prompts, credentials, or tokens. Pi may save complete text output to a private temporary file only when the displayed result is truncated; never spill image data.
 - Do not add wrapper-side permission policy, risk classification, allowlists, gates, or speculative defence-in-depth on top of official Codex and macOS controls.
-- Treat current focus checks as legacy post-action completion telemetry, not preventive isolation or a precedent for further hardening.
+- Pass official app selectors and key expressions through unchanged.
 - Document reviewed ChatGPT component paths, launcher contracts, and upstream schema/API assumptions.
 - Include strict core/Pi type checks, tests, build, audit, package inspection, and real-app acceptance evidence.
 - Review material transport or published-behavior changes at the exact head, and keep findings tied to realistic supported paths.
