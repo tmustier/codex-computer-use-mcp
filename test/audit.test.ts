@@ -22,9 +22,7 @@ const record: AuditRecord = {
 	modelTurnsStarted: 0,
 	ephemeralThread: true,
 	elicitationRequests: 0,
-	backgroundPreserved: true,
 	brokerCleanupVerified: true,
-	appLeaseReleased: true,
 	resultContentTypes: ["text"],
 	resultBytes: 42,
 };

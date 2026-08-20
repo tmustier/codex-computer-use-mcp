@@ -8,7 +8,7 @@ This package is a thin transport adapter to the official signed Computer Use too
 
 Preserve the official capability surface. Add adapter code only when the transport, zero-model-turn architecture, component compatibility, or process lifecycle requires it.
 
-Canonical app resolution, same-app locking, focus completion telemetry, and metadata-only audit came from the earlier background-computer-use wrapper. The current release retains them for compatibility. They do not provide extra authorization or sandbox boundaries. This inventory does not justify extending them. A maintainer must explicitly approve their removal or material simplification.
+Canonical app rewriting, same-app locking, and focus telemetry came from the earlier background-computer-use wrapper. They were later removed with maintainer approval because they narrowed or complicated the official capability surface. Metadata-only audit remains observability, not an authorization or sandbox boundary.
 
 ## Official API evidence
 
@@ -28,7 +28,7 @@ The Full access behavior is also public in the pinned Codex `rust-v0.144.2` sour
 - MCP permission prompts are auto-approved when the approval policy is `Never` and the permission profile is disabled ([MCP policy lines 76–99](https://github.com/openai/codex/blob/a6645b6b8a656360fa16fb7e1c6721d0697d3d6a/codex-rs/codex-mcp/src/mcp/mod.rs#L76-L99));
 - the elicitation manager applies that policy before client notification ([elicitation lines 196–221](https://github.com/openai/codex/blob/a6645b6b8a656360fa16fb7e1c6721d0697d3d6a/codex-rs/codex-mcp/src/elicitation.rs#L196-L221)), and limits the automatic response to empty-schema approval/confirmation forms ([lines 319–331](https://github.com/openai/codex/blob/a6645b6b8a656360fa16fb7e1c6721d0697d3d6a/codex-rs/codex-mcp/src/elicitation.rs#L319-L331)).
 
-The installed CLI labels app-server experimental. This project therefore verifies the current method and upstream schemas on every call and fails closed on drift.
+The installed CLI labels app-server experimental. The adapter keeps typed definitions for the current methods but accepts additional arguments and dispatches without a separate inventory or schema-fidelity gate.
 
 ## Live architecture probe
 
@@ -69,7 +69,7 @@ The relevant construction difference is the macOS responsible-process chain:
 - unsupported: ad-hoc/no-Team-ID Node parent → signed helper;
 - supported: Node/Pi → strict-valid OpenAI-signed app-bundled Codex (`2DC432GLL2`) → strict-valid OpenAI-signed helper (`2DC432GLL2`).
 
-Process sampling confirmed the helper children were direct descendants of signed app-server; helper processes may create their own process groups. App-server and helper therefore share one private broker-session cwd. One-shot MCP calls close that session after the call; Pi retains it only across the required `get_app_state` and following action. Cleanup preserves partial ancestry results, recovers any reparented process by that unique cwd, freezes the owned set to stability, then kills and verifies every process rather than assuming one PGID. Enumeration, freeze, or exit uncertainty fails cleanup closed. The app-server has the expected sandbox/application-group entitlement keys; the helper has OpenAI application/team identifiers, application groups, and keychain-access-group entitlements. Ordinary Node has no Team ID or entitlement set. The service's peer audit token is not exposed through the supported MCP layer. No private socket inspection, identity spoofing, copied signing material, re-signing, injection, or TCC change was attempted. The remaining enforcement boundary is therefore OS peer/responsible-process identity, not a missing public JSON field.
+Process sampling confirmed the helper children were direct descendants of signed app-server; helper processes may create their own process groups. App-server and helper therefore share one private broker-session cwd. Pi and generic MCP retain sessions across `get_app_state` and subsequent actions using the same app selector so callers can compose the official primitives. Cleanup preserves partial ancestry results, recovers any reparented process by that unique cwd, freezes the owned set to stability, then kills and verifies every process rather than assuming one PGID. Enumeration, freeze, or exit uncertainty fails cleanup closed. The app-server has the expected sandbox/application-group entitlement keys; the helper has OpenAI application/team identifiers, application groups, and keychain-access-group entitlements. Ordinary Node has no Team ID or entitlement set. The service's peer audit token is not exposed through the supported MCP layer. No private socket inspection, identity spoofing, copied signing material, re-signing, injection, or TCC change was attempted. The remaining enforcement boundary is therefore OS peer/responsible-process identity, not a missing public JSON field.
 
 Command, environment, cwd, and config differences were also isolated: both paths invoke the same signed helper with `mcp`; the accepted path gives it a signed parent plus a private fixed cwd/config environment. Matching public MCP fields did not alter the raw error, while the signed-parent path succeeds without model credentials.
 
@@ -122,15 +122,15 @@ nested prompts or result summaries
 | Official first-party app access | official Codex control | official Codex Full access auto-accepts normal empty-schema app approval elicitations; any elicitation app-server emits is forwarded unchanged |
 | macOS TCC | official platform control | retained; never modified |
 | Helper descriptions, annotations, and schema metadata | upstream implementation detail | compatible drift does not block dispatch; the official call result is authoritative |
-| Canonical bundle identity | legacy wrapper behavior | retained for the current release contract; not an independent authorization boundary |
-| Same-app kernel lock | legacy wrapper coordination | retained in one fixed per-user namespace shared across Pi/MCP state roots |
-| Automatic background app launch | accidental wrapper behavior | removed; the official tool owns app behavior |
-| Global focus watcher and final sample | legacy completion telemetry | retained for the current release contract; not a preventive sandbox |
+| App selector and key rewriting | former legacy wrapper behavior | removed; values pass unchanged to the official service |
+| Same-app kernel lock | former legacy wrapper coordination | removed; only calls sharing one stateful official session are serialized |
+| Automatic app launch and foreground behavior | official Computer Use behavior | the official tool remains authoritative; the adapter neither forces nor prevents focus changes |
+| Global focus watcher and final sample | former legacy completion telemetry | removed |
 | Timeout/cancellation process-tree termination | operational lifecycle | retained with strict enumeration, freeze, kill, stdio-close, and exit verification |
-| Temporary broker-session cleanup | operational lifecycle | retained with isolated `CODEX_HOME`; Pi closes after the inspection-action pair, replacement inspection, or session shutdown |
+| Temporary broker-session cleanup | operational lifecycle | retained with isolated `CODEX_HOME`; Pi closes on agent settle, same-selector replacement inspection, error, or session shutdown |
 | Codex token usage accounting | former compatibility layer | removed; no model turn exists |
 | Content-safe private audit | legacy observability behavior | retained with direct-call fields; not an authorization mechanism |
-| Full-result spill files | output hygiene | prohibited; truncation is in-memory only |
+| Truncated Pi text output | context hygiene | complete text is saved mode-0600 in a private `/tmp` directory; image data is never spilled |
 | Browser-host integration | out of scope | unchanged |
 
 These roles explain the current code. They do not authorize new safeguards. Only propose hardening for a concrete, realistically reachable failure in the supported path.
@@ -147,13 +147,13 @@ The broker still handles any `mcpServer/elicitation/request` that app-server emi
 
 The Pi extension registers and activates all ten Computer Use definitions on `session_start`, additively preserving active tools owned by Pi and other extensions. Keeping inspection and interaction methods on the same direct surface avoids provider-bound tool discovery creating a second, incompatible client binding.
 
-For `get_app_state`, Pi starts one verified zero-turn app-server runtime and signed Computer Use client. The following direct interaction is serialized through that same runtime and thread, preserving the official active-app lease. The retained process tree is closed and verified after the action, before a replacement inspection, or during `session_shutdown`. One-shot MCP calls still start and close a broker session within the call. Both paths dispatch directly rather than imposing a separate inventory or schema-fidelity gate.
+For `get_app_state`, Pi starts one verified zero-turn app-server runtime and signed Computer Use client. Subsequent actions using the same app selector use that runtime and thread, preserving the official app-use session and element identifiers. Pi closes retained sessions when the agent settles, a same-selector replacement inspection starts, an error occurs, or the Pi session shuts down. Generic MCP applies the same composition behavior and also closes inactive sessions after two minutes or when the connection closes. Calls sharing a retained official session are serialized because the helper session itself allows one active call; unrelated one-shot calls are not globally locked. Both paths dispatch directly rather than imposing a separate inventory or schema-fidelity gate.
 
 This lifecycle changes neither the schemas nor the no-permissions policy. Interaction definitions omit extra `promptSnippet` and `promptGuidelines` metadata and rely on their official descriptions.
 
 ## Output boundary
 
-The current helper returns `text` and `image` MCP blocks. The broker does not impose an independent block-count or payload-size policy. Results are returned to the invoking client because app state and screenshots are the requested capability. They are never copied to audit, logs, temp files, or structured metadata. Text is truncated in memory at Pi's standard 50KB/2000-line bound; the full text is not persisted.
+The current helper returns `text` and `image` MCP blocks. The broker does not impose an independent block-count or payload-size policy. Results are returned to the invoking client because app state and screenshots are the requested capability. They are never copied to audit or logs. Pi truncates text at its standard 50KB/2,000-line bound and writes the complete text to a mode-0600 file inside a private directory under `/tmp`, returning the path so the agent can use `read` when needed. Image data is never written to a spill file.
 
 ## Package name
 

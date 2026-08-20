@@ -4,8 +4,8 @@ const app = z.string().describe("App name, full app path, or unambiguous bundle 
 const selectTextApp = z.string().describe("App name or bundle identifier");
 
 export const DIRECT_TOOL_SCHEMAS = {
-	list_apps: z.object({}).strict(),
-	get_app_state: z.object({ app }).strict(),
+	list_apps: z.object({}).passthrough(),
+	get_app_state: z.object({ app }).passthrough(),
 	click: z
 		.object({
 			app,
@@ -15,21 +15,21 @@ export const DIRECT_TOOL_SCHEMAS = {
 			x: z.number().describe("X coordinate in screenshot pixel coordinates").optional(),
 			y: z.number().describe("Y coordinate in screenshot pixel coordinates").optional(),
 		})
-		.strict(),
+		.passthrough(),
 	perform_secondary_action: z
 		.object({
 			app,
 			element_index: z.string().describe("Element identifier"),
 			action: z.string().describe("Secondary accessibility action name"),
 		})
-		.strict(),
+		.passthrough(),
 	set_value: z
 		.object({
 			app,
 			element_index: z.string().describe("Element identifier"),
 			value: z.string().describe("Value to assign"),
 		})
-		.strict(),
+		.passthrough(),
 	select_text: z
 		.object({
 			app: selectTextApp,
@@ -39,7 +39,7 @@ export const DIRECT_TOOL_SCHEMAS = {
 			selection: z.enum(["text", "cursor_before", "cursor_after"]).describe("Whether to select the text or place the cursor before or after it. Defaults to text.").optional(),
 			suffix: z.string().describe("Optional text immediately after the target, used to disambiguate repeated matches").optional(),
 		})
-		.strict(),
+		.passthrough(),
 	scroll: z
 		.object({
 			app,
@@ -47,7 +47,7 @@ export const DIRECT_TOOL_SCHEMAS = {
 			direction: z.string().describe("Scroll direction: up, down, left, or right"),
 			pages: z.number().describe("Number of pages to scroll. Fractional values are supported. Defaults to 1").optional(),
 		})
-		.strict(),
+		.passthrough(),
 	drag: z
 		.object({
 			app,
@@ -56,9 +56,9 @@ export const DIRECT_TOOL_SCHEMAS = {
 			to_x: z.number().describe("End X coordinate"),
 			to_y: z.number().describe("End Y coordinate"),
 		})
-		.strict(),
-	press_key: z.object({ app, key: z.string().describe("Key or key combination to press") }).strict(),
-	type_text: z.object({ app, text: z.string().describe("Literal text to type") }).strict(),
+		.passthrough(),
+	press_key: z.object({ app, key: z.string().describe("Key or key combination to press") }).passthrough(),
+	type_text: z.object({ app, text: z.string().describe("Literal text to type") }).passthrough(),
 } as const;
 
 export type DirectMethod = keyof typeof DIRECT_TOOL_SCHEMAS;
@@ -140,45 +140,8 @@ export function isDirectMethod(value: string): value is DirectMethod {
 	return COMPUTER_USE_METHODS.includes(value as DirectMethod);
 }
 
-const KEY_ALIASES: Readonly<Record<string, string>> = {
-	cmd: "Meta_L",
-	command: "Meta_L",
-	meta: "Meta_L",
-	ctrl: "Control_L",
-	control: "Control_L",
-	shift: "Shift_L",
-	alt: "Alt_L",
-	option: "Alt_L",
-	enter: "Return",
-	return: "Return",
-	esc: "Escape",
-	escape: "Escape",
-	backspace: "BackSpace",
-	delete: "Delete",
-	pageup: "Page_Up",
-	pagedown: "Page_Down",
-	arrowup: "Up",
-	arrowdown: "Down",
-	arrowleft: "Left",
-	arrowright: "Right",
-};
-
-export function normalizeKeyExpression(value: string): string {
-	return value
-		.split("+")
-		.map((part) => {
-			const trimmed = part.trim();
-			const alias = KEY_ALIASES[trimmed.toLowerCase()];
-			if (alias) return alias;
-			return /^[A-Z]$/.test(trimmed) ? trimmed.toLowerCase() : trimmed;
-		})
-		.join("+");
-}
-
 export function validateDirectArguments(method: DirectMethod, value: unknown): DirectToolArguments {
-	const parsed = DIRECT_TOOL_SCHEMAS[method].parse(value) as DirectToolArguments;
-	if (method === "press_key") return { ...parsed, key: normalizeKeyExpression(parsed.key as string) };
-	return parsed;
+	return DIRECT_TOOL_SCHEMAS[method].parse(value) as DirectToolArguments;
 }
 
 export const TOOL_INPUT_SCHEMAS = Object.freeze(Object.fromEntries(

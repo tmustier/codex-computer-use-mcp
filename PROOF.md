@@ -64,20 +64,26 @@ Current branch tests cover:
 - partial-preserving ancestry enumeration plus private-cwd recovery, stable freeze/termination of separately grouped or reparented helpers, and stdio closure;
 - unrestricted read and mutation dispatch under the single no-permissions policy;
 - absence of wrapper app/intent/action gates and permission prompts;
-- canonical bundle-ID dispatch;
-- native-compatible focus behavior for already-frontmost targets, focus changes, and unavailable legacy telemetry;
+- unchanged app-selector, key-expression, and compatible additional-argument dispatch;
+- foreground-compatible behavior with no app rewrite, focus monitor, or same-app kernel lock;
 - official error preservation;
-- private metadata-only audits with no arguments/results and truthful separate broker/lease cleanup evidence;
+- private metadata-only audits with no arguments or results and truthful broker cleanup evidence;
 - secure audit-directory/file no-follow and mode checks;
-- global per-user same-app exclusion across different supported state roots, race behavior, crash release, private lock roots, and bounded lock filenames;
-- focus-event ASN retry/drain behavior, including valid events at the start of a single large stdout chunk;
+- concurrent direct-service dispatch without a wrapper lock;
 - stdio MCP all-ten inventory/status with no alternate mode route;
 - signed app-server elicitation forwarding, exact user responses, headless cancellation, and cancellation while a UI callback is pending;
 - standard form/URL forwarding across a real MCP SDK client/server transport;
 - Pi runtime registration for every direct capability with no nested planner, permission command, or wrapper-generated approval UI;
 - Pi session-start registration and activation of all ten direct definitions while preserving unrelated active tools;
-- one retained broker/client session across `get_app_state` and the following action, with deterministic active-app lease continuity and verified close;
+- one retained broker/client session across `get_app_state` and multiple subsequent actions using the same app selector, with verified close;
+- Pi's 50KB/2,000-line truncation plus complete mode-0600 text output under `/tmp`, with no image spill;
 - Pi form, opaque OpenAI-form, URL, decline, and headless-cancel elicitation handling.
+
+## Unreleased capability-preservation acceptance
+
+The current branch removes wrapper-only app canonicalization, key rewriting, same-app locking, and focus telemetry. Automated tests verify unchanged argument dispatch, compatible additional properties, concurrent direct-service calls, multi-action session retention, and private full-text files for truncated Pi output.
+
+Live acceptance used Finder and completed `get_app_state` followed by two harmless `Escape` actions through both the Pi-style session executor and a real stdio MCP client/server connection. All six official calls succeeded, each three-call sequence retained one broker session (`brokerCleanupVerified=false` while active), and explicit executor/client close completed cleanly.
 
 ## Version 0.3.4 native focus compatibility
 
@@ -156,10 +162,10 @@ Validation recorded for the reviewed direct implementation:
 - public-source scrub: no secrets, private absolute paths, or machine identifiers found;
 - fresh-Pi real-app acceptance: pass as above.
 
-Independent reviews of earlier revisions found cleanup and coordination gaps: fail-open or partial descendant enumeration, early-exit orphan recovery, state-root-scoped same-app locking, false-success lease-release audit, unverified focus-listener exit, pre-response direct-call accounting, and large-chunk focus-event loss. The reviewed implementation retains those fixes while removing wrapper-generated approval UI and safe or full configuration branches. The follow-up Full access change uses Codex's own policy to resolve normal empty-schema app approvals without prompts; any elicitation app-server emits remains a separate, faithfully forwarded user interaction.
+Independent reviews of earlier revisions found cleanup and coordination gaps: fail-open or partial descendant enumeration, early-exit orphan recovery, false completion reporting, and pre-response direct-call accounting. The current implementation retains process-cleanup and accounting fixes while removing obsolete app locking and focus telemetry. The Full access path uses Codex's own policy to resolve normal empty-schema app approvals without prompts; any elicitation app-server emits remains a separate, faithfully forwarded user interaction.
 
 Version 0.2.0 supports direct local calls only in an unlocked macOS session. Targeted calls failed with official error `-10005` during genuine locked-session acceptance. OpenAI limits locked Computer Use to active trusted turns started from a connected device, so locked local use remains follow-up work and is not part of this release.
 
 ## Non-goals
 
-No private Sky protocol clone, browser-host integration, credential extraction, TCC automation, app injection, re-signing, sender-auth bypass, wrapper-side approval fabrication, persistent approval-file mutation, nested model fallback, or tool-result persistence.
+No private Sky protocol clone, browser-host integration, credential extraction, TCC automation, app injection, re-signing, sender-auth bypass, wrapper-side approval fabrication, persistent approval-file mutation, nested model fallback, audit result persistence, or screenshot spill files. Pi may save complete truncated text privately under `/tmp` and returns the path.

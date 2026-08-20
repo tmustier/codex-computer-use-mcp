@@ -1,13 +1,22 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
-import { getAgentDir, truncateHead, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
-import { executeDirectTool, getDirectStatus } from "../../dist/direct-service.js";
 import {
-  createOfficialDirectToolSession,
+  DEFAULT_MAX_BYTES,
+  DEFAULT_MAX_LINES,
+  formatSize,
+  getAgentDir,
+  truncateHead,
+  withFileMutationQueue,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
+import { getDirectStatus } from "../../dist/direct-service.js";
+import {
   type DirectBrokerElicitationRequest,
   type DirectBrokerElicitationResponse,
-  type OfficialDirectToolSession,
 } from "../../dist/direct-broker.js";
+import { DirectSessionExecutor } from "../../dist/session-executor.js";
 import {
   TOOL_INPUT_SCHEMAS,
   COMPUTER_USE_METHODS,
@@ -44,102 +53,53 @@ export function setInitialComputerUseTools(pi: Pick<ExtensionAPI, "getActiveTool
   pi.setActiveTools([...new Set([...pi.getActiveTools(), ...COMPUTER_USE_TOOL_NAMES])]);
 }
 
-interface SessionExecutorDependencies {
-  createSession?: typeof createOfficialDirectToolSession;
-  executeTool?: typeof executeDirectTool;
-}
+export { DirectSessionExecutor as PiDirectSessionExecutor };
 
-/** Keep the signed app-server/client alive across the required state -> action pair. */
-export class PiDirectSessionExecutor {
-  private session: OfficialDirectToolSession | undefined;
-  private queue: Promise<void> = Promise.resolve();
-  private readonly dependencies: SessionExecutorDependencies;
-
-  constructor(dependencies: SessionExecutorDependencies = {}) {
-    this.dependencies = dependencies;
-  }
-
-  private async closeSession(): Promise<void> {
-    const session = this.session;
-    this.session = undefined;
-    await session?.close();
-  }
-
-  async execute(
-    method: DirectMethod,
-    params: Record<string, unknown>,
-    dependencies: Parameters<typeof executeDirectTool>[1],
-  ): Promise<Awaited<ReturnType<typeof executeDirectTool>>> {
-    const previous = this.queue;
-    let release!: () => void;
-    this.queue = new Promise<void>((resolve) => { release = resolve; });
-    await previous;
+export async function toPiContent(content: Array<Record<string, unknown>>): Promise<{
+  content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>;
+  fullOutputPath?: string;
+  fullOutputSaveFailed?: true;
+}> {
+  const textBlocks = content
+    .filter((block) => block.type !== "image")
+    .map((block) => String(block.text ?? ""));
+  const truncations = textBlocks.map((text) => truncateHead(text, {
+    maxLines: DEFAULT_MAX_LINES,
+    maxBytes: DEFAULT_MAX_BYTES,
+  }));
+  let fullOutputPath: string | undefined;
+  let fullOutputSaveFailed = false;
+  if (truncations.some((result) => result.truncated)) {
     try {
-      const executeTool = this.dependencies.executeTool ?? executeDirectTool;
-      if (method === "list_apps") return await executeTool({ method, arguments: params }, dependencies);
-      if (method === "get_app_state") {
-        await this.closeSession();
-        const createSession = this.dependencies.createSession ?? createOfficialDirectToolSession;
-        try {
-          const response = await executeTool(
-            { method, arguments: params },
-            {
-              ...dependencies,
-              callTool: async (directMethod, args, options) => {
-                this.session = await createSession({ supportsOpenAiFormElicitation: true });
-                return this.session.call(directMethod, args, options);
-              },
-            },
-          );
-          if (response.isError) await this.closeSession();
-          return response;
-        } catch (error) {
-          await this.closeSession();
-          throw error;
-        }
-      }
-      const session = this.session;
-      try {
-        return await executeTool(
-          { method, arguments: params },
-          session ? {
-            ...dependencies,
-            callTool: async (directMethod, args, options) => {
-              const result = await session.call(directMethod, args, options);
-              await this.closeSession();
-              return { ...result, brokerCleanupVerified: true };
-            },
-          } : dependencies,
-        );
-      } finally {
-        await this.closeSession();
-      }
-    } finally {
-      release();
+      const tempDir = await mkdtemp(path.join(tmpdir(), "pi-computer-use-"));
+      fullOutputPath = path.join(tempDir, "output.txt");
+      await withFileMutationQueue(fullOutputPath, async () => {
+        await writeFile(fullOutputPath!, textBlocks.join("\n\n"), { encoding: "utf8", mode: 0o600 });
+      });
+    } catch {
+      fullOutputPath = undefined;
+      fullOutputSaveFailed = true;
     }
   }
 
-  async close(): Promise<void> {
-    await this.queue;
-    await this.closeSession();
-  }
-}
-
-function toPiContent(content: Array<Record<string, unknown>>): Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> {
   const result: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [];
+  let textIndex = 0;
   for (const block of content) {
     if (block.type === "image") {
       result.push({ type: "image", data: String(block.data), mimeType: String(block.mimeType) });
       continue;
     }
-    const original = String(block.text ?? "");
-    const truncated = truncateHead(original, { maxLines: 2_000, maxBytes: 50 * 1024 });
+    const truncated = truncations[textIndex++];
     const suffix = truncated.truncated
-      ? `\n\n[Official Computer Use text truncated in-memory: ${truncated.outputLines}/${truncated.totalLines} lines, ${truncated.outputBytes}/${truncated.totalBytes} bytes. No full-output file was written.]`
+      ? `\n\n[Official Computer Use text truncated: showing ${truncated.outputLines} of ${truncated.totalLines} lines (${formatSize(truncated.outputBytes)} of ${formatSize(truncated.totalBytes)}). ${fullOutputPath ? `Full output saved to: ${fullOutputPath}` : "The complete output could not be saved."}]`
       : "";
     result.push({ type: "text", text: `${truncated.content}${suffix}` });
   }
-  return result;
+  return {
+    content: result,
+    ...(fullOutputPath ? { fullOutputPath } : {}),
+    ...(fullOutputSaveFailed ? { fullOutputSaveFailed: true as const } : {}),
+  };
 }
 
 function errorText(content: Array<Record<string, unknown>>): string {
@@ -220,7 +180,7 @@ export async function handleOfficialElicitation(
 
 export default function directComputerUse(pi: ExtensionAPI) {
   const stateRoot = process.env.CODEX_COMPUTER_USE_HOME || path.join(getAgentDir(), "direct-computer-use");
-  const sessionExecutor = new PiDirectSessionExecutor();
+  const sessionExecutor = new DirectSessionExecutor();
 
   pi.registerCommand("computer-use-status", {
     description: "Show the direct-call architecture, durable no-permissions policy, signed broker, and private audit path",
@@ -232,6 +192,7 @@ export default function directComputerUse(pi: ExtensionAPI) {
 
   for (const method of COMPUTER_USE_METHODS) {
     const piName = `computer_use_${method}`;
+    const baseDescription = TOOL_METADATA[method].description;
     const inspectionPromptMetadata = INSPECTION_METHODS.has(method) ? {
       promptSnippet: `${titleFor(method)} through the official signed macOS Computer Use service`,
       promptGuidelines: [
@@ -242,7 +203,7 @@ export default function directComputerUse(pi: ExtensionAPI) {
     pi.registerTool({
       name: piName,
       label: titleFor(method),
-      description: TOOL_METADATA[method].description,
+      description: `${baseDescription}${baseDescription.endsWith(".") ? "" : "."} Text output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)}; full text is saved to a temporary file when truncated.`,
       ...inspectionPromptMetadata,
       parameters: TOOL_INPUT_SCHEMAS[method] as any,
       async execute(_toolCallId, params, signal, onUpdate, ctx) {
@@ -265,7 +226,15 @@ export default function directComputerUse(pi: ExtensionAPI) {
           },
         );
         if (response.isError) throw new Error(errorText(response.content));
-        return { content: toPiContent(response.content), details: response.details };
+        const rendered = await toPiContent(response.content);
+        return {
+          content: rendered.content,
+          details: {
+            ...response.details,
+            ...(rendered.fullOutputPath ? { fullOutputPath: rendered.fullOutputPath } : {}),
+            ...(rendered.fullOutputSaveFailed ? { fullOutputSaveFailed: true } : {}),
+          },
+        };
       },
       renderCall(args, theme) {
         const renderedArgs = args as Record<string, unknown>;
@@ -276,5 +245,6 @@ export default function directComputerUse(pi: ExtensionAPI) {
   }
 
   pi.on("session_start", () => setInitialComputerUseTools(pi));
-  pi.on("session_shutdown", () => sessionExecutor.close());
+  pi.on("agent_settled", () => { void sessionExecutor.close().catch(() => undefined); });
+  pi.on("session_shutdown", () => { void sessionExecutor.close().catch(() => undefined); });
 }

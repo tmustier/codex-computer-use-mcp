@@ -9,6 +9,7 @@ This changelog records user-visible changes from version 0.3.2 onwards.
 - Remove the install-time build that could delete the published `dist` directory.
 - Report the package version from `package.json` in both MCP protocol identities.
 - Support npm 12 source installs and package inspection with `package-lock.json` and the current `npm pack --json` format.
+- Preserve one official app-use session across `get_app_state` and multi-action sequences using the same app selector in both Pi and generic MCP.
 
 ### Changed
 
@@ -16,6 +17,9 @@ This changelog records user-visible changes from version 0.3.2 onwards.
 - Derive Pi tool parameters from the same schemas used by the MCP server.
 - Dispatch directly instead of blocking on helper inventory, descriptions, annotations, or compatible schema drift.
 - Remove arbitrary protocol-line and result-size limits, stale Dictionary verification, and redundant no-permissions configuration code.
+- Pass app selectors and key expressions through unchanged, and accept compatible additional tool arguments.
+- Remove legacy canonical app rewriting, same-app kernel locking, and focus telemetry.
+- Keep Pi's 50KB/2,000-line context limit while saving complete truncated text privately under `/tmp`; screenshots are never spilled.
 
 ## 0.3.4 - 2026-07-27
 

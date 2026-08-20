@@ -11,15 +11,6 @@ import {
 	type DirectBrokerElicitationResponse,
 	type DirectBrokerResult,
 } from "./direct-broker.ts";
-import { acquireAppLock, globalAppLockRoot, type AppLock } from "./lock.ts";
-import {
-	frontmostBundleId,
-	frontmostBundleIdAsync,
-	resolveAppIdentity,
-	watchTargetFrontmost,
-	type ResolvedAppIdentity,
-	type TargetFrontmostWatcher,
-} from "./system.ts";
 import {
 	MUTATING_METHODS,
 	COMPUTER_USE_METHODS,
@@ -50,11 +41,6 @@ export interface DirectServiceDependencies {
 	) => DirectBrokerElicitationResponse | Promise<DirectBrokerElicitationResponse>;
 	supportsOpenAiFormElicitation?: boolean;
 	callTool?: typeof callOfficialDirectTool;
-	resolveIdentity?: typeof resolveAppIdentity;
-	frontmost?: typeof frontmostBundleId;
-	frontmostAsync?: typeof frontmostBundleIdAsync;
-	watchFocus?: typeof watchTargetFrontmost;
-	acquireLock?: typeof acquireAppLock;
 }
 
 export class DirectPolicyError extends Error {
@@ -68,9 +54,8 @@ export function defaultStateRoot(): string {
 	return process.env.CODEX_COMPUTER_USE_HOME || path.join(homedir(), ".direct-computer-use");
 }
 
-function auditAppIdentifier(rawApp: string | undefined, identity?: ResolvedAppIdentity): string | null {
+function auditAppIdentifier(rawApp: string | undefined): string | null {
 	if (!rawApp) return null;
-	if (identity?.bundleId) return identity.bundleId;
 	return `target-sha256:${crypto.createHash("sha256").update(rawApp).digest("hex").slice(0, 16)}`;
 }
 
@@ -140,9 +125,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			modelTurnsStarted: 0,
 			ephemeralThread: null,
 			elicitationRequests: 0,
-			backgroundPreserved: null,
 			brokerCleanupVerified: true,
-			appLeaseReleased: true,
 			resultContentTypes: [],
 			resultBytes: 0,
 		};
@@ -153,33 +136,6 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 	}
 
 	const rawApp = request.method === "list_apps" ? undefined : request.arguments.app as string | undefined;
-	const identity = rawApp ? (deps.resolveIdentity ?? resolveAppIdentity)(rawApp) : undefined;
-	if (rawApp && !identity?.bundleId) {
-		const audit: AuditRecord = {
-			timestamp: new Date().toISOString(), runId, method: request.method, permissionMode: PERMISSION_MODE,
-			app: auditAppIdentifier(rawApp, identity), mutating: MUTATING_METHODS.has(request.method),
-			authorization: "no_permissions_unrestricted", inputBytes: inputByteCount(request.arguments),
-			outcome: "identity_rejected", durationMs: Date.now() - startedAt, brokerVersion: null, clientBuild: null,
-			directCalls: 0, modelTurnsStarted: 0, ephemeralThread: null, elicitationRequests: 0,
-			backgroundPreserved: null, brokerCleanupVerified: true, appLeaseReleased: true, resultContentTypes: [], resultBytes: 0,
-		};
-		try { await appendAudit(stateRoot, audit); }
-		catch { throw new Error("Direct Computer Use identity validation failed, and secure audit logging also failed"); }
-		throw new DirectPolicyError("Target app could not be resolved to a canonical installed bundle identifier");
-	}
-
-	const canonicalArgs: DirectToolArguments = identity?.bundleId
-		? { ...request.arguments, app: identity.bundleId }
-		: { ...request.arguments };
-	let lock: AppLock | undefined;
-	let watcher: TargetFrontmostWatcher | undefined;
-	let focusTimer: NodeJS.Timeout | undefined;
-	let focusSample: Promise<void> | undefined;
-	let focusSamplingFailed = false;
-	let frontBefore: string | undefined;
-	let targetBecameFrontmost = false;
-	let unrelatedFocusChanges = false;
-	let backgroundPreserved: boolean | null = null;
 	let broker: DirectBrokerResult | undefined;
 	let brokerFailure: DirectBrokerCallError | undefined;
 	let brokerDispatchAttempted = false;
@@ -189,33 +145,10 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 	let thrown: Error | undefined;
 
 	try {
-		if (identity) lock = await (deps.acquireLock ?? acquireAppLock)(globalAppLockRoot(), identity.leaseId, runId);
-		if (identity?.bundleId) {
-			frontBefore = (deps.frontmost ?? frontmostBundleId)();
-			if (frontBefore?.toLowerCase() === identity.bundleId.toLowerCase()) targetBecameFrontmost = true;
-			try { watcher = await (deps.watchFocus ?? watchTargetFrontmost)(); }
-			catch { focusSamplingFailed = true; }
-			const sample = async (): Promise<void> => {
-				if (focusSample) return focusSample;
-				focusSample = (async () => {
-					const current = await (deps.frontmostAsync ?? frontmostBundleIdAsync)();
-					if (!current) return;
-					if (current.toLowerCase() === identity.bundleId!.toLowerCase()) targetBecameFrontmost = true;
-					else if (frontBefore && current !== frontBefore) unrelatedFocusChanges = true;
-				})().finally(() => { focusSample = undefined; });
-				return focusSample;
-			};
-			await sample().catch(() => { focusSamplingFailed = true; });
-			focusTimer = setInterval(() => {
-				void sample().catch(() => { focusSamplingFailed = true; });
-			}, 100);
-			focusTimer.unref();
-		}
-
-		await deps.onProgress?.(`Direct ${request.method}: verified target lease; calling the signed official tool without a model turn…`);
+		await deps.onProgress?.(`Direct ${request.method}: calling the signed official tool without a model turn…`);
 		try {
 			brokerDispatchAttempted = true;
-			broker = await (deps.callTool ?? callOfficialDirectTool)(request.method, canonicalArgs, {
+			broker = await (deps.callTool ?? callOfficialDirectTool)(request.method, request.arguments, {
 				signal: deps.signal,
 				timeoutMs: 120_000,
 				onElicitation: deps.onElicitation,
@@ -239,7 +172,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 				runId,
 				method: request.method,
 				permissionMode: PERMISSION_MODE,
-				app: identity?.bundleId ?? null,
+				app: auditAppIdentifier(rawApp),
 				outcome,
 				directCalls: 1,
 				modelTurnsStarted: 0,
@@ -248,6 +181,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 				brokerVersion: broker.brokerVersion,
 				clientBuild: broker.clientBuild,
 				durationMs: broker.durationMs,
+				brokerCleanupVerified,
 			},
 		};
 	} catch (error) {
@@ -255,39 +189,16 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 		if (!brokerDispatchAttempted) brokerCleanupVerified = true;
 		thrown = new Error(safeErrorMessage(error));
 	} finally {
-		if (focusTimer) clearInterval(focusTimer);
-		if (focusSample) await focusSample.catch(() => { focusSamplingFailed = true; });
-		let watcherFailed = focusSamplingFailed;
-		if (watcher) {
-			watcherFailed ||= !watcher.healthy();
-			try { await watcher.stop(); }
-			catch { watcherFailed = true; }
-			if (identity?.bundleId) targetBecameFrontmost ||= watcher.becameFrontmost(identity.bundleId);
-		}
-		if (identity?.bundleId) {
-			const frontAfter = (deps.frontmost ?? frontmostBundleId)();
-			if (!frontAfter) watcherFailed = true;
-			else if (frontAfter.toLowerCase() === identity.bundleId.toLowerCase()) targetBecameFrontmost = true;
-			else if (frontBefore && frontAfter !== frontBefore) unrelatedFocusChanges = true;
-		}
-		backgroundPreserved = identity ? !targetBecameFrontmost && !watcherFailed : null;
-		let releaseFailed = false;
-		try { await lock?.release(); } catch { releaseFailed = true; }
-		if (releaseFailed) {
-			outcome = "lease_cleanup_failed";
-			thrown = new Error("Direct Computer Use app lease did not release cleanly");
-			response = undefined;
-		}
 		const metadata = broker ? contentMetadata(broker.content) : { types: [], bytes: 0 };
 		const audit: AuditRecord = {
 			timestamp: new Date().toISOString(),
 			runId,
 			method: request.method,
 			permissionMode: PERMISSION_MODE,
-			app: auditAppIdentifier(rawApp, identity),
+			app: auditAppIdentifier(rawApp),
 			mutating: MUTATING_METHODS.has(request.method),
 			authorization: "no_permissions_unrestricted",
-			inputBytes: inputByteCount(canonicalArgs),
+			inputBytes: inputByteCount(request.arguments),
 			outcome,
 			durationMs: Date.now() - startedAt,
 			brokerVersion: broker?.brokerVersion ?? brokerFailure?.brokerVersion ?? null,
@@ -296,9 +207,7 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 			modelTurnsStarted: broker?.modelTurnsStarted ?? brokerFailure?.modelTurnsStarted ?? 0,
 			ephemeralThread: broker?.ephemeralThread ?? brokerFailure?.ephemeralThread ?? null,
 			elicitationRequests: broker?.elicitationRequests ?? brokerFailure?.elicitationRequests ?? 0,
-			backgroundPreserved,
 			brokerCleanupVerified,
-			appLeaseReleased: !releaseFailed,
 			resultContentTypes: metadata.types,
 			resultBytes: metadata.bytes,
 		};
@@ -307,9 +216,6 @@ export async function executeDirectTool(raw: unknown, deps: DirectServiceDepende
 	}
 	if (thrown) throw thrown;
 	if (!response) throw new Error("Direct Computer Use ended without a result");
-	response.details.backgroundPreserved = backgroundPreserved;
-	response.details.unrelatedFocusChanges = unrelatedFocusChanges;
-	response.details.brokerCleanupVerified = brokerCleanupVerified;
 	return response;
 }
 
@@ -339,9 +245,9 @@ export function getDirectStatus(stateRoot = defaultStateRoot()): Record<string, 
 		officialAppApprovalHandling: "auto-approved-by-codex-full-access",
 		officialElicitationHandling: "forwarded-if-emitted",
 		wrapperAuthorization: "unrestricted",
+		appSelectors: "passed-through",
 		availableMethods: [...COMPUTER_USE_METHODS],
 		supportedMethods: [...COMPUTER_USE_METHODS],
-		appLockRoot: globalAppLockRoot(),
 		auditPath: path.join(stateRoot, "audit", "direct-computer-use.jsonl"),
 	};
 }
