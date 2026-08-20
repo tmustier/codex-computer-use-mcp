@@ -1,10 +1,9 @@
 {
   "mcpServers": {
     "computer-use-direct": {
-      "command": "npx",
+      "command": "node",
       "args": [
-        "-y",
-        "codex-computer-use-mcp@0.3.4"
+        "/absolute/path/to/node_modules/codex-computer-use-mcp/dist/mcp-server.js"
       ],
       "lifecycle": "lazy",
       "requestTimeoutMs": 180000,

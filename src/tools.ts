@@ -9,7 +9,7 @@ export const DIRECT_TOOL_SCHEMAS = {
 	click: z
 		.object({
 			app,
-			click_count: z.number().refine(Number.isInteger).describe("Number of clicks. Defaults to 1").optional(),
+			click_count: z.number().refine(Number.isInteger).describe("Number of clicks. Defaults to 1").meta({ type: "integer" }).optional(),
 			element_index: z.string().describe("Element index to click").optional(),
 			mouse_button: z.enum(["left", "right", "middle"]).describe("Mouse button to click. Defaults to left.").optional(),
 			x: z.number().describe("X coordinate in screenshot pixel coordinates").optional(),
@@ -133,8 +133,9 @@ export const OFFICIAL_TOOL_METADATA: Readonly<Record<DirectMethod, OfficialToolM
 	},
 });
 
-export const READ_ONLY_METHODS = new Set<DirectMethod>(OFFICIAL_METHODS.filter((method) => OFFICIAL_TOOL_METADATA[method].annotations.readOnlyHint));
-export const MUTATING_METHODS = new Set<DirectMethod>(OFFICIAL_METHODS.filter((method) => !READ_ONLY_METHODS.has(method)));
+export const MUTATING_METHODS = new Set<DirectMethod>(
+	OFFICIAL_METHODS.filter((method) => !OFFICIAL_TOOL_METADATA[method].annotations.readOnlyHint),
+);
 
 export function isDirectMethod(value: string): value is DirectMethod {
 	return OFFICIAL_METHODS.includes(value as DirectMethod);
@@ -181,104 +182,11 @@ export function validateDirectArguments(method: DirectMethod, value: unknown): D
 	return parsed;
 }
 
-export function targetAppFor(method: DirectMethod, args: DirectToolArguments): string | undefined {
-	return method === "list_apps" ? undefined : (args.app as string | undefined);
+function officialInputSchema(schema: z.ZodType): unknown {
+	const { $schema: _, ...inputSchema } = z.toJSONSchema(schema);
+	return inputSchema;
 }
 
-/** Exact upstream MCP schemas observed from the signed helper. Drift fails closed before dispatch. */
-export const EXPECTED_OFFICIAL_INPUT_SCHEMAS: Readonly<Record<DirectMethod, unknown>> = {
-	list_apps: { type: "object", properties: {}, additionalProperties: false },
-	get_app_state: {
-		type: "object",
-		properties: { app: { description: "App name, full app path, or unambiguous bundle identifier", type: "string" } },
-		required: ["app"],
-		additionalProperties: false,
-	},
-	click: {
-		type: "object",
-		properties: {
-			app: { description: "App name, full app path, or unambiguous bundle identifier", type: "string" },
-			click_count: { description: "Number of clicks. Defaults to 1", type: "integer" },
-			element_index: { description: "Element index to click", type: "string" },
-			mouse_button: { description: "Mouse button to click. Defaults to left.", enum: ["left", "right", "middle"], type: "string" },
-			x: { description: "X coordinate in screenshot pixel coordinates", type: "number" },
-			y: { description: "Y coordinate in screenshot pixel coordinates", type: "number" },
-		},
-		required: ["app"],
-		additionalProperties: false,
-	},
-	perform_secondary_action: {
-		type: "object",
-		properties: {
-			action: { description: "Secondary accessibility action name", type: "string" },
-			app: { description: "App name, full app path, or unambiguous bundle identifier", type: "string" },
-			element_index: { description: "Element identifier", type: "string" },
-		},
-		required: ["app", "element_index", "action"],
-		additionalProperties: false,
-	},
-	set_value: {
-		type: "object",
-		properties: {
-			app: { description: "App name, full app path, or unambiguous bundle identifier", type: "string" },
-			element_index: { description: "Element identifier", type: "string" },
-			value: { description: "Value to assign", type: "string" },
-		},
-		required: ["app", "element_index", "value"],
-		additionalProperties: false,
-	},
-	select_text: {
-		type: "object",
-		properties: {
-			app: { description: "App name or bundle identifier", type: "string" },
-			element_index: { description: "Text element identifier", type: "string" },
-			prefix: { description: "Optional text immediately before the target, used to disambiguate repeated matches", type: "string" },
-			selection: { description: "Whether to select the text or place the cursor before or after it. Defaults to text.", enum: ["text", "cursor_before", "cursor_after"], type: "string" },
-			suffix: { description: "Optional text immediately after the target, used to disambiguate repeated matches", type: "string" },
-			text: { description: "Target text as shown in the accessibility tree", type: "string" },
-		},
-		required: ["app", "element_index", "text"],
-		additionalProperties: false,
-	},
-	scroll: {
-		type: "object",
-		properties: {
-			app: { description: "App name, full app path, or unambiguous bundle identifier", type: "string" },
-			direction: { description: "Scroll direction: up, down, left, or right", type: "string" },
-			element_index: { description: "Element identifier", type: "string" },
-			pages: { description: "Number of pages to scroll. Fractional values are supported. Defaults to 1", type: "number" },
-		},
-		required: ["app", "element_index", "direction"],
-		additionalProperties: false,
-	},
-	drag: {
-		type: "object",
-		properties: {
-			app: { description: "App name, full app path, or unambiguous bundle identifier", type: "string" },
-			from_x: { description: "Start X coordinate", type: "number" },
-			from_y: { description: "Start Y coordinate", type: "number" },
-			to_x: { description: "End X coordinate", type: "number" },
-			to_y: { description: "End Y coordinate", type: "number" },
-		},
-		required: ["app", "from_x", "from_y", "to_x", "to_y"],
-		additionalProperties: false,
-	},
-	press_key: {
-		type: "object",
-		properties: {
-			app: { description: "App name, full app path, or unambiguous bundle identifier", type: "string" },
-			key: { description: "Key or key combination to press", type: "string" },
-		},
-		required: ["app", "key"],
-		additionalProperties: false,
-	},
-	type_text: {
-		type: "object",
-		properties: {
-			app: { description: "App name, full app path, or unambiguous bundle identifier", type: "string" },
-			text: { description: "Literal text to type", type: "string" },
-		},
-		required: ["app", "text"],
-		additionalProperties: false,
-	},
-};
+export const EXPECTED_OFFICIAL_INPUT_SCHEMAS = Object.freeze(Object.fromEntries(
+	OFFICIAL_METHODS.map((method) => [method, officialInputSchema(DIRECT_TOOL_SCHEMAS[method])]),
+)) as Readonly<Record<DirectMethod, unknown>>;

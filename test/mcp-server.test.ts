@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { EXPECTED_OFFICIAL_INPUT_SCHEMAS, OFFICIAL_METHODS, OFFICIAL_TOOL_METADATA } from "../src/tools.ts";
+
+const packageVersion = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
 
 test("stdio MCP advertises one unrestricted no-permissions interface with all ten direct tools", async () => {
 	const stateRoot = await mkdtemp(path.join(os.tmpdir(), "direct-computer-use-mcp-test."));
@@ -19,6 +22,7 @@ test("stdio MCP advertises one unrestricted no-permissions interface with all te
 	});
 	try {
 		await client.connect(transport);
+		assert.deepEqual(client.getServerVersion(), { name: "codex-computer-use-mcp", version: packageVersion });
 		const listed = await client.listTools();
 		assert.deepEqual(listed.tools.map((tool) => tool.name).sort(), [...OFFICIAL_METHODS, "computer_use_status"].sort());
 		for (const method of OFFICIAL_METHODS) {

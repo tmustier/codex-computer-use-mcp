@@ -42,7 +42,7 @@ These invariants describe the supported transport, zero-model-turn architecture,
 14. Only validated text/image result blocks cross to the invoking client. No full-result spill file is written.
 15. Audits contain metadata only, including separate `brokerCleanupVerified` and `appLeaseReleased` evidence. A retained Pi inspection truthfully records broker cleanup as pending (`false`); the paired action does not return if final retained-session cleanup fails. Lease-release failure changes the audited outcome before surfacing. Arguments, values, screenshots, app-state text, result content, prompts, approvals, credentials, and tokens are forbidden.
 16. Policy rejections are audited; audit failure is fatal once a secure state path exists.
-17. Runtime and development dependency tarballs are exact-pinned with integrity in `npm-shrinkwrap.json`.
+17. `package-lock.json` exact-pins source and CI dependencies with integrity. Published consumers use standard npm dependency resolution.
 
 ## Permission semantics
 
@@ -64,6 +64,6 @@ Computer Use returns the official app-state text and screenshots to the invoking
 
 ## Supported versions
 
-Only the latest approved release is supported. Version 0.3.4 supports direct local calls in an unlocked macOS session. Targeted local calls while the Mac is locked are not supported.
+Only the latest approved release is supported. Direct local calls require an unlocked macOS session. Targeted local calls while the Mac is locked are not supported.
 
 App-server is experimental and bundle paths or schemas can change. Drift fails closed until reviewed.

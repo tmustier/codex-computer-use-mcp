@@ -17,28 +17,27 @@ import {
 	OFFICIAL_METHODS,
 	OFFICIAL_TOOL_METADATA,
 } from "./tools.ts";
+import { PACKAGE_VERSION } from "./version.ts";
 
-const version = "0.3.3";
-
-async function handleCli(): Promise<boolean> {
+function handleCli(): boolean {
 	const args = process.argv.slice(2);
 	if (args.length === 0) return false;
 	if (args.length === 1 && args[0] === "--status") {
-		console.log(JSON.stringify(await getDirectStatus(), null, 2));
+		console.log(JSON.stringify(getDirectStatus(), null, 2));
 		return true;
 	}
 	throw new Error("Usage: codex-computer-use-mcp [--status]. The durable no-permissions interface has no alternate mode or configuration command.");
 }
 
 try {
-	if (await handleCli()) process.exit(0);
+	if (handleCli()) process.exit(0);
 } catch (error) {
 	console.error(error instanceof Error ? error.message : "Invalid command");
 	process.exit(1);
 }
 
 const server = new Server(
-	{ name: "codex-computer-use-mcp", version },
+	{ name: "codex-computer-use-mcp", version: PACKAGE_VERSION },
 	{ capabilities: { logging: {}, tools: {} } },
 );
 
@@ -64,7 +63,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<CallToolResult> => {
 	if (request.params.name === statusToolDefinition.name) {
 		try {
-			const status = await getDirectStatus();
+			const status = getDirectStatus();
 			return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }], structuredContent: status };
 		} catch (error) {
 			return { content: [{ type: "text", text: error instanceof Error ? error.message : "Could not read status" }], isError: true };

@@ -131,4 +131,4 @@ Direct state can be removed only after rollback evidence is captured and no proc
 
 ## Generic MCP gateway
 
-If Pi uses `mcp.json`, retain `directTools: false`. Use the exact `0.3.4` package shown in `integrations/pi/mcp.json.example`. During source acceptance, use a distinct temporary server name and source path, then remove it. The direct Pi adapter is the primary live path; do not leave the version 0.1 aggregate server active after the switch.
+If Pi uses `mcp.json`, retain `directTools: false` and point `integrations/pi/mcp.json.example` at the reviewed local package installation. During source acceptance, use a distinct temporary server name and source path, then remove it. The direct Pi adapter is the primary live path; do not leave the version 0.1 aggregate server active after the switch.

@@ -29,7 +29,6 @@
   "files": [
     "dist",
     "integrations/pi",
-    "npm-shrinkwrap.json",
     "README.md",
     "CHANGELOG.md",
     "PROOF.md",
@@ -43,42 +42,33 @@
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
+    "pretest": "npm run build",
     "test": "node --test test/*.test.ts",
-    "prepare": "npm run build",
-    "prepublishOnly": "npm run check && npm run check:pi && npm test && npm run build",
-    "check:pi": "npx tsc --ignoreConfig --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --skipLibCheck --types node integrations/pi/index.ts"
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run check && npm run check:pi && npm test",
+    "check:pi": "npm run build && npx tsc --ignoreConfig --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --skipLibCheck --types node integrations/pi/index.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",
-    "@types/node": "24.13.3",
-    "typescript": "7.0.2",
     "zod": "4.4.3"
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
-    "typebox": "*"
+    "@earendil-works/pi-tui": "*"
   },
   "peerDependenciesMeta": {
-    "@earendil-works/pi-ai": {
-      "optional": true
-    },
     "@earendil-works/pi-coding-agent": {
       "optional": true
     },
     "@earendil-works/pi-tui": {
       "optional": true
-    },
-    "typebox": {
-      "optional": true
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.80.7",
     "@earendil-works/pi-coding-agent": "0.80.7",
     "@earendil-works/pi-tui": "0.80.7",
-    "typebox": "1.1.38"
+    "@types/node": "24.13.3",
+    "typescript": "7.0.2"
   },
   "engines": {
     "node": ">=22"

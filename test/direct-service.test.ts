@@ -24,7 +24,7 @@ function deps(root: string, callTool: DirectServiceDependencies["callTool"], bec
 	return {
 		stateRoot: root,
 		callTool,
-		resolveIdentity: (app) => ({ bundleId: app === "TextEdit" ? "com.apple.TextEdit" : app, leaseId: (app === "TextEdit" ? "com.apple.TextEdit" : app).toLowerCase(), verifiedSystemDictionary: false }),
+		resolveIdentity: (app) => ({ bundleId: app === "TextEdit" ? "com.apple.TextEdit" : app, leaseId: (app === "TextEdit" ? "com.apple.TextEdit" : app).toLowerCase() }),
 		frontmost: () => "com.google.Chrome",
 		frontmostAsync: async () => "com.google.Chrome",
 		watchFocus: async () => ({ healthy: () => true, becameFrontmost: () => becameFrontmost, stop: async () => undefined }),
@@ -102,23 +102,6 @@ test("same-app exclusion is global across different supported state roots", asyn
 });
 
 test("no-permissions dispatches mutating methods without a wrapper gate or prompt", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-mutation-test."));
-	let observed: unknown;
-	try {
-		const response = await executeDirectTool(
-			{ method: "click", arguments: { app: "TextEdit", element_index: "button-1" } },
-			deps(root, async (method, args) => { observed = { method, args }; return brokerResult("clicked"); }),
-		);
-		assert.equal(response.ok, true);
-		assert.deepEqual(observed, { method: "click", args: { app: "com.apple.TextEdit", element_index: "button-1" } });
-		const audit = JSON.parse((await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8")).trim());
-		assert.equal(audit.permissionMode, "no-permissions");
-		assert.equal(audit.authorization, "no_permissions_unrestricted");
-		assert.equal(audit.directCalls, 1);
-	} finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test("no-permissions has no wrapper app, intent, or action gate", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-full-test."));
 	let observed: unknown;
 	try {
@@ -131,6 +114,7 @@ test("no-permissions has no wrapper app, intent, or action gate", async () => {
 		const auditText = await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8");
 		assert.doesNotMatch(auditText, /arbitrary direct action/);
 		const audit = JSON.parse(auditText.trim());
+		assert.equal(audit.permissionMode, "no-permissions");
 		assert.equal(audit.authorization, "no_permissions_unrestricted");
 		assert.equal(audit.modelTurnsStarted, 0);
 		assert.equal(audit.directCalls, 1);

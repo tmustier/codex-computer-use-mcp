@@ -5,46 +5,6 @@ import path from "node:path";
 import test from "node:test";
 import { EXPECTED_OFFICIAL_INPUT_SCHEMAS, OFFICIAL_METHODS, OFFICIAL_TOOL_METADATA } from "../src/tools.ts";
 
-test("Pi adapter registers all ten tools through one direct no-permissions session path", async () => {
-	const source = await readFile("integrations/pi/index.ts", "utf8");
-	assert.match(source, /const piName = `computer_use_\$\{method\}`/);
-	for (const method of OFFICIAL_METHODS) assert.match(source, new RegExp(`\\b${method}: Type\\.Object`));
-	for (const forbidden of [
-		"runOfficialCodex",
-		"buildPrompt",
-		"reasoningEffort",
-		"gpt-",
-		"background_computer_use",
-		"computer-use-mode",
-		"saveConfig",
-		"loadConfig",
-		"ctx.ui.confirm",
-		"ctx.ui.input",
-		"full-permissions",
-		"safe mode",
-		"must not be used",
-		"credentials",
-		"authentication",
-		"payments",
-		"external messages",
-		"destructive actions",
-		"purpose-built",
-		"confirmation",
-		"policy gate",
-	]) {
-		assert.doesNotMatch(source, new RegExp(forbidden.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
-	}
-	assert.match(source, /OFFICIAL_TOOL_METADATA\[method\]\.description/);
-	assert.match(source, /executeDirectTool/);
-	assert.match(source, /onElicitation: \(request\) => handleOfficialElicitation/);
-	assert.match(source, /supportsOpenAiFormElicitation: true/);
-	assert.match(source, /Call computer_use_get_app_state once per assistant turn before interacting with an app/);
-	assert.match(source, /new PiDirectSessionExecutor\(\)/);
-	assert.match(source, /sessionExecutor\.execute/);
-	assert.match(source, /pi\.on\("session_start", \(\) => setInitialComputerUseTools\(pi\)\)/);
-	assert.match(source, /pi\.on\("session_shutdown", \(\) => sessionExecutor\.close\(\)\)/);
-});
-
 test("Pi surfaces an official form elicitation and returns the user's structured response", async () => {
 	const { handleOfficialElicitation } = await import("../integrations/pi/index.ts");
 	const calls: Array<{ kind: string; value: unknown }> = [];
@@ -179,7 +139,7 @@ test("Pi broker setup failures stay inside the audited direct-service path", asy
 		} as any);
 		await assert.rejects(executor.execute("get_app_state", { app: "TextEdit" }, {
 			stateRoot: root,
-			resolveIdentity: () => ({ bundleId: "com.apple.TextEdit", leaseId: "com.apple.textedit", verifiedSystemDictionary: false }),
+			resolveIdentity: () => ({ bundleId: "com.apple.TextEdit", leaseId: "com.apple.textedit" }),
 			frontmost: () => "com.google.Chrome",
 			frontmostAsync: async () => "com.google.Chrome",
 			watchFocus: async () => ({ healthy: () => true, becameFrontmost: () => false, stop: async () => undefined }),

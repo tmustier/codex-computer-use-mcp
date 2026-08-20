@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import test from "node:test";
+import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { verifyOfficialDirectBroker } from "../src/direct-broker.ts";
 import { EXPECTED_OFFICIAL_INPUT_SCHEMAS, OFFICIAL_METHODS, OFFICIAL_TOOL_METADATA } from "../src/tools.ts";
 
@@ -36,7 +37,7 @@ test("official signed app-server broker and exact ten-tool helper inventory are 
 	const proc = spawn(verified.client.clientPath, ["mcp"], { stdio: ["pipe", "pipe", "ignore"] });
 	try {
 		const initialized = await rpc(proc, 1, "initialize", {
-			protocolVersion: "2025-11-25",
+			protocolVersion: LATEST_PROTOCOL_VERSION,
 			capabilities: {},
 			clientInfo: { name: "direct-computer-use-test", version: "1" },
 		});

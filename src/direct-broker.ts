@@ -9,6 +9,7 @@ import {
 	type DirectMethod,
 	type DirectToolArguments,
 } from "./tools.ts";
+import { PACKAGE_VERSION } from "./version.ts";
 
 export const CODEX_PATH = "/Applications/ChatGPT.app/Contents/Resources/codex";
 export const COMPUTER_USE_PLUGIN_ROOT =
@@ -663,7 +664,7 @@ export async function createOfficialDirectToolSession(
 		proc.stdout.on("end", () => { if (stdoutBuffer.length > 0) processProtocolLine(stdoutBuffer); stdoutBuffer = ""; });
 
 		await request("initialize", {
-			clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: "0.3.3" },
+			clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: PACKAGE_VERSION },
 			capabilities: { mcpServerOpenaiFormElicitation: options.supportsOpenAiFormElicitation === true },
 		}, 15_000);
 		send({ method: "initialized" });

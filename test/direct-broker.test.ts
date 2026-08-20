@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { buildDirectAppServerArgs, callOfficialDirectTool, createOfficialDirectToolSession } from "../src/direct-broker.ts";
 import { EXPECTED_OFFICIAL_INPUT_SCHEMAS, OFFICIAL_METHODS } from "../src/tools.ts";
+
+const packageVersion = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
 
 async function makeFake(root: string): Promise<{ script: string; log: string }> {
 	const script = path.join(root, "fake-app-server.mjs");
@@ -74,6 +77,7 @@ test("direct broker uses only zero-turn app-server MCP methods and an isolated c
 		assert.equal(result.ephemeralThread, true);
 		const records = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
 		assert.deepEqual(records.map((item) => item.method).filter(Boolean), ["initialize", "initialized", "thread/start", "mcpServerStatus/list", "mcpServer/tool/call"]);
+		assert.equal(records.find((item) => item.method === "initialize")?.params?.clientInfo?.version, packageVersion);
 		assert.equal(records.some((item) => item.method === "turn/start"), false);
 		assert.equal(records.find((item) => item.method === "thread/start")?.params?.approvalPolicy, "never");
 		assert.equal(records.find((item) => item.method === "thread/start")?.params?.sandbox, "danger-full-access");

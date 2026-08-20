@@ -1,6 +1,6 @@
 # Pi integration
 
-The native Pi adapter is the primary 0.3 path. It registers and activates ten namespaced typed tools together so Pi itself chooses each official Computer Use method and argument.
+The native Pi adapter registers and activates ten namespaced typed tools together so Pi itself chooses each official Computer Use method and argument.
 
 ## Source checkout acceptance
 
@@ -13,10 +13,10 @@ CODEX_COMPUTER_USE_HOME="$(mktemp -d)" \
 
 `-ne` prevents an installed 0.1 adapter from loading at the same time. This source workflow does not install or switch live Pi configuration.
 
-For normal installation, use the exact version 0.3.4 npm package:
+For normal installation, install from npm:
 
 ```bash
-pi install npm:codex-computer-use-mcp@0.3.4
+pi install npm:codex-computer-use-mcp
 ```
 
 Use the source workflow only when you need to test an exact reviewed commit. Follow the rollback procedure in `MIGRATION.md` when replacing version 0.1.
@@ -48,7 +48,7 @@ No-permissions is the only policy: all ten tools are registered and available th
 
 ## Generic MCP gateway
 
-Merge `mcp.json.example` only for the exact 0.3.4 package or after building an exact reviewed source commit. `directTools: false` is intentional; it keeps this powerful generic MCP surface behind Pi's gateway.
+Merge `mcp.json.example` after installing the package locally or building an exact reviewed source commit. `directTools: false` keeps this powerful generic MCP surface behind Pi's gateway.
 
 For a source checkout:
 

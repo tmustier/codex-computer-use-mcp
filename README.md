@@ -1,6 +1,6 @@
 # Codex Computer Use MCP
 
-Version 0.3.4 exposes the official signed macOS Computer Use capabilities as direct typed tools for Pi and MCP clients. The calling agent chooses every tool and argument itself.
+This package exposes the official signed macOS Computer Use capabilities as direct typed tools for Pi and MCP clients. The calling agent chooses every tool and argument itself.
 
 The primary path has:
 
@@ -77,16 +77,16 @@ The direct bridge starts app-server with a new private `CODEX_HOME` containing n
 
 ### Locked-screen limitation
 
-Version 0.3.4 supports direct local calls in an unlocked macOS session. It does not support window or accessibility actions after the Mac locks.
+Direct local calls require an unlocked macOS session. Window and accessibility actions can fail with official error `-10005` after the Mac locks.
 
-OpenAI's [locked Computer Use](https://developers.openai.com/codex/app/computer-use#use-computer-use-while-your-mac-is-locked) is limited to active, trusted ChatGPT turns started from a connected device. It does not authorize other apps or local processes to unlock the Mac. This package uses local zero-turn dispatch, so targeted calls can fail with official error `-10005` while the Mac is locked. Support for locked local use remains a follow-up and is not part of version 0.3.4.
+OpenAI's [locked Computer Use](https://developers.openai.com/codex/app/computer-use#use-computer-use-while-your-mac-is-locked) requires an active, trusted ChatGPT turn started from a connected device. It does not authorize other apps or local processes to unlock the Mac. This package cannot support locked local use unless OpenAI provides a supported local authorization API.
 
 ## Pi integration
 
-Install the exact release from npm:
+Install from npm:
 
 ```bash
-pi install npm:codex-computer-use-mcp@0.3.4
+pi install npm:codex-computer-use-mcp
 ```
 
 To evaluate a source checkout instead:
@@ -111,6 +111,16 @@ Running the binary without arguments starts a stdio MCP server exposing the same
 
 ```bash
 node dist/mcp-server.js
+```
+
+For Claude Code, install the package in a dedicated directory and register its binary:
+
+```bash
+install_dir="$HOME/.local/share/codex-computer-use-mcp"
+mkdir -p "$install_dir"
+npm install --prefix "$install_dir" --save-exact codex-computer-use-mcp
+claude mcp add --scope user codex-computer-use -- \
+  "$install_dir/node_modules/.bin/codex-computer-use-mcp"
 ```
 
 For Pi's generic MCP gateway, keep `directTools: false` so this powerful surface remains intentional:
@@ -170,7 +180,7 @@ npm audit --omit=dev
 npm pack --dry-run
 ```
 
-Registry dependency tarballs are exact-pinned with integrity and the package includes `npm-shrinkwrap.json`.
+`package-lock.json` gives source checkouts and CI reproducible dependency versions. Published consumers use standard npm dependency resolution.
 
 See [`CHANGELOG.md`](CHANGELOG.md), [`PROOF.md`](PROOF.md), [`SECURITY.md`](SECURITY.md), and [`CONTRIBUTING.md`](CONTRIBUTING.md). Agent contributors must also follow [`AGENTS.md`](AGENTS.md). It records the maintainer's thin-adapter intent and review standard.
 
