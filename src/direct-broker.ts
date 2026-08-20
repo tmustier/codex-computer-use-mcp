@@ -1,37 +1,55 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { existsSync, realpathSync } from "node:fs";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { DirectMethod, DirectToolArguments } from "./tools.ts";
+import { createInterface } from "node:readline";
+import { z } from "zod";
+import type { DirectMethod, DirectToolArguments, JsonObject, JsonValue } from "./tools.ts";
 import { PACKAGE_VERSION } from "./version.ts";
 
-export const CODEX_PATH = "/Applications/ChatGPT.app/Contents/Resources/codex";
-export const COMPUTER_USE_PLUGIN_ROOT =
+const CODEX_PATH = "/Applications/ChatGPT.app/Contents/Resources/codex";
+const COMPUTER_USE_PLUGIN_ROOT =
 	"/Applications/ChatGPT.app/Contents/Resources/plugins/openai-bundled/plugins/computer-use";
 const COMPUTER_USE_APP_RELATIVE_PATH = "computer-use/Codex Computer Use.app";
 const CLIENT_RELATIVE_PATH = "Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient";
-export const COMPUTER_USE_CLIENT_PATH = path.join(os.userInfo().homedir, ".codex", COMPUTER_USE_APP_RELATIVE_PATH, CLIENT_RELATIVE_PATH);
-export const LEGACY_COMPUTER_USE_CLIENT_PATH = path.join(COMPUTER_USE_PLUGIN_ROOT, "Codex Computer Use.app", CLIENT_RELATIVE_PATH);
+const COMPUTER_USE_CLIENT_PATH = path.join(os.userInfo().homedir, ".codex", COMPUTER_USE_APP_RELATIVE_PATH, CLIENT_RELATIVE_PATH);
 const OPENAI_TEAM_ID = "2DC432GLL2";
 
-export interface DirectBrokerElicitationRequest extends Record<string, unknown> {
-	mode?: string;
-	message?: string;
-	requestedSchema?: unknown;
-	url?: string;
-	elicitationId?: string;
-}
+const jsonObjectSchema = z.record(z.string(), z.json());
+const elicitationRequestSchema = z.object({
+	mode: z.string().optional(),
+	message: z.string().optional(),
+	requestedSchema: z.json().optional(),
+	url: z.string().optional(),
+	elicitationId: z.string().optional(),
+	_meta: z.json().optional(),
+}).catchall(z.json());
+const directResultSchema = z.object({
+	content: z.array(jsonObjectSchema),
+	structuredContent: z.json().optional(),
+	isError: z.boolean().optional(),
+});
+const protocolMessageSchema = z.object({
+	id: z.union([z.string(), z.number(), z.null()]).optional(),
+	method: z.string().optional(),
+	params: z.json().optional(),
+	result: z.json().optional(),
+	error: z.object({ message: z.string().optional() }).catchall(z.json()).optional(),
+}).catchall(z.json());
+const threadStartSchema = z.object({ thread: z.object({ id: z.string() }) });
+
+export type DirectBrokerElicitationRequest = z.infer<typeof elicitationRequestSchema>;
 
 export interface DirectBrokerElicitationResponse {
 	action: "accept" | "decline" | "cancel";
-	content?: unknown;
-	_meta?: unknown;
+	content?: JsonValue;
+	_meta?: JsonValue;
 }
 
 export interface DirectBrokerResult {
-	content: Array<Record<string, unknown>>;
-	structuredContent?: unknown;
+	content: JsonObject[];
+	structuredContent?: JsonValue;
 	isError: boolean;
 	brokerVersion: string;
 	clientBuild: string;
@@ -62,7 +80,7 @@ export interface DirectBrokerOptions {
 	onSpawn?: (pid: number) => void;
 }
 
-export class BrokerVerificationError extends Error {
+class BrokerVerificationError extends Error {
 	constructor(message: string) {
 		super(message);
 		this.name = "BrokerVerificationError";
@@ -172,19 +190,7 @@ export function resolveOfficialComputerUseClient(options: ResolveOfficialCompute
 	throw new BrokerVerificationError("Official Computer Use client was not found in a supported location");
 }
 
-function clientBuild(appPath: string, runSync: RunSync): string {
-	const result = runSync("/usr/bin/plutil", ["-extract", "CFBundleVersion", "raw", path.join(appPath, "Contents", "Info.plist")]);
-	if (result.status !== 0 || !(result.stdout ?? "").toString().trim()) {
-		throw new BrokerVerificationError("Could not verify the official Computer Use client build");
-	}
-	return (result.stdout ?? "").toString().trim();
-}
-
-export function verifyOfficialDirectBroker(options: ResolveOfficialComputerUseClientOptions = {}): {
-	brokerVersion: string;
-	clientBuild: string;
-	client: OfficialComputerUseClient;
-} {
+export function verifyOfficialDirectBroker(options: ResolveOfficialComputerUseClientOptions = {}) {
 	const runSync = options.runSync ?? productionRunSync;
 	verifySignedBinary(CODEX_PATH, runSync);
 	const client = resolveOfficialComputerUseClient({ ...options, runSync });
@@ -192,7 +198,12 @@ export function verifyOfficialDirectBroker(options: ResolveOfficialComputerUseCl
 	if (version.status !== 0 || !/^codex-cli\s+\d+\./.test((version.stdout ?? "").toString().trim())) {
 		throw new BrokerVerificationError("Could not verify the app-bundled Codex app-server version");
 	}
-	return { brokerVersion: (version.stdout ?? "").toString().trim(), clientBuild: clientBuild(client.appPath, runSync), client };
+	const build = runSync("/usr/bin/plutil", ["-extract", "CFBundleVersion", "raw", path.join(client.appPath, "Contents", "Info.plist")]);
+	const clientBuild = (build.stdout ?? "").toString().trim();
+	if (build.status !== 0 || !clientBuild) {
+		throw new BrokerVerificationError("Could not verify the official Computer Use client build");
+	}
+	return { brokerVersion: (version.stdout ?? "").toString().trim(), clientBuild, client };
 }
 
 function buildBrokerEnv(codexHome: string, tempRoot: string): NodeJS.ProcessEnv {
@@ -237,21 +248,12 @@ export function buildDirectAppServerArgs(mcpCwd = COMPUTER_USE_PLUGIN_ROOT, clie
 	];
 }
 
-function validateResult(value: unknown): {
-	content: Array<Record<string, unknown>>;
-	structuredContent?: unknown;
-	isError: boolean;
-} {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Official Computer Use returned an invalid result");
-	const record = value as Record<string, unknown>;
-	if (!Array.isArray(record.content) || record.content.some((item) => !item || typeof item !== "object" || Array.isArray(item))) {
-		throw new Error("Official Computer Use returned invalid content blocks");
-	}
-	const content = record.content as Array<Record<string, unknown>>;
+function validateResult(value: JsonValue) {
+	const result = directResultSchema.parse(value);
 	return {
-		content,
-		...(record.structuredContent !== undefined ? { structuredContent: record.structuredContent } : {}),
-		isError: record.isError === true,
+		content: result.content,
+		structuredContent: result.structuredContent,
+		isError: result.isError === true,
 	};
 }
 
@@ -427,11 +429,6 @@ export interface OfficialDirectToolSession {
 	close(): Promise<void>;
 }
 
-/**
- * Start one verified app-server runtime and retain its signed Computer Use MCP
- * client across calls. Pi uses this for the required get_app_state -> action
- * sequence; one-shot callers continue to use callOfficialDirectTool below.
- */
 export async function createOfficialDirectToolSession(
 	options: DirectBrokerOptions = {},
 ): Promise<OfficialDirectToolSession> {
@@ -460,7 +457,7 @@ export async function createOfficialDirectToolSession(
 	let callActive = false;
 	let currentElicitation: DirectBrokerOptions["onElicitation"];
 	let currentElicitationCount = 0;
-	const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
+	const pending = new Map<string, { resolve(value: JsonValue): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
 	const rejectAll = (error: Error): void => {
 		for (const waiter of pending.values()) {
 			clearTimeout(waiter.timer);
@@ -477,11 +474,11 @@ export async function createOfficialDirectToolSession(
 		rejectAll(fatalError);
 		void ensureTerminated().catch(() => undefined);
 	};
-	const send = (message: unknown): void => {
+	const send = (message: JsonValue): void => {
 		if (!proc?.stdin.writable) throw new Error("Official app-server stdin is unavailable");
 		proc.stdin.write(`${JSON.stringify(message)}\n`, "utf8");
 	};
-	const request = (methodName: string, params: unknown, timeoutMs: number): Promise<unknown> => {
+	const request = (methodName: string, params: JsonValue, timeoutMs: number): Promise<JsonValue> => {
 		const id = String(nextId++);
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
@@ -526,7 +523,11 @@ export async function createOfficialDirectToolSession(
 
 	try {
 		const command = options.appServerCommand ?? CODEX_PATH;
-		const commandArgs = options.appServerArgs ?? buildDirectAppServerArgs(workDir, verification.client!.clientPath);
+		let commandArgs = options.appServerArgs;
+		if (!commandArgs) {
+			if (!verification.client) throw new BrokerVerificationError("The official Computer Use client was not verified");
+			commandArgs = buildDirectAppServerArgs(workDir, verification.client.clientPath);
+		}
 		proc = spawn(command, commandArgs, {
 			cwd: workDir,
 			detached: true,
@@ -534,7 +535,8 @@ export async function createOfficialDirectToolSession(
 			stdio: ["pipe", "pipe", "pipe"],
 			env: buildBrokerEnv(codexHome, tempRoot),
 		});
-		processClosed = new Promise((resolve) => proc!.once("close", () => resolve()));
+		const spawnedProcess = proc;
+		processClosed = new Promise((resolve) => spawnedProcess.once("close", () => resolve()));
 		if (proc.pid) options.onSpawn?.(proc.pid);
 		proc.stdin.on("error", (error: NodeJS.ErrnoException) => { if (error.code !== "EPIPE") fail(error); });
 		proc.stderr.setEncoding("utf8");
@@ -543,74 +545,59 @@ export async function createOfficialDirectToolSession(
 		proc.once("close", (code) => { if (!closed && pending.size > 0) fail(new Error(`Official app-server exited before completing the request (${code ?? "unknown"})`)); });
 
 		const processProtocolLine = (line: string): void => {
-			let message: any;
-			try { message = JSON.parse(line); } catch { fail(new Error("Official app-server emitted malformed JSONL")); return; }
-			if (typeof message?.method === "string" && (message.method.startsWith("turn/") || message.method.startsWith("item/"))) {
+			let parsedMessage: ReturnType<typeof protocolMessageSchema.safeParse>;
+			try { parsedMessage = protocolMessageSchema.safeParse(JSON.parse(line)); }
+			catch { fail(new Error("Official app-server emitted malformed JSONL")); return; }
+			if (!parsedMessage.success) { fail(new Error("Official app-server emitted an invalid protocol message")); return; }
+			const message = parsedMessage.data;
+			if (message.method?.startsWith("turn/") || message.method?.startsWith("item/")) {
 				modelTurnsStarted += 1;
 				fail(new Error("Official app-server unexpectedly emitted model-turn activity during direct dispatch"));
 				return;
 			}
 			if (fatalError) return;
 			try {
-				if (message?.id != null && (Object.prototype.hasOwnProperty.call(message, "result") || Object.prototype.hasOwnProperty.call(message, "error"))) {
+				if (message.id != null && (message.result !== undefined || message.error !== undefined)) {
 					const waiter = pending.get(String(message.id));
 					if (!waiter) return;
 					pending.delete(String(message.id));
 					clearTimeout(waiter.timer);
-					if (message.error) waiter.reject(new Error(`Official app-server error: ${String(message.error.message ?? "unknown")}`));
-					else waiter.resolve(message.result);
+					if (message.error) waiter.reject(new Error(`Official app-server error: ${message.error.message ?? "unknown"}`));
+					else waiter.resolve(message.result ?? null);
 					return;
 				}
-				if (message?.id != null && typeof message.method === "string") {
+				if (message.id != null && message.method) {
 					if (message.method !== "mcpServer/elicitation/request") {
 						send({ id: message.id, error: { code: -32601, message: "Unsupported server request" } });
 						return;
 					}
 					currentElicitationCount += 1;
-					const requestParams = message.params && typeof message.params === "object" && !Array.isArray(message.params)
-						? message.params as DirectBrokerElicitationRequest : {};
+					const parsedRequest = elicitationRequestSchema.safeParse(message.params ?? {});
+					const requestParams = parsedRequest.success ? parsedRequest.data : {};
 					void (async () => {
 						let response: DirectBrokerElicitationResponse = { action: "cancel" };
-						if (currentElicitation) {
-							try {
-								const candidate = await currentElicitation(requestParams);
-								if (candidate && ["accept", "decline", "cancel"].includes(candidate.action)) response = candidate;
-							} catch { response = { action: "cancel" }; }
-						}
+						try {
+							if (currentElicitation) response = await currentElicitation(requestParams);
+						} catch { response = { action: "cancel" }; }
 						if (fatalError || closed || !proc?.stdin.writable) return;
-						send({ id: message.id, result: response });
+						send({ id: message.id, result: { ...response } });
 					})().catch((error) => fail(error instanceof Error ? error : new Error(String(error))));
 				}
 			} catch (error) { fail(error instanceof Error ? error : new Error(String(error))); }
 		};
-		let stdoutBuffer = "";
-		proc.stdout.setEncoding("utf8");
-		proc.stdout.on("data", (chunk: string) => {
-			let offset = 0;
-			while (offset < chunk.length) {
-				const newline = chunk.indexOf("\n", offset);
-				const end = newline === -1 ? chunk.length : newline;
-				const segment = chunk.slice(offset, end);
-				if (newline === -1) { stdoutBuffer += segment; return; }
-				const line = stdoutBuffer + segment;
-				stdoutBuffer = "";
-				if (line.length > 0) processProtocolLine(line);
-				offset = newline + 1;
-			}
-		});
-		proc.stdout.on("end", () => { if (stdoutBuffer.length > 0) processProtocolLine(stdoutBuffer); stdoutBuffer = ""; });
+		const stdoutLines = createInterface({ input: proc.stdout, crlfDelay: Number.POSITIVE_INFINITY });
+		stdoutLines.on("line", processProtocolLine);
 
 		await request("initialize", {
 			clientInfo: { name: "pi_direct_computer_use", title: "Pi Direct Computer Use", version: PACKAGE_VERSION },
 			capabilities: { mcpServerOpenaiFormElicitation: options.supportsOpenAiFormElicitation === true },
 		}, 15_000);
 		send({ method: "initialized" });
-		const started = (await request("thread/start", {
+		const started = threadStartSchema.safeParse(await request("thread/start", {
 			cwd: workDir, approvalPolicy: "never", sandbox: "danger-full-access", ephemeral: true, serviceName: "pi_direct_computer_use",
-		}, 30_000)) as any;
-		const thread = started?.thread;
-		threadId = thread?.id;
-		if (typeof threadId !== "string") throw new BrokerVerificationError("App-server did not return a usable thread");
+		}, 30_000));
+		if (!started.success) throw new BrokerVerificationError("App-server did not return a usable thread");
+		threadId = started.data.thread.id;
 		ephemeralThread = true;
 	} catch (error) {
 		const base = error instanceof Error ? error : new Error(String(error));

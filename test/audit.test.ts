@@ -9,10 +9,7 @@ const record: AuditRecord = {
 	timestamp: "2026-07-11T00:00:00.000Z",
 	runId: "run",
 	method: "type_text",
-	permissionMode: "no-permissions",
 	app: "com.apple.TextEdit",
-	mutating: true,
-	authorization: "no_permissions_unrestricted",
 	inputBytes: 19,
 	outcome: "ok",
 	durationMs: 20,
@@ -30,7 +27,8 @@ const record: AuditRecord = {
 test("audit is mode-0600 metadata without arguments, output, or secrets", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-audit-test."));
 	try {
-		const auditPath = await appendAudit(root, record);
+		await appendAudit(root, record);
+		const auditPath = path.join(root, "audit", "direct-computer-use.jsonl");
 		assert.equal((await stat(auditPath)).mode & 0o777, 0o600);
 		const parsed = JSON.parse((await readFile(auditPath, "utf8")).trim());
 		assert.equal(parsed.method, "type_text");
@@ -55,7 +53,8 @@ test("audit refuses symlinked state and log targets", async () => {
 		assert.equal(await readFile(outside, "utf8"), "untouched\n");
 
 		const state = path.join(root, "state");
-		const log = await appendAudit(state, { ...record, runId: "seed" });
+		await appendAudit(state, { ...record, runId: "seed" });
+		const log = path.join(state, "audit", "direct-computer-use.jsonl");
 		await rm(log);
 		await symlink(outside, log);
 		await assert.rejects(() => appendAudit(state, record));

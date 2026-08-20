@@ -7,13 +7,13 @@ import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { forwardOfficialElicitationToMcpClient } from "../src/mcp-elicitation.ts";
 
 test("generic MCP forwards standard official form elicitations and returns the client response", async () => {
-	let observedParams: unknown;
-	let observedOptions: unknown;
+	let observedParams;
+	let observedSignal: AbortSignal | undefined;
 	const controller = new AbortController();
 	const response = await forwardOfficialElicitationToMcpClient({
 		async elicitInput(params, options) {
 			observedParams = params;
-			observedOptions = options;
+			observedSignal = options?.signal;
 			return { action: "accept", content: { choice: "allow" }, _meta: { client: "test" } };
 		},
 	}, {
@@ -36,7 +36,7 @@ test("generic MCP forwards standard official form elicitations and returns the c
 		},
 		_meta: { source: "official-test" },
 	});
-	assert.equal((observedOptions as any).signal, controller.signal);
+	assert.equal(observedSignal, controller.signal);
 	assert.deepEqual(response, { action: "accept", content: { choice: "allow" }, _meta: { client: "test" } });
 });
 

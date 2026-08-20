@@ -7,39 +7,32 @@ import {
 	ListToolsRequestSchema,
 	McpError,
 	type CallToolResult,
-	type ContentBlock,
 } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 import { getDirectStatus } from "./direct-service.ts";
 import { forwardOfficialElicitationToMcpClient } from "./mcp-elicitation.ts";
-import {
-	TOOL_INPUT_SCHEMAS,
-	isDirectMethod,
-	COMPUTER_USE_METHODS,
-	TOOL_METADATA,
-} from "./tools.ts";
 import { DirectSessionExecutor } from "./session-executor.ts";
+import {
+	COMPUTER_USE_METHODS,
+	TOOL_INPUT_SCHEMAS,
+	TOOL_METADATA,
+	isDirectMethod,
+} from "./tools.ts";
 import { PACKAGE_VERSION } from "./version.ts";
 
-function handleCli(): boolean {
-	const args = process.argv.slice(2);
-	if (args.length === 0) return false;
-	if (args.length === 1 && args[0] === "--status") {
+const cliArgs = process.argv.slice(2);
+if (cliArgs.length > 0) {
+	if (cliArgs.length === 1 && cliArgs[0] === "--status") {
 		console.log(JSON.stringify(getDirectStatus(), null, 2));
-		return true;
+		process.exit(0);
 	}
-	throw new Error("Usage: codex-computer-use-mcp [--status]. The durable no-permissions interface has no alternate mode or configuration command.");
-}
-
-try {
-	if (handleCli()) process.exit(0);
-} catch (error) {
-	console.error(error instanceof Error ? error.message : "Invalid command");
+	console.error("Usage: codex-computer-use-mcp [--status]");
 	process.exit(1);
 }
 
 const server = new Server(
 	{ name: "codex-computer-use-mcp", version: PACKAGE_VERSION },
-	{ capabilities: { logging: {}, tools: {} } },
+	{ capabilities: { tools: {} } },
 );
 const sessionExecutor = new DirectSessionExecutor({ idleTimeoutMs: 120_000 });
 server.onclose = () => {
@@ -52,47 +45,41 @@ const toolDefinitions = COMPUTER_USE_METHODS.map((method) => ({
 	inputSchema: TOOL_INPUT_SCHEMAS[method],
 	annotations: TOOL_METADATA[method].annotations,
 }));
-
 const statusToolDefinition = {
 	name: "computer_use_status",
 	title: "Computer Use Status",
-	description: "Show direct-call architecture, durable no-permissions policy, signed broker status, supported methods, and private audit path.",
+	description: "Show Computer Use status.",
 	inputSchema: { type: "object" as const, properties: {}, additionalProperties: false },
 	annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 };
 
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
+server.setRequestHandler(ListToolsRequestSchema, () => Promise.resolve({
 	tools: [...toolDefinitions, statusToolDefinition],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<CallToolResult> => {
 	if (request.params.name === statusToolDefinition.name) {
-		try {
-			const status = getDirectStatus();
-			return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }], structuredContent: status };
-		} catch (error) {
-			return { content: [{ type: "text", text: error instanceof Error ? error.message : "Could not read status" }], isError: true };
-		}
+		const status = getDirectStatus();
+		return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }], structuredContent: status };
 	}
-
 	if (!isDirectMethod(request.params.name)) {
 		throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${request.params.name}`);
 	}
 
 	try {
-		const response = await sessionExecutor.execute(
-			request.params.name,
-			request.params.arguments ?? {},
-			{
-				signal: extra.signal,
-				onElicitation: (elicitation) => forwardOfficialElicitationToMcpClient(server, elicitation, extra.signal),
-			},
-		);
-		return {
-			content: response.content as ContentBlock[],
-			structuredContent: response.details,
+		const args = z.record(z.string(), z.json()).parse(request.params.arguments ?? {});
+		const response = await sessionExecutor.execute(request.params.name, args, {
+			signal: extra.signal,
+			onElicitation: (elicitation) => forwardOfficialElicitationToMcpClient(server, elicitation, extra.signal),
+		});
+		const result: CallToolResult = {
+			// SAFETY: app-server returns MCP CallToolResult content blocks; the broker already verifies the JSON object envelope.
+			content: response.content as CallToolResult["content"],
 			isError: response.isError,
 		};
+		const structuredContent = z.record(z.string(), z.json()).safeParse(response.structuredContent);
+		if (structuredContent.success) result.structuredContent = structuredContent.data;
+		return result;
 	} catch (error) {
 		return {
 			content: [{ type: "text", text: error instanceof Error ? error.message : "Direct Computer Use failed" }],
@@ -101,5 +88,4 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<
 	}
 });
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
+await server.connect(new StdioServerTransport());

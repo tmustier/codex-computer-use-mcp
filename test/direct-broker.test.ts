@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { buildDirectAppServerArgs, callOfficialDirectTool, createOfficialDirectToolSession } from "../src/direct-broker.ts";
+import { z } from "zod";
+import { buildDirectAppServerArgs, callOfficialDirectTool, createOfficialDirectToolSession, DirectBrokerCallError } from "../src/direct-broker.ts";
+import packageMetadata from "../package.json" with { type: "json" };
 
-const packageVersion = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
+const packageVersion = packageMetadata.version;
 
 async function makeFake(root: string): Promise<{ script: string; log: string }> {
 	const script = path.join(root, "fake-app-server.mjs");
@@ -60,7 +61,7 @@ test("production app-server args disable model transport, plugins, and remote co
 	assert.match(serialized, /features\.remote_control=false/);
 	assert.match(serialized, /app-server --stdio$/);
 	assert.doesNotMatch(serialized, /\bexec\b/);
-	assert.match(buildDirectAppServerArgs("\/tmp\/private-broker-work").join(" "), /cwd = "\/tmp\/private-broker-work"/);
+	assert.match(buildDirectAppServerArgs("/tmp/private-broker-work").join(" "), /cwd = "\/tmp\/private-broker-work"/);
 });
 
 test("direct broker uses only zero-turn app-server MCP methods and an isolated credential-free CODEX_HOME", async () => {
@@ -81,7 +82,7 @@ test("direct broker uses only zero-turn app-server MCP methods and an isolated c
 		assert.equal(records.find((item) => item.method === "thread/start")?.params?.sandbox, "danger-full-access");
 		assert.deepEqual(records.find((item) => item.method === "initialize")?.params?.capabilities, { mcpServerOpenaiFormElicitation: false });
 		assert.ok(records.every((item) => item.hasOpenAIKey === false));
-		assert.ok(records.every((item) => typeof item.codexHome === "string" && item.codexHome.includes("pi-direct-computer-use.")));
+		assert.ok(records.every((item) => z.string().safeParse(item.codexHome).success && item.codexHome.includes("pi-direct-computer-use.")));
 		assert.ok(records.every((item) => item.home.includes("pi-direct-computer-use.") && item.tmpdir === item.home));
 		assert.ok(records.every((item) => !item.codexHome.includes(path.join(os.homedir(), ".codex"))));
 	} finally {
@@ -112,15 +113,17 @@ test("one-shot wrapper preserves a setup-phase cleanup failure", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-setup-cleanup-test."));
 	try {
 		const { script } = await makeFake(root);
-		let observed: unknown;
+		let observed: DirectBrokerCallError | undefined;
 		try {
 			await callOfficialDirectTool("list_apps", {}, {
 				...options(script),
 				processEnumeratorCommand: path.join(root, "missing-enumerator"),
 			});
-		} catch (error) { observed = error; }
-		assert.match((observed as Error)?.message ?? "", /cleanup failed/);
-		assert.equal((observed as any)?.cleanupVerified, false);
+		} catch (error) {
+			if (error instanceof DirectBrokerCallError) observed = error;
+		}
+		assert.match(observed?.message ?? "", /cleanup failed/);
+		assert.equal(observed?.cleanupVerified, false);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
