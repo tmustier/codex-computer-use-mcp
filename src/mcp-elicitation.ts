@@ -44,8 +44,7 @@ export async function forwardOfficialElicitationToMcpClient(
 	try {
 		const response = await client.elicitInput(parsedParams.data, signal ? { signal } : undefined);
 		const result: DirectBrokerElicitationResponse = { action: response.action };
-		const content = z.json().safeParse(response.content);
-		if (content.success) result.content = content.data;
+		if (response.content !== undefined) result.content = response.content;
 		const metadata = z.json().safeParse(response._meta);
 		if (metadata.success) result._meta = metadata.data;
 		return result;

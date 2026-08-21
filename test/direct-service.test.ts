@@ -13,7 +13,6 @@ function brokerResult(content = "ok", isError = false): DirectBrokerResult {
 		isError,
 		brokerVersion: "test-app-server",
 		clientBuild: "test-client",
-		durationMs: 10,
 		elicitationRequests: 0,
 		modelTurnsStarted: 0,
 		ephemeralThread: true,

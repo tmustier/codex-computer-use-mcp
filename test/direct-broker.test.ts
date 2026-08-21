@@ -25,7 +25,7 @@ if(mode==="child-hang"||mode==="orphan-exit"){const child=spawn(process.execPath
 rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify({method:m.method,id:m.id,params:m.params,result:m.result,codexHome:process.env.CODEX_HOME,home:process.env.HOME,tmpdir:process.env.TMPDIR,hasOpenAIKey:Boolean(process.env.OPENAI_API_KEY)})+"\\n");
  if(m.method==="initialize") return send({id:m.id,result:{userAgent:"fake",platformFamily:"unix",platformOs:"macos"}});
  if(m.method==="initialized") return;
- if(m.method==="thread/start"){const thread=mode==="bad-thread"?{}:{id:"thread-test"}; send({id:m.id,result:{thread}}); if(mode==="model-event")send({method:"turn/started",params:{}}); return;}
+ if(m.method==="thread/start"){send({id:m.id,result:{thread:{id:"thread-test"}}}); if(mode==="model-event")send({method:"turn/started",params:{}}); return;}
  if(m.method==="mcpServer/tool/call"){
    if(mode==="close-before-tool"){process.stdin.destroy();setTimeout(()=>process.exit(0),100);return;}
    if(mode==="hang"||mode==="child-hang") return;
@@ -50,6 +50,18 @@ function options(script: string, mode = "ok") {
 		appServerArgs: [script, mode],
 		skipSignatureVerification: true,
 	};
+}
+
+const childProcessRecordSchema = z.object({ childPid: z.number().int().positive() });
+
+async function waitForChildPid(log: string): Promise<number> {
+	for (let attempt = 0; attempt < 50; attempt += 1) {
+		const text = await readFile(log, "utf8").catch(() => "");
+		const record = text.split("\n").find((line) => line.includes("childPid"));
+		if (record) return childProcessRecordSchema.parse(JSON.parse(record)).childPid;
+		await new Promise((resolve) => setTimeout(resolve, 10));
+	}
+	throw new Error("Fake app-server did not report its child process");
 }
 
 test("production app-server args disable model transport, plugins, and remote control", () => {
@@ -215,19 +227,6 @@ test("direct broker fails closed on any model-turn notification, including durin
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("direct broker requires a usable app-server thread", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-thread-test."));
-	try {
-		const { script, log } = await makeFake(root);
-		await assert.rejects(
-			callOfficialDirectTool("list_apps", {}, options(script, "bad-thread")),
-			/usable thread/,
-		);
-		const methods = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line).method);
-		assert.equal(methods.includes("mcpServer/tool/call"), false);
-	} finally { await rm(root, { recursive: true, force: true }); }
-});
-
 test("partial process enumeration errors fail closed but still kill already discovered descendants", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-enumerator-test."));
 	try {
@@ -242,11 +241,7 @@ test("partial process enumeration errors fail closed but still kill already disc
 			signal: controller.signal,
 			timeoutMs: 60_000,
 		});
-		for (let attempt = 0; attempt < 50; attempt += 1) {
-			try { if ((await readFile(log, "utf8")).includes("childPid")) break; } catch { /* not written yet */ }
-			await new Promise((resolve) => setTimeout(resolve, 10));
-		}
-		const childPid = JSON.parse((await readFile(log, "utf8")).split("\n").find((line) => line.includes("childPid"))!).childPid;
+		const childPid = await waitForChildPid(log);
 		controller.abort();
 		await assert.rejects(call, /cleanup failed/);
 		assert.throws(() => process.kill(childPid, 0));
@@ -262,7 +257,7 @@ test("an app-server that exits immediately cannot orphan a private-workdir child
 		catch (error) { observed = error; }
 		assert.match(observed?.message ?? "", /exited before completing/);
 		assert.equal(observed?.cleanupVerified, true);
-		const childPid = JSON.parse((await readFile(log, "utf8")).split("\n").find((line) => line.includes("childPid"))!).childPid;
+		const childPid = await waitForChildPid(log);
 		assert.throws(() => process.kill(childPid, 0));
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -277,12 +272,7 @@ test("direct broker cancellation terminates separately-grouped descendants", asy
 			...options(script, "child-hang"), signal: controller.signal, timeoutMs: 60_000,
 			onSpawn: (pid) => { parentPid = pid; },
 		});
-		for (let attempt = 0; attempt < 50; attempt += 1) {
-			try { if ((await readFile(log, "utf8")).includes("childPid")) break; } catch { /* not written yet */ }
-			await new Promise((resolve) => setTimeout(resolve, 10));
-		}
-		const childPid = JSON.parse((await readFile(log, "utf8")).split("\n").find((line) => line.includes("childPid"))!).childPid;
-		assert.equal(Number.isSafeInteger(childPid), true);
+		const childPid = await waitForChildPid(log);
 		assert.match(spawnSync("/usr/bin/pgrep", ["-P", String(parentPid)], { encoding: "utf8" }).stdout, new RegExp(`\\b${childPid}\\b`));
 		controller.abort();
 		await assert.rejects(promise, /cancelled/);

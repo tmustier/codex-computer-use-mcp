@@ -81,7 +81,7 @@ export class DirectSessionExecutor {
 						...dependencies,
 						callTool: async (directMethod, args, options) => {
 							this.session = await (this.dependencies.createSession ?? createOfficialDirectToolSession)({
-								supportsOpenAiFormElicitation: true,
+								supportsOpenAiFormElicitation: dependencies.supportsOpenAiFormElicitation === true,
 							});
 							return this.session.call(directMethod, args, options);
 						},
