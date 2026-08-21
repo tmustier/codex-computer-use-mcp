@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import adapter, { handleOfficialElicitation, toPiContent } from "../integrations/pi/index.ts";
 import type { DirectBrokerResult } from "../src/direct-broker.ts";
 import { DirectSessionExecutor } from "../src/session-executor.ts";
 import { COMPUTER_USE_METHODS, TOOL_INPUT_SCHEMAS, TOOL_METADATA, type DirectMethod } from "../src/tools.ts";
@@ -13,7 +14,6 @@ function brokerResult(text: string): DirectBrokerResult {
 		isError: false,
 		brokerVersion: "test",
 		clientBuild: "test",
-		durationMs: 1,
 		elicitationRequests: 0,
 		modelTurnsStarted: 0,
 		ephemeralThread: true,
@@ -22,7 +22,6 @@ function brokerResult(text: string): DirectBrokerResult {
 }
 
 test("Pi returns form elicitation responses", async () => {
-	const { handleOfficialElicitation } = await import("../integrations/pi/index.ts");
 	let selectedTitle = "";
 	let editorTitle = "";
 	let editorPrefill = "";
@@ -45,7 +44,6 @@ test("Pi returns form elicitation responses", async () => {
 });
 
 test("Pi preserves opaque OpenAI form responses", async () => {
-	const { handleOfficialElicitation } = await import("../integrations/pi/index.ts");
 	let editorTitle = "";
 	const response = await handleOfficialElicitation({
 		mode: "openai/form",
@@ -64,7 +62,6 @@ test("Pi preserves opaque OpenAI form responses", async () => {
 });
 
 test("Pi opens URL elicitations only after acceptance", async () => {
-	const { handleOfficialElicitation } = await import("../integrations/pi/index.ts");
 	const opened: string[] = [];
 	const accepted = await handleOfficialElicitation({
 		mode: "url",
@@ -91,7 +88,6 @@ test("Pi opens URL elicitations only after acceptance", async () => {
 });
 
 test("Pi distinguishes decline from headless cancellation", async () => {
-	const { handleOfficialElicitation } = await import("../integrations/pi/index.ts");
 	const request = { mode: "form", message: "Choose", requestedSchema: { type: "object", properties: {} } };
 	const declined = await handleOfficialElicitation(request, {
 		hasUI: true,
@@ -106,7 +102,6 @@ test("Pi distinguishes decline from headless cancellation", async () => {
 });
 
 test("Pi registers and activates the ten Computer Use tools", async () => {
-	const { default: adapter } = await import("../integrations/pi/index.ts");
 	const tools: Array<{ name: string; description: string; parameters: unknown }> = [];
 	const commands: string[] = [];
 	const handlers = new Map<string, () => void>();
@@ -148,6 +143,33 @@ test("broker setup failures remain audited", async () => {
 		assert.equal(audit.outcome, "broker_failed");
 		assert.equal(audit.directCalls, 0);
 	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("retained sessions advertise only the caller's elicitation capability", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-session-capability-test."));
+	const advertised: boolean[] = [];
+	const createExecutor = () => new DirectSessionExecutor({
+		createSession: async (options) => {
+			advertised.push(options.supportsOpenAiFormElicitation === true);
+			return {
+				async call() { return brokerResult("state"); },
+				async close() {},
+			};
+		},
+	});
+	const genericExecutor = createExecutor();
+	const piExecutor = createExecutor();
+	try {
+		await genericExecutor.execute("get_app_state", { app: "TextEdit" }, { stateRoot: root });
+		await piExecutor.execute("get_app_state", { app: "TextEdit" }, {
+			stateRoot: root,
+			supportsOpenAiFormElicitation: true,
+		});
+		assert.deepEqual(advertised, [false, true]);
+	} finally {
+		await Promise.all([genericExecutor.close(), piExecutor.close()]);
 		await rm(root, { recursive: true, force: true });
 	}
 });
@@ -203,7 +225,6 @@ test("idle expiry closes a retained session", async () => {
 });
 
 test("Pi truncates text to a private spill file without spilling images", async () => {
-	const { toPiContent } = await import("../integrations/pi/index.ts");
 	const original = "x".repeat(60 * 1024);
 	const rendered = await toPiContent([
 		{ type: "text", text: original },

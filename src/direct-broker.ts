@@ -53,7 +53,6 @@ export interface DirectBrokerResult {
 	isError: boolean;
 	brokerVersion: string;
 	clientBuild: string;
-	durationMs: number;
 	elicitationRequests: number;
 	modelTurnsStarted: 0;
 	ephemeralThread: true;
@@ -75,8 +74,6 @@ export interface DirectBrokerOptions {
 	skipSignatureVerification?: boolean;
 	/** Test-only process-enumerator override. */
 	processEnumeratorCommand?: string;
-	/** Test-only working-directory process-enumerator override. */
-	cwdEnumeratorCommand?: string;
 	onSpawn?: (pid: number) => void;
 }
 
@@ -122,8 +119,8 @@ export class DirectBrokerCallError extends Error {
 
 interface CommandResult {
 	status: number | null;
-	stdout?: string | Buffer;
-	stderr?: string | Buffer;
+	stdout?: string;
+	stderr?: string;
 }
 
 type RunSync = (command: string, args: string[]) => CommandResult;
@@ -195,15 +192,15 @@ export function verifyOfficialDirectBroker(options: ResolveOfficialComputerUseCl
 	verifySignedBinary(CODEX_PATH, runSync);
 	const client = resolveOfficialComputerUseClient({ ...options, runSync });
 	const version = runSync(CODEX_PATH, ["--version"]);
-	if (version.status !== 0 || !/^codex-cli\s+\d+\./.test((version.stdout ?? "").toString().trim())) {
+	if (version.status !== 0 || !/^codex-cli\s+\d+\./.test((version.stdout ?? "").trim())) {
 		throw new BrokerVerificationError("Could not verify the app-bundled Codex app-server version");
 	}
 	const build = runSync("/usr/bin/plutil", ["-extract", "CFBundleVersion", "raw", path.join(client.appPath, "Contents", "Info.plist")]);
-	const clientBuild = (build.stdout ?? "").toString().trim();
+	const clientBuild = (build.stdout ?? "").trim();
 	if (build.status !== 0 || !clientBuild) {
 		throw new BrokerVerificationError("Could not verify the official Computer Use client build");
 	}
-	return { brokerVersion: (version.stdout ?? "").toString().trim(), clientBuild, client };
+	return { brokerVersion: (version.stdout ?? "").trim(), clientBuild, client };
 }
 
 function buildBrokerEnv(codexHome: string, tempRoot: string): NodeJS.ProcessEnv {
@@ -219,6 +216,12 @@ function buildBrokerEnv(codexHome: string, tempRoot: string): NodeJS.ProcessEnv 
 		if (process.env[key]) env[key] = process.env[key];
 	}
 	return env;
+}
+
+function normalizeBrokerError(error: Error, stderr: string): Error {
+	return /authentication|bearer|token/i.test(`${error.message}\n${stderr}`)
+		? new Error("Official direct Computer Use broker reported an authentication failure", { cause: error })
+		: error;
 }
 
 export function buildDirectAppServerArgs(mcpCwd = COMPUTER_USE_PLUGIN_ROOT, clientPath = COMPUTER_USE_CLIENT_PATH): string[] {
@@ -246,15 +249,6 @@ export function buildDirectAppServerArgs(mcpCwd = COMPUTER_USE_PLUGIN_ROOT, clie
 		"-c", "plugins={}",
 		"app-server", "--stdio",
 	];
-}
-
-function validateResult(value: JsonValue) {
-	const result = directResultSchema.parse(value);
-	return {
-		content: result.content,
-		structuredContent: result.structuredContent,
-		isError: result.isError === true,
-	};
 }
 
 function processExists(pid: number): boolean {
@@ -310,8 +304,8 @@ function collectDescendants(rootPid: number, processEnumeratorCommand = "/usr/bi
 	return descendants;
 }
 
-function collectProcessesWithCwd(workDir: string, cwdEnumeratorCommand = "/usr/sbin/lsof"): Set<number> {
-	const result = spawnSync(cwdEnumeratorCommand, ["-a", "-d", "cwd", "+d", workDir, "-Fp"], {
+function collectProcessesWithCwd(workDir: string): Set<number> {
+	const result = spawnSync("/usr/sbin/lsof", ["-a", "-d", "cwd", "+d", workDir, "-Fp"], {
 		encoding: "utf8",
 		timeout: 3000,
 	});
@@ -336,7 +330,6 @@ async function terminateGroup(
 	proc: ChildProcessWithoutNullStreams | undefined,
 	workDir: string,
 	processEnumeratorCommand = "/usr/bin/pgrep",
-	cwdEnumeratorCommand = "/usr/sbin/lsof",
 ): Promise<void> {
 	const pid = proc?.pid;
 	if (!pid) return;
@@ -354,7 +347,7 @@ async function terminateGroup(
 			cleanupError ??= error instanceof Error ? error : new Error(String(error));
 		}
 		try {
-			for (const owned of collectProcessesWithCwd(workDir, cwdEnumeratorCommand)) found.add(owned);
+			for (const owned of collectProcessesWithCwd(workDir)) found.add(owned);
 		} catch (error) {
 			if (error instanceof ProcessEnumerationError) {
 				for (const owned of error.partialPids) found.add(owned);
@@ -409,7 +402,7 @@ async function terminateGroup(
 		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
 	let cwdSurvivors = new Set<number>();
-	try { cwdSurvivors = collectProcessesWithCwd(workDir, cwdEnumeratorCommand); }
+	try { cwdSurvivors = collectProcessesWithCwd(workDir); }
 	catch (error) { cleanupError ??= error instanceof Error ? error : new Error(String(error)); }
 	for (const survivor of cwdSurvivors) {
 		try { process.kill(survivor, "SIGKILL"); } catch { /* exited */ }
@@ -424,7 +417,7 @@ export interface OfficialDirectToolSession {
 	call(
 		method: DirectMethod,
 		args: DirectToolArguments,
-		options?: Pick<DirectBrokerOptions, "timeoutMs" | "signal" | "onElicitation" | "supportsOpenAiFormElicitation">,
+		options?: Pick<DirectBrokerOptions, "timeoutMs" | "signal" | "onElicitation">,
 	): Promise<DirectBrokerResult>;
 	close(): Promise<void>;
 }
@@ -466,7 +459,7 @@ export async function createOfficialDirectToolSession(
 		pending.clear();
 	};
 	const ensureTerminated = (): Promise<void> => {
-		termination ??= terminateGroup(proc, workDir, options.processEnumeratorCommand, options.cwdEnumeratorCommand);
+		termination ??= terminateGroup(proc, workDir, options.processEnumeratorCommand);
 		return termination;
 	};
 	const fail = (error: Error): void => {
@@ -572,8 +565,7 @@ export async function createOfficialDirectToolSession(
 						return;
 					}
 					currentElicitationCount += 1;
-					const parsedRequest = elicitationRequestSchema.safeParse(message.params ?? {});
-					const requestParams = parsedRequest.success ? parsedRequest.data : {};
+					const requestParams = elicitationRequestSchema.parse(message.params ?? {});
 					void (async () => {
 						let response: DirectBrokerElicitationResponse = { action: "cancel" };
 						try {
@@ -593,16 +585,13 @@ export async function createOfficialDirectToolSession(
 			capabilities: { mcpServerOpenaiFormElicitation: options.supportsOpenAiFormElicitation === true },
 		}, 15_000);
 		send({ method: "initialized" });
-		const started = threadStartSchema.safeParse(await request("thread/start", {
+		const started = threadStartSchema.parse(await request("thread/start", {
 			cwd: workDir, approvalPolicy: "never", sandbox: "danger-full-access", ephemeral: true, serviceName: "pi_direct_computer_use",
 		}, 30_000));
-		if (!started.success) throw new BrokerVerificationError("App-server did not return a usable thread");
-		threadId = started.data.thread.id;
+		threadId = started.thread.id;
 		ephemeralThread = true;
 	} catch (error) {
-		const base = error instanceof Error ? error : new Error(String(error));
-		const primary = /authentication|bearer|token/i.test(`${base.message}\n${stderr}`)
-			? new Error("Official direct Computer Use broker reported an authentication failure") : base;
+		const primary = normalizeBrokerError(error instanceof Error ? error : new Error(String(error)), stderr);
 		try { await close(); }
 		catch (closeError) {
 			const closeFailure = closeError instanceof Error ? closeError : new Error(String(closeError));
@@ -620,7 +609,6 @@ export async function createOfficialDirectToolSession(
 			callActive = true;
 			currentElicitation = callOptions.onElicitation;
 			currentElicitationCount = 0;
-			const startedAt = Date.now();
 			let directCalls = 0;
 			let abortHandler: (() => void) | undefined;
 			try {
@@ -633,21 +621,20 @@ export async function createOfficialDirectToolSession(
 				const raw = await request("mcpServer/tool/call", { threadId, server: "computer-use", tool: method, arguments: args }, callOptions.timeoutMs ?? 120_000);
 				directCalls = 1;
 				if (modelTurnsStarted !== 0) throw new BrokerVerificationError("Model-turn activity was observed during direct dispatch");
-				const result = validateResult(raw);
+				const result = directResultSchema.parse(raw);
 				return {
-					...result,
+					content: result.content,
+					structuredContent: result.structuredContent,
+					isError: result.isError === true,
 					brokerVersion: verification.brokerVersion,
 					clientBuild: verification.clientBuild,
-					durationMs: Date.now() - startedAt,
 					elicitationRequests: currentElicitationCount,
 					modelTurnsStarted: 0,
 					ephemeralThread: true,
 					brokerCleanupVerified: false,
 				};
 			} catch (error) {
-				const base = error instanceof Error ? error : new Error(String(error));
-				const primary = /authentication|bearer|token/i.test(`${base.message}\n${stderr}`)
-					? new Error("Official direct Computer Use broker reported an authentication failure") : base;
+				const primary = normalizeBrokerError(error instanceof Error ? error : new Error(String(error)), stderr);
 				throw new DirectBrokerCallError(primary.message, false, primary, {
 					directCalls, modelTurnsStarted, ephemeralThread, elicitationRequests: currentElicitationCount,
 					brokerVersion: verification.brokerVersion, clientBuild: verification.clientBuild,

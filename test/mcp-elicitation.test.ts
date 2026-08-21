@@ -6,62 +6,38 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { forwardOfficialElicitationToMcpClient } from "../src/mcp-elicitation.ts";
 
-test("generic MCP forwards standard official form elicitations and returns the client response", async () => {
-	let observedParams;
-	let observedSignal: AbortSignal | undefined;
-	const controller = new AbortController();
-	const response = await forwardOfficialElicitationToMcpClient({
-		async elicitInput(params, options) {
-			observedParams = params;
-			observedSignal = options?.signal;
-			return { action: "accept", content: { choice: "allow" }, _meta: { client: "test" } };
-		},
-	}, {
-		mode: "form",
-		message: "Choose access",
-		requestedSchema: {
-			type: "object",
-			properties: { choice: { type: "string", enum: ["allow", "deny"] } },
-			required: ["choice"],
-		},
-		_meta: { source: "official-test" },
-	}, controller.signal);
-	assert.deepEqual(observedParams, {
-		mode: "form",
-		message: "Choose access",
-		requestedSchema: {
-			type: "object",
-			properties: { choice: { type: "string", enum: ["allow", "deny"] } },
-			required: ["choice"],
-		},
-		_meta: { source: "official-test" },
-	});
-	assert.equal(observedSignal, controller.signal);
-	assert.deepEqual(response, { action: "accept", content: { choice: "allow" }, _meta: { client: "test" } });
-});
-
-test("generic MCP elicitation crosses a real SDK client/server transport", async () => {
+test("generic MCP form elicitation crosses the SDK transport unchanged", async () => {
 	const server = new Server({ name: "test-server", version: "1" }, { capabilities: {} });
 	const client = new Client({ name: "test-client", version: "1" }, { capabilities: { elicitation: { form: {} } } });
 	const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+	const controller = new AbortController();
 	let observed: unknown;
+	let observedSignal: AbortSignal | undefined;
 	client.setRequestHandler(ElicitRequestSchema, async (request) => {
 		observed = request.params;
-		return { action: "accept", content: { name: "Thomas" } };
+		return { action: "accept", content: { name: "Thomas" }, _meta: { client: "test" } };
 	});
 	try {
 		await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
-		const response = await forwardOfficialElicitationToMcpClient(server, {
+		const response = await forwardOfficialElicitationToMcpClient({
+			async elicitInput(params, options) {
+				observedSignal = options?.signal;
+				return server.elicitInput(params, options);
+			},
+		}, {
 			mode: "form",
 			message: "Your name",
 			requestedSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
-		});
+			_meta: { source: "official-test" },
+		}, controller.signal);
 		assert.deepEqual(observed, {
 			mode: "form",
 			message: "Your name",
 			requestedSchema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+			_meta: { source: "official-test" },
 		});
-		assert.deepEqual(response, { action: "accept", content: { name: "Thomas" } });
+		assert.equal(observedSignal, controller.signal);
+		assert.deepEqual(response, { action: "accept", content: { name: "Thomas" }, _meta: { client: "test" } });
 	} finally {
 		await client.close().catch(() => undefined);
 		await server.close().catch(() => undefined);
@@ -90,16 +66,9 @@ test("generic MCP forwards URL elicitations without converting them into wrapper
 	assert.deepEqual(response, { action: "decline" });
 });
 
-test("unsupported or unavailable MCP elicitation support cancels and never fabricates a decline", async () => {
-	const unavailable = await forwardOfficialElicitationToMcpClient({
+test("unavailable MCP elicitation support cancels rather than declining", async () => {
+	const response = await forwardOfficialElicitationToMcpClient({
 		async elicitInput() { throw new Error("client does not support elicitation"); },
 	}, { mode: "form", message: "Input", requestedSchema: { type: "object", properties: {} } });
-	assert.deepEqual(unavailable, { action: "cancel" });
-
-	let called = false;
-	const proprietary = await forwardOfficialElicitationToMcpClient({
-		async elicitInput() { called = true; return { action: "accept" }; },
-	}, { mode: "openai/form", message: "Input", requestedSchema: { type: "object", properties: {} } });
-	assert.equal(called, false);
-	assert.deepEqual(proprietary, { action: "cancel" });
+	assert.deepEqual(response, { action: "cancel" });
 });

@@ -172,8 +172,9 @@ export default function directComputerUse(pi: ExtensionAPI) {
       },
       renderCall(args, theme) {
         const parsed = z.object({ app: z.string().optional() }).safeParse(args);
-        const app = parsed.success && parsed.data.app ? ` ${parsed.data.app}` : "";
-        return new Text(theme.fg("toolTitle", theme.bold(`${piName} `)) + theme.fg("accent", app.trim()), 0, 0);
+        const app = parsed.success ? parsed.data.app : undefined;
+        const label = theme.fg("toolTitle", theme.bold(piName));
+        return new Text(app ? `${label} ${theme.fg("accent", app)}` : label, 0, 0);
       },
     });
   }
