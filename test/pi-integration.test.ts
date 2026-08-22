@@ -162,45 +162,78 @@ emitImage(state.screenshot);
 	]);
 });
 
-test("Computer Use code presents list_apps as the native structured app surface", async () => {
+test("Computer Use code returns the official list_apps text unchanged", async () => {
+	const inventory = "Notes — Beta — /Applications/Notes Beta.app/ — example.NotesBeta [running]";
+	const session = {
+		async execute() { return { isError: false, content: [{ type: "text", text: inventory }] }; },
+		async close() {},
+	};
+	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
+	const executor = new ComputerUseCodeExecutor(session as any);
+	const result = await executor.execute(`emit(await sky.list_apps());`, {});
+	assert.deepEqual(result.content, [{ type: "text", text: inventory }]);
+});
+
+test("Computer Use code terminates a busy loop after an awaited call", async () => {
+	const session = {
+		async execute() { return { isError: false, content: [{ type: "text", text: "apps" }] }; },
+		async close() {},
+	};
+	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
+	const executor = new ComputerUseCodeExecutor(session as any, 50);
+	const result = await executor.execute(`await sky.list_apps(); while (true) {}`, {});
+	assert.match(result.error ?? "", /execution exceeded 50ms/);
+	assert.deepEqual(result.calls, ["list_apps"]);
+});
+
+test("aborting Computer Use code terminates a busy worker without blocking Pi", async () => {
+	const controller = new AbortController();
 	const session = {
 		async execute() {
-			return {
-				isError: false,
-				content: [{ type: "text", text: "TextEdit — /System/Applications/TextEdit.app/ — com.apple.TextEdit [running, last-used=2026-08-21, uses=251]" }],
-			};
+			setTimeout(() => controller.abort(), 20);
+			return { isError: false, content: [{ type: "text", text: "apps" }] };
 		},
 		async close() {},
 	};
 	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
 	const executor = new ComputerUseCodeExecutor(session as any);
-	const result = await executor.execute(`const apps = await sky.list_apps(); emit(apps);`, {});
-	assert.deepEqual(result.content, [{
-		type: "text",
-		text: `[
-  {
-    "id": "com.apple.TextEdit",
-    "displayName": "TextEdit",
-    "isRunning": true,
-    "lastUsedDate": "2026-08-21",
-    "useCount": 251
-  }
-]`,
-	}]);
+	await assert.rejects(
+		executor.execute(`await sky.list_apps(); while (true) {}`, { signal: controller.signal }),
+		/Computer Use code cancelled/,
+	);
+});
+
+test("Computer Use code preserves emits and call history after a mid-batch failure", async () => {
+	const session = {
+		async execute(method: DirectMethod) {
+			if (method === "click") return { isError: true, content: [{ type: "text", text: "element not found" }] };
+			return { isError: false, content: [{ type: "text", text: "initial state" }] };
+		},
+		async close() {},
+	};
+	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
+	const executor = new ComputerUseCodeExecutor(session as any);
+	const result = await executor.execute(`
+const state = await sky.get_app_state({ app: "TextEdit" });
+emit(state.text);
+await sky.click({ app: "TextEdit", element_index: "missing" });
+`, {});
+	assert.equal(result.error, "element not found");
+	assert.deepEqual(result.calls, ["get_app_state", "click"]);
+	assert.deepEqual(result.content, [
+		{ type: "text", text: "initial state" },
+		{ type: "text", text: "Computer Use code stopped: element not found" },
+	]);
 });
 
 test("Computer Use code cannot escape through bridge or store constructors", async () => {
 	const session = { async execute() { return { isError: false, content: [] }; }, async close() {} };
 	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
 	const executor = new ComputerUseCodeExecutor(session as any);
-	await assert.rejects(
-		executor.execute(`emit(sky.click.constructor("return process")());`, {}),
-		/Code generation from strings disallowed/,
-	);
-	await assert.rejects(
-		executor.execute(`emit(store.constructor.constructor("return process")());`, {}),
-		/Code generation from strings disallowed/,
-	);
+	const bridgeEscape = await executor.execute(`emit(sky.click.constructor("return process")());`, {});
+	assert.match(bridgeEscape.error ?? "", /Code generation from strings disallowed/);
+	const storeEscape = await executor.execute(`emit(store.constructor.constructor("return process")());`, {});
+	assert.match(storeEscape.error ?? "", /Code generation from strings disallowed/);
 });
 
 test("Computer Use code exposes a persistent explicit store", async () => {

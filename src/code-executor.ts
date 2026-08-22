@@ -1,4 +1,4 @@
-import vm from "node:vm";
+import { Worker } from "node:worker_threads";
 import { z } from "zod";
 import type { DirectResponse, DirectServiceDependencies } from "./direct-service.ts";
 import { DirectSessionExecutor } from "./session-executor.ts";
@@ -12,11 +12,12 @@ import {
 
 const MAX_CODE_BYTES = 20_000;
 const MAX_CALLS = 50;
-const SYNC_TIMEOUT_MS = 5_000;
+const CODE_SLICE_TIMEOUT_MS = 5_000;
 
 export interface ComputerUseCodeResult {
 	content: JsonObject[];
 	calls: DirectMethod[];
+	error?: string;
 }
 
 interface ImageValue extends JsonObject {
@@ -25,6 +26,14 @@ interface ImageValue extends JsonObject {
 	mimeType: string;
 }
 
+const workerMessageSchema = z.discriminatedUnion("type", [
+	z.object({ type: z.literal("call"), id: z.number().int(), method: z.enum(COMPUTER_USE_METHODS), args: z.string() }),
+	z.object({ type: z.literal("emit"), value: z.string() }),
+	z.object({ type: z.literal("emit_image"), value: z.string() }),
+	z.object({ type: z.literal("done"), store: z.string(), error: z.string().optional() }),
+]);
+type WorkerMessageInput = z.input<typeof workerMessageSchema>;
+const argumentsSchema = z.record(z.string(), z.json());
 const emittedValueSchema = z.json();
 const emittedStringSchema = z.string();
 const imageValueSchema = z.object({
@@ -50,26 +59,8 @@ function imagesFrom(response: DirectResponse): ImageValue[] {
 		}));
 }
 
-function listAppsFrom(text: string): JsonValue {
-	const apps: JsonObject[] = [];
-	for (const line of text.split("\n")) {
-		const match = line.match(/^(.*?) — .*? — (\S+?)(?: \[(.*)\])?$/);
-		if (!match) continue;
-		const details = match[3]?.split(", ") ?? [];
-		const app: JsonObject = { id: match[2], displayName: match[1] };
-		if (details.includes("running") || details.includes("frontmost")) app.isRunning = true;
-		const lastUsed = details.find((detail) => detail.startsWith("last-used="));
-		if (lastUsed) app.lastUsedDate = lastUsed.slice("last-used=".length);
-		const uses = details.find((detail) => detail.startsWith("uses="));
-		if (uses) app.useCount = Number(uses.slice("uses=".length));
-		apps.push(app);
-	}
-	return apps.length > 0 ? apps : text;
-}
-
 function valueFrom(method: DirectMethod, args: DirectToolArguments, response: DirectResponse): JsonValue | undefined {
 	const text = textFrom(response);
-	if (method === "list_apps") return listAppsFrom(text);
 	if (method === "get_app_state") {
 		return {
 			app: String(args.app),
@@ -85,13 +76,21 @@ function errorFrom(response: DirectResponse): Error {
 	return new Error(textFrom(response).slice(0, 2_000) || "Official Computer Use returned an error");
 }
 
+function workerUrl(): URL {
+	return import.meta.url.endsWith(".ts")
+		? new URL("../dist/code-worker.js", import.meta.url)
+		: new URL("./code-worker.js", import.meta.url);
+}
+
 export class ComputerUseCodeExecutor {
 	private queue = Promise.resolve();
 	private readonly sessionExecutor: DirectSessionExecutor;
+	private readonly codeSliceTimeoutMs: number;
 	readonly store: Record<string, JsonValue | undefined> = {};
 
-	constructor(sessionExecutor = new DirectSessionExecutor()) {
+	constructor(sessionExecutor = new DirectSessionExecutor(), codeSliceTimeoutMs = CODE_SLICE_TIMEOUT_MS) {
 		this.sessionExecutor = sessionExecutor;
+		this.codeSliceTimeoutMs = codeSliceTimeoutMs;
 	}
 
 	private runExclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -105,78 +104,106 @@ export class ComputerUseCodeExecutor {
 			if (Buffer.byteLength(code, "utf8") > MAX_CODE_BYTES) {
 				throw new Error(`Computer Use code exceeds ${MAX_CODE_BYTES} bytes`);
 			}
+			return new Promise<ComputerUseCodeResult>((resolve, reject) => {
+				const content: JsonObject[] = [];
+				const calls: DirectMethod[] = [];
+				const worker = new Worker(workerUrl(), { workerData: { code, store: this.store } });
+				let pendingCalls = 0;
+				let settled = false;
+				let timer: NodeJS.Timeout | undefined;
+				const clearTimer = (): void => {
+					if (timer) clearTimeout(timer);
+					timer = undefined;
+				};
+				const finish = (result: ComputerUseCodeResult): void => {
+					if (settled) return;
+					settled = true;
+					clearTimer();
+					dependencies.signal?.removeEventListener("abort", abort);
+					void worker.terminate();
+					resolve(result);
+				};
+				const fail = (error: Error): void => {
+					if (settled) return;
+					settled = true;
+					clearTimer();
+					dependencies.signal?.removeEventListener("abort", abort);
+					void worker.terminate();
+					reject(error);
+				};
+				const stopWithError = (message: string): void => {
+					content.push({ type: "text", text: `Computer Use code stopped: ${message}` });
+					finish({ content, calls, error: message });
+				};
+				const armTimer = (): void => {
+					clearTimer();
+					if (settled || pendingCalls > 0) return;
+					timer = setTimeout(() => stopWithError(`execution exceeded ${this.codeSliceTimeoutMs}ms between Computer Use calls`), this.codeSliceTimeoutMs);
+					timer.unref();
+				};
+				const abort = (): void => fail(new Error("Computer Use code cancelled"));
+				if (dependencies.signal?.aborted) {
+					abort();
+					return;
+				}
+				dependencies.signal?.addEventListener("abort", abort, { once: true });
+				worker.on("message", (rawMessage: WorkerMessageInput) => {
+					void (async () => {
+						const message = workerMessageSchema.parse(rawMessage);
+						if (message.type === "emit") {
+							const parsed = emittedValueSchema.parse(JSON.parse(message.value));
+							const stringResult = emittedStringSchema.safeParse(parsed);
+							content.push({ type: "text", text: stringResult.success ? stringResult.data : JSON.stringify(parsed, null, 2) });
+							return;
+						}
+						if (message.type === "emit_image") {
+							const parsed = imageValueSchema.parse(JSON.parse(message.value));
+							content.push({ type: "image", data: parsed.data, mimeType: parsed.mimeType });
+							return;
+						}
+						if (message.type === "done") {
+							const nextStore = argumentsSchema.parse(JSON.parse(message.store));
+							for (const key of Object.keys(this.store)) delete this.store[key];
+							Object.assign(this.store, nextStore);
+							if (message.error) stopWithError(message.error);
+							else finish({ content, calls });
+							return;
+						}
 
-			const content: JsonObject[] = [];
-			const calls: DirectMethod[] = [];
-			const methodSchema = z.enum(COMPUTER_USE_METHODS);
-			const argumentsSchema = z.record(z.string(), z.json());
-			const callBridge = async (rawMethod: string, rawArguments: string): Promise<string> => {
-				if (calls.length >= MAX_CALLS) throw new Error(`Computer Use code exceeded ${MAX_CALLS} calls`);
-				const method = methodSchema.parse(rawMethod);
-				const args = argumentsSchema.parse(JSON.parse(rawArguments));
-				calls.push(method);
-				const response = await this.sessionExecutor.execute(method, args, dependencies);
-				if (response.isError) throw errorFrom(response);
-				return JSON.stringify(valueFrom(method, args, response) ?? null);
-			};
-			const emitBridge = (rawValue: string): void => {
-				const parsed = emittedValueSchema.parse(JSON.parse(rawValue));
-				const stringResult = emittedStringSchema.safeParse(parsed);
-				content.push({
-					type: "text",
-					text: stringResult.success ? stringResult.data : JSON.stringify(parsed, null, 2),
+						if (calls.length >= MAX_CALLS) {
+							worker.postMessage({ type: "call_result", id: message.id, error: `Computer Use code exceeded ${MAX_CALLS} calls` });
+							return;
+						}
+						clearTimer();
+						pendingCalls += 1;
+						calls.push(message.method);
+						try {
+							const args = argumentsSchema.parse(JSON.parse(message.args));
+							const response = await this.sessionExecutor.execute(message.method, args, dependencies);
+							if (response.isError) throw errorFrom(response);
+							worker.postMessage({
+								type: "call_result",
+								id: message.id,
+								value: JSON.stringify(valueFrom(message.method, args, response) ?? null),
+							});
+						} catch (error) {
+							worker.postMessage({
+								type: "call_result",
+								id: message.id,
+								error: error instanceof Error ? error.message : String(error),
+							});
+						} finally {
+							pendingCalls -= 1;
+							armTimer();
+						}
+					})().catch((error) => fail(error instanceof Error ? error : new Error(String(error))));
 				});
-			};
-			const emitImageBridge = (rawValue: string): void => {
-				const parsed = imageValueSchema.parse(JSON.parse(rawValue));
-				content.push({ type: "image", data: parsed.data, mimeType: parsed.mimeType });
-			};
-			Object.setPrototypeOf(callBridge, null);
-			Object.setPrototypeOf(emitBridge, null);
-			Object.setPrototypeOf(emitImageBridge, null);
-			const context = vm.createContext({
-				__callBridge: callBridge,
-				__emitBridge: emitBridge,
-				__emitImageBridge: emitImageBridge,
-				__storeJson: JSON.stringify(this.store),
-			}, {
-				codeGeneration: { strings: false, wasm: false },
-				name: "computer-use",
+				worker.once("error", (error) => fail(error));
+				worker.once("exit", (code) => {
+					if (!settled) fail(new Error(`Computer Use code worker exited before completion (${code})`));
+				});
+				armTimer();
 			});
-			const bootstrap = new vm.Script(`(() => {
-	const callBridge = globalThis.__callBridge;
-	const emitBridge = globalThis.__emitBridge;
-	const emitImageBridge = globalThis.__emitImageBridge;
-	const storeJson = globalThis.__storeJson;
-	delete globalThis.__callBridge;
-	delete globalThis.__emitBridge;
-	delete globalThis.__emitImageBridge;
-	delete globalThis.__storeJson;
-	const call = async (method, args = {}) => JSON.parse(await callBridge(method, JSON.stringify(args)));
-	globalThis.sky = Object.freeze({
-		list_apps: (args) => call("list_apps", args),
-		get_app_state: (args) => call("get_app_state", args),
-		click: (args) => call("click", args),
-		perform_secondary_action: (args) => call("perform_secondary_action", args),
-		set_value: (args) => call("set_value", args),
-		select_text: (args) => call("select_text", args),
-		scroll: (args) => call("scroll", args),
-		drag: (args) => call("drag", args),
-		press_key: (args) => call("press_key", args),
-		type_text: (args) => call("type_text", args),
-	});
-	globalThis.emit = (value) => emitBridge(JSON.stringify(value));
-	globalThis.emitImage = (value) => emitImageBridge(JSON.stringify(value));
-	globalThis.store = JSON.parse(storeJson);
-})()`);
-			bootstrap.runInContext(context, { timeout: SYNC_TIMEOUT_MS });
-			const script = new vm.Script(`(async () => {\n${code}\n})()`, { filename: "computer-use.js" });
-			await script.runInContext(context, { timeout: SYNC_TIMEOUT_MS });
-			const rawStore = new vm.Script("JSON.stringify(store)").runInContext(context, { timeout: SYNC_TIMEOUT_MS });
-			const nextStore = argumentsSchema.parse(JSON.parse(String(rawStore)));
-			for (const key of Object.keys(this.store)) delete this.store[key];
-			Object.assign(this.store, nextStore);
-			return { content, calls };
 		});
 	}
 

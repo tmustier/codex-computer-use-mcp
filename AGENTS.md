@@ -4,11 +4,12 @@ This package is a thin transport adapter to OpenAI's official signed macOS Compu
 
 ## Scope
 
-- Preserve the official ten-tool surface and no-permissions behaviour.
+- Preserve all ten official methods and no-permissions behaviour. MCP exposes them as typed tools; Pi may expose the same methods through one composable `computer_use({ code })` tool.
 - Do not add wrapper permission prompts, app or intent allowlists, action gates, risk classifiers, content inspection, alternate modes or model-driven planning.
 - Do not reintroduce app rewriting, same-app locking or focus telemetry.
 - Add adapter logic only for transport compatibility, zero-model-turn execution, retained official sessions, process lifecycle, packaging or a concrete user-visible bug.
 - Keep signature and Team ID verification, isolated temporary state, model-turn rejection and process cleanup.
+- Run model-authored Pi code outside Pi's main thread with real cancellation, and preserve emitted observations plus completed-call history when a batch stops partway through.
 - Preserve compatible additional tool arguments and pass app selectors through unchanged.
 
 ## Review

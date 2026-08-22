@@ -40,7 +40,9 @@ const next = await sky.get_app_state({ app: "TextEdit" });
 emit(next.text);
 ```
 
-Only values passed to `emit(...)` or `emitImage(...)` are returned to Pi. Use `/computer-use-status` to inspect the installed component and transport status.
+Only values passed to `emit(...)` or `emitImage(...)` are returned to Pi. `list_apps` returns the official text inventory produced by the app-server transport. Code runs in a worker so an unbounded loop can be terminated without freezing Pi; time spent inside an official Computer Use call does not count toward the code execution slice. If a later action fails, Pi still receives earlier emitted observations and the attempted method sequence.
+
+Use `/computer-use-status` to inspect the installed component and transport status.
 
 To run a source checkout:
 

@@ -35,7 +35,7 @@ const codeParameters = {
 const codeDescription = `Run JavaScript that composes OpenAI's official signed macOS Computer Use methods in one call. No nested model is used.
 
 Available globals:
-- sky.list_apps() -> app inventory
+- sky.list_apps() -> text app inventory
 - sky.get_app_state({ app, disableDiff? }) -> { app, text, screenshot }
 - sky.click({ app, element_index?, x?, y?, mouse_button?, click_count? })
 - sky.perform_secondary_action({ app, element_index, action })
@@ -183,11 +183,17 @@ export default function directComputerUse(pi: ExtensionAPI) {
       });
       const rendered = await toPiContent(result.content);
       const details: JsonObject = { calls: result.calls };
+      if (result.error) details.error = result.error;
       if (rendered.fullOutputPath) details.fullOutputPath = rendered.fullOutputPath;
       return { content: rendered.content, details };
     },
-    renderCall(_args, theme) {
-      return new Text(theme.fg("toolTitle", theme.bold("computer_use")), 0, 0);
+    renderCall(args, theme) {
+      const parsed = z.object({ code: z.string() }).safeParse(args);
+      const firstLine = parsed.success
+        ? parsed.data.code.split("\n").map((line) => line.trim()).find(Boolean)?.slice(0, 100)
+        : undefined;
+      const label = theme.fg("toolTitle", theme.bold("computer_use"));
+      return new Text(firstLine ? `${label} ${theme.fg("dim", firstLine)}` : label, 0, 0);
     },
   });
 
