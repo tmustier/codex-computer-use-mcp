@@ -49,7 +49,7 @@ Available globals:
 - emitImage(state.screenshot) returns a screenshot to Pi
 - store is a persistent JSON object shared across calls
 
-get_app_state may return an accessibility-tree diff after the first inspection. Pass disableDiff: true when you need a fresh full tree. Screenshot payloads stay outside the worker and cross it only as opaque handles.
+get_app_state may return an accessibility-tree diff after the first inspection. Pass disableDiff: true when you need a fresh full tree.
 
 Example:
 const state = await sky.get_app_state({ app: "TextEdit" });
@@ -63,47 +63,44 @@ interface PiContentResult {
 }
 
 export async function toPiContent(content: JsonObject[]): Promise<PiContentResult> {
-  const textBlocks = content
-    .filter((block) => block.type !== "image")
-    .map((block) => String(block.text ?? ""));
+  const textBlocks = content.filter((block) => block.type !== "image").map((block) => String(block.text ?? ""));
   const fullText = textBlocks.join("\n\n");
-  const aggregate = truncateHead(fullText, {
-    maxLines: DEFAULT_MAX_LINES,
-    maxBytes: DEFAULT_MAX_BYTES,
-  });
-  let fullOutputPath: string | undefined;
-  if (aggregate.truncated) {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "pi-computer-use-"));
-    fullOutputPath = path.join(tempDir, "output.txt");
-    await writeFile(fullOutputPath, fullText, { encoding: "utf8", mode: 0o600 });
+  const aggregate = truncateHead(fullText, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
+  if (!aggregate.truncated) {
+    return {
+      content: content.map((block) => block.type === "image"
+        ? { type: "image", data: String(block.data), mimeType: String(block.mimeType) }
+        : { type: "text", text: String(block.text ?? "") }),
+    };
   }
 
-  const result: PiContentResult = { content: [] };
-  let remainingText = aggregate.content;
-  let textIndex = 0;
-  let truncationNoticeAdded = false;
+  const tempDir = await mkdtemp(path.join(tmpdir(), "pi-computer-use-"));
+  const fullOutputPath = path.join(tempDir, "output.txt");
+  await writeFile(fullOutputPath, fullText, { encoding: "utf8", mode: 0o600 });
   const suffix = `\n\n[Official Computer Use text truncated: showing ${aggregate.outputLines} of ${aggregate.totalLines} lines (${formatSize(aggregate.outputBytes)} of ${formatSize(aggregate.totalBytes)}). Full output saved to: ${fullOutputPath}]`;
+  const result: PiContentResult = { content: [], fullOutputPath };
+  let textIndex = 0;
+  let textOffset = 0;
+  let noticeAdded = false;
   for (const block of content) {
     if (block.type === "image") {
       result.content.push({ type: "image", data: String(block.data), mimeType: String(block.mimeType) });
       continue;
     }
     const blockText = String(block.text ?? "");
-    if (!aggregate.truncated) {
-      result.content.push({ type: "text", text: blockText });
-      continue;
+    const start = textOffset + (textIndex > 0 ? 2 : 0);
+    const end = start + blockText.length;
+    const retained = aggregate.content.length > start
+      ? blockText.slice(0, Math.min(end, aggregate.content.length) - start)
+      : "";
+    const cutoffHere: boolean = !noticeAdded && aggregate.content.length < end;
+    if (retained || cutoffHere) {
+      result.content.push({ type: "text", text: `${retained}${cutoffHere ? suffix : ""}` });
+      noticeAdded ||= cutoffHere;
     }
-    if (textIndex > 0 && remainingText.startsWith("\n\n")) remainingText = remainingText.slice(2);
+    textOffset = end;
     textIndex += 1;
-    const retained = blockText.slice(0, remainingText.length);
-    remainingText = remainingText.slice(retained.length);
-    const truncatedHere = retained.length < blockText.length || (remainingText.length === 0 && textIndex < textBlocks.length);
-    if (!retained && !truncatedHere) continue;
-    const notice = truncatedHere && !truncationNoticeAdded ? suffix : "";
-    truncationNoticeAdded ||= truncatedHere;
-    result.content.push({ type: "text", text: `${retained}${notice}` });
   }
-  if (fullOutputPath) result.fullOutputPath = fullOutputPath;
   return result;
 }
 

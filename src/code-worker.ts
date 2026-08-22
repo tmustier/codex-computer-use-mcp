@@ -8,12 +8,9 @@ interface WorkerInput {
 	store: JsonObject;
 }
 
-interface CallResultMessage {
-	type: "call_result";
-	id: number;
-	value?: string;
-	error?: string;
-}
+type CallResultMessage =
+	| { type: "call_result"; id: number; value: string }
+	| { type: "call_result"; id: number; error: string };
 
 const MAX_BRIDGE_BYTES = 1_000_000;
 const MAX_EMITS = 100;
@@ -28,12 +25,11 @@ let nextCallId = 1;
 const pending = new Map<number, { resolve(value: string): void; reject(error: Error): void }>();
 
 port.on("message", (message: CallResultMessage) => {
-	if (message.type !== "call_result") return;
 	const waiter = pending.get(message.id);
 	if (!waiter) return;
 	pending.delete(message.id);
-	if (message.error) waiter.reject(new Error(message.error));
-	else waiter.resolve(message.value ?? "null");
+	if ("error" in message) waiter.reject(new Error(message.error));
+	else waiter.resolve(message.value);
 });
 
 let emitCount = 0;
@@ -120,14 +116,14 @@ try {
 	const script = new vm.Script(`(async () => {\n${input.code}\n})()`, { filename: "computer-use.js" });
 	await script.runInContext(context);
 	port.postMessage({ type: "done", store: serializedStore() });
-} catch (error) {
-	let store = JSON.stringify(input.store);
+} catch (cause) {
+	let error = cause instanceof Error ? cause.message : String(cause);
+	let store: string;
 	try {
 		store = serializedStore();
-	} catch {}
-	port.postMessage({
-		type: "done",
-		store,
-		error: error instanceof Error ? error.message : String(error),
-	});
+	} catch (storeError) {
+		store = JSON.stringify(input.store);
+		error = storeError instanceof Error ? storeError.message : String(storeError);
+	}
+	port.postMessage({ type: "done", store, error });
 }

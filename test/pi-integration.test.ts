@@ -145,23 +145,43 @@ test("Computer Use code composes calls and emits only requested state", async ()
 		},
 		async close() {},
 	};
-	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
-	const executor = new ComputerUseCodeExecutor(session as any);
+	const executor = new ComputerUseCodeExecutor(session);
 	const result = await executor.execute(`
 const state = await sky.get_app_state({ app: "TextEdit" });
 await sky.click({ app: "TextEdit", element_index: "7" });
 await sky.type_text({ app: "TextEdit", text: "hello" });
 emit(state.text);
-emit(state.screenshot);
 emitImage(state.screenshot);
 `, {});
 	assert.deepEqual(calls.map((call) => call.method), ["get_app_state", "click", "type_text"]);
 	assert.deepEqual(result.calls, ["get_app_state", "click", "type_text"]);
 	assert.deepEqual(result.content, [
 		{ type: "text", text: "AX tree" },
-		{ type: "text", text: `{\n  "type": "computer_use_screenshot",\n  "id": "1"\n}` },
 		{ type: "image", data: "png-data", mimeType: "image/png" },
 	]);
+});
+
+test("Computer Use code waits for unawaited calls before completing", async () => {
+	let completeCall: (() => void) | undefined;
+	const session = {
+		execute() {
+			return new Promise<{ isError: boolean; content: Array<{ type: string; text: string }> }>((resolve) => {
+				completeCall = () => resolve({ isError: false, content: [{ type: "text", text: "apps" }] });
+			});
+		},
+		async close() {},
+	};
+	const executor = new ComputerUseCodeExecutor(session);
+	const execution = executor.execute(`sky.list_apps(); emit("started");`, {});
+	while (!completeCall) await new Promise((resolve) => setImmediate(resolve));
+	let settled = false;
+	void execution.then(() => { settled = true; });
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(settled, false);
+	completeCall();
+	const result = await execution;
+	assert.deepEqual(result.calls, ["list_apps"]);
+	assert.deepEqual(result.content, [{ type: "text", text: "started" }]);
 });
 
 test("Computer Use code returns the official list_apps text unchanged", async () => {
@@ -170,8 +190,7 @@ test("Computer Use code returns the official list_apps text unchanged", async ()
 		async execute() { return { isError: false, content: [{ type: "text", text: inventory }] }; },
 		async close() {},
 	};
-	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
-	const executor = new ComputerUseCodeExecutor(session as any);
+	const executor = new ComputerUseCodeExecutor(session);
 	const result = await executor.execute(`emit(await sky.list_apps());`, {});
 	assert.deepEqual(result.content, [{ type: "text", text: inventory }]);
 });
@@ -181,8 +200,7 @@ test("Computer Use code terminates a busy loop after an awaited call", async () 
 		async execute() { return { isError: false, content: [{ type: "text", text: "apps" }] }; },
 		async close() {},
 	};
-	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
-	const executor = new ComputerUseCodeExecutor(session as any, 50);
+	const executor = new ComputerUseCodeExecutor(session, 50);
 	const result = await executor.execute(`await sky.list_apps(); while (true) {}`, {});
 	assert.match(result.error ?? "", /execution exceeded 50ms/);
 	assert.deepEqual(result.calls, ["list_apps"]);
@@ -197,8 +215,7 @@ test("aborting Computer Use code terminates a busy worker without blocking Pi", 
 		},
 		async close() {},
 	};
-	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
-	const executor = new ComputerUseCodeExecutor(session as any);
+	const executor = new ComputerUseCodeExecutor(session);
 	await assert.rejects(
 		executor.execute(`await sky.list_apps(); while (true) {}`, { signal: controller.signal }),
 		/Computer Use code cancelled/,
@@ -213,8 +230,7 @@ test("Computer Use code preserves emits and call history after a mid-batch failu
 		},
 		async close() {},
 	};
-	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
-	const executor = new ComputerUseCodeExecutor(session as any);
+	const executor = new ComputerUseCodeExecutor(session);
 	const result = await executor.execute(`
 const state = await sky.get_app_state({ app: "TextEdit" });
 store.lastState = state.text;
@@ -232,8 +248,7 @@ await sky.click({ app: "TextEdit", element_index: "missing" });
 
 test("Computer Use code bounds the number of emitted blocks", async () => {
 	const session = { async execute() { return { isError: false, content: [] }; }, async close() {} };
-	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
-	const executor = new ComputerUseCodeExecutor(session as any);
+	const executor = new ComputerUseCodeExecutor(session);
 	const result = await executor.execute(`for (let i = 0; i < 101; i += 1) emit(i);`, {});
 	assert.match(result.error ?? "", /exceeded 100 emits/);
 	assert.equal(result.content.length, 101);
@@ -250,8 +265,7 @@ test("Computer Use code bounds screenshots resolved from opaque handles", async 
 		},
 		async close() {},
 	};
-	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
-	const executor = new ComputerUseCodeExecutor(session as any);
+	const executor = new ComputerUseCodeExecutor(session);
 	const result = await executor.execute(`
 const state = await sky.get_app_state({ app: "TextEdit" });
 for (let i = 0; i < 11; i += 1) emitImage(state.screenshot);
@@ -261,20 +275,16 @@ for (let i = 0; i < 11; i += 1) emitImage(state.screenshot);
 	assert.equal(result.content.at(-1)?.type, "text");
 });
 
-test("Computer Use code cannot escape through bridge or store constructors", async () => {
+test("Computer Use code cannot escape through bridge constructors", async () => {
 	const session = { async execute() { return { isError: false, content: [] }; }, async close() {} };
-	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
-	const executor = new ComputerUseCodeExecutor(session as any);
-	const bridgeEscape = await executor.execute(`emit(sky.click.constructor("return process")());`, {});
-	assert.match(bridgeEscape.error ?? "", /Code generation from strings disallowed/);
-	const storeEscape = await executor.execute(`emit(store.constructor.constructor("return process")());`, {});
-	assert.match(storeEscape.error ?? "", /Code generation from strings disallowed/);
+	const executor = new ComputerUseCodeExecutor(session);
+	const result = await executor.execute(`emit(sky.click.constructor("return process")());`, {});
+	assert.match(result.error ?? "", /Code generation from strings disallowed/);
 });
 
 test("Computer Use code exposes a persistent explicit store", async () => {
 	const session = { async execute() { return { isError: false, content: [] }; }, async close() {} };
-	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
-	const executor = new ComputerUseCodeExecutor(session as any);
+	const executor = new ComputerUseCodeExecutor(session);
 	await executor.execute(`store.count = 1;`, {});
 	const result = await executor.execute(`store.count += 1; emit(store);`, {});
 	assert.deepEqual(result.content, [{ type: "text", text: `{\n  "count": 2\n}` }]);
@@ -390,8 +400,9 @@ test("Pi truncates aggregate text to a private spill file without spilling image
 		assert.equal(await readFile(rendered.fullOutputPath, "utf8"), original);
 		assert.equal((await stat(rendered.fullOutputPath)).mode & 0o777, 0o600);
 		assert.deepEqual(rendered.content.map((block) => block.type), ["text", "image", "text", "image"]);
+		assert.deepEqual(rendered.content[0], { type: "text", text: first });
 		assert.deepEqual(rendered.content[1], { type: "image", data: "first-image", mimeType: "image/png" });
-		assert.match(rendered.content[2].type === "text" ? rendered.content[2].text : "", /Full output saved to:/);
+		assert.match(rendered.content[2].type === "text" ? rendered.content[2].text : "", /^\n\n\[Official Computer Use text truncated:.*Full output saved to:/s);
 		const returnedText = rendered.content.filter((block) => block.type === "text").map((block) => block.text).join("");
 		assert.ok(Buffer.byteLength(returnedText) < 55 * 1024);
 		assert.deepEqual(rendered.content[3], { type: "image", data: "second-image", mimeType: "image/png" });

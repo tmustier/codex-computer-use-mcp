@@ -1,11 +1,10 @@
 import { Worker } from "node:worker_threads";
 import { z } from "zod";
-import type { DirectResponse, DirectServiceDependencies } from "./direct-service.ts";
+import type { DirectServiceDependencies } from "./direct-service.ts";
 import { DirectSessionExecutor } from "./session-executor.ts";
 import {
 	COMPUTER_USE_METHODS,
 	type DirectMethod,
-	type DirectToolArguments,
 	type JsonObject,
 	type JsonValue,
 } from "./tools.ts";
@@ -41,71 +40,22 @@ type WorkerMessageInput = z.input<typeof workerMessageSchema>;
 const argumentsSchema = z.record(z.string(), z.json());
 const emittedValueSchema = z.json();
 const emittedStringSchema = z.string();
-const imageValueSchema = z.object({
-	type: z.literal("image"),
-	data: z.string(),
-	mimeType: z.string(),
-});
 const screenshotHandleSchema = z.object({
 	type: z.literal("computer_use_screenshot"),
 	id: z.string(),
 });
 
-function textFrom(response: DirectResponse): string {
-	return response.content
-		.filter((block) => block.type !== "image")
-		.map((block) => String(block.text ?? ""))
-		.join("\n");
-}
-
-function imagesFrom(response: DirectResponse): ImageValue[] {
-	return response.content
-		.filter((block) => block.type === "image")
-		.map((block) => ({
-			type: "image" as const,
-			data: String(block.data),
-			mimeType: String(block.mimeType),
-		}));
-}
-
-function valueFrom(
-	method: DirectMethod,
-	args: DirectToolArguments,
-	response: DirectResponse,
-	registerScreenshot: (image: ImageValue) => JsonObject,
-): JsonValue | undefined {
-	const text = textFrom(response);
-	if (method === "get_app_state") {
-		const screenshot = imagesFrom(response)[0];
-		return {
-			app: String(args.app),
-			text,
-			screenshot: screenshot ? registerScreenshot(screenshot) : null,
-		};
-	}
-	if (response.structuredContent !== undefined) return response.structuredContent;
-	return text || undefined;
-}
-
-function errorFrom(response: DirectResponse): Error {
-	return new Error(textFrom(response).slice(0, 2_000) || "Official Computer Use returned an error");
-}
-
-function workerUrl(): URL {
-	return import.meta.url.endsWith(".ts")
-		? new URL("../dist/code-worker.js", import.meta.url)
-		: new URL("./code-worker.js", import.meta.url);
-}
+type CodeSessionExecutor = Pick<DirectSessionExecutor, "execute" | "close">;
 
 export class ComputerUseCodeExecutor {
 	private queue = Promise.resolve();
-	private readonly sessionExecutor: DirectSessionExecutor;
+	private readonly sessionExecutor: CodeSessionExecutor;
 	private readonly codeSliceTimeoutMs: number;
 	private readonly screenshots = new Map<string, ImageValue>();
 	private nextScreenshotId = 1;
 	readonly store: Record<string, JsonValue | undefined> = {};
 
-	constructor(sessionExecutor = new DirectSessionExecutor(), codeSliceTimeoutMs = CODE_SLICE_TIMEOUT_MS) {
+	constructor(sessionExecutor: CodeSessionExecutor = new DirectSessionExecutor(), codeSliceTimeoutMs = CODE_SLICE_TIMEOUT_MS) {
 		this.sessionExecutor = sessionExecutor;
 		this.codeSliceTimeoutMs = codeSliceTimeoutMs;
 	}
@@ -119,10 +69,8 @@ export class ComputerUseCodeExecutor {
 	private registerScreenshot(image: ImageValue): JsonObject {
 		const id = String(this.nextScreenshotId++);
 		this.screenshots.set(id, image);
-		while (this.screenshots.size > MAX_SCREENSHOT_HANDLES) {
-			const oldest = this.screenshots.keys().next().value;
-			if (oldest === undefined) break;
-			this.screenshots.delete(oldest);
+		if (this.screenshots.size > MAX_SCREENSHOT_HANDLES) {
+			this.screenshots.delete(this.screenshots.keys().next().value!);
 		}
 		return { type: "computer_use_screenshot", id };
 	}
@@ -135,11 +83,14 @@ export class ComputerUseCodeExecutor {
 			return new Promise<ComputerUseCodeResult>((resolve, reject) => {
 				const content: JsonObject[] = [];
 				const calls: DirectMethod[] = [];
-				const worker = new Worker(workerUrl(), { workerData: { code, store: this.store } });
+				const worker = new Worker(
+					import.meta.url.endsWith(".ts")
+						? new URL("../dist/code-worker.js", import.meta.url)
+						: new URL("./code-worker.js", import.meta.url),
+					{ workerData: { code, store: this.store } },
+				);
 				let emittedImages = 0;
 				let emittedImageBytes = 0;
-				let pendingCalls = 0;
-				let ready = false;
 				let settled = false;
 				let timer: NodeJS.Timeout | undefined;
 				const clearTimer = (): void => {
@@ -168,7 +119,7 @@ export class ComputerUseCodeExecutor {
 				};
 				const armTimer = (): void => {
 					clearTimer();
-					if (settled || !ready || pendingCalls > 0) return;
+					if (settled) return;
 					timer = setTimeout(() => stopWithError(`execution exceeded ${this.codeSliceTimeoutMs}ms between Computer Use calls`), this.codeSliceTimeoutMs);
 					timer.unref();
 				};
@@ -178,11 +129,12 @@ export class ComputerUseCodeExecutor {
 					return;
 				}
 				dependencies.signal?.addEventListener("abort", abort, { once: true });
+				let messageQueue = Promise.resolve();
 				worker.on("message", (rawMessage: WorkerMessageInput) => {
-					void (async () => {
+					messageQueue = messageQueue.then(async () => {
+						if (settled) return;
 						const message = workerMessageSchema.parse(rawMessage);
 						if (message.type === "ready") {
-							ready = true;
 							armTimer();
 							return;
 						}
@@ -193,8 +145,8 @@ export class ComputerUseCodeExecutor {
 							return;
 						}
 						if (message.type === "emit_image") {
-							const parsed = z.union([imageValueSchema, screenshotHandleSchema]).parse(JSON.parse(message.value));
-							const image = parsed.type === "image" ? parsed : this.screenshots.get(parsed.id);
+							const handle = screenshotHandleSchema.parse(JSON.parse(message.value));
+							const image = this.screenshots.get(handle.id);
 							if (!image) {
 								stopWithError("screenshot is no longer available");
 								return;
@@ -223,17 +175,32 @@ export class ComputerUseCodeExecutor {
 							return;
 						}
 						clearTimer();
-						pendingCalls += 1;
 						calls.push(message.method);
 						try {
 							const args = argumentsSchema.parse(JSON.parse(message.args));
 							const response = await this.sessionExecutor.execute(message.method, args, dependencies);
-							if (response.isError) throw errorFrom(response);
-							worker.postMessage({
-								type: "call_result",
-								id: message.id,
-								value: JSON.stringify(valueFrom(message.method, args, response, (image) => this.registerScreenshot(image)) ?? null),
-							});
+							const text = response.content
+								.filter((block) => block.type !== "image")
+								.map((block) => String(block.text ?? ""))
+								.join("\n");
+							if (response.isError) throw new Error(text.slice(0, 2_000) || "Official Computer Use returned an error");
+							let value = response.structuredContent;
+							if (message.method === "get_app_state") {
+								const block = response.content.find((item) => item.type === "image");
+								const screenshot: ImageValue | undefined = block ? {
+									type: "image",
+									data: String(block.data),
+									mimeType: String(block.mimeType),
+								} : undefined;
+								value = {
+									app: String(args.app),
+									text,
+									screenshot: screenshot ? this.registerScreenshot(screenshot) : null,
+								};
+							} else if (value === undefined) {
+								value = text || undefined;
+							}
+							worker.postMessage({ type: "call_result", id: message.id, value: JSON.stringify(value ?? null) });
 						} catch (error) {
 							worker.postMessage({
 								type: "call_result",
@@ -241,10 +208,9 @@ export class ComputerUseCodeExecutor {
 								error: error instanceof Error ? error.message : String(error),
 							});
 						} finally {
-							pendingCalls -= 1;
 							armTimer();
 						}
-					})().catch((error) => fail(error instanceof Error ? error : new Error(String(error))));
+					}).catch((error) => fail(error instanceof Error ? error : new Error(String(error))));
 				});
 				worker.once("error", (error) => fail(error));
 				worker.once("exit", (code) => {
