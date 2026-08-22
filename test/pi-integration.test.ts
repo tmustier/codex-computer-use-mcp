@@ -4,9 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import adapter, { handleOfficialElicitation, toPiContent } from "../integrations/pi/index.ts";
+import { ComputerUseCodeExecutor } from "../src/code-executor.ts";
 import type { DirectBrokerResult } from "../src/direct-broker.ts";
 import { DirectSessionExecutor } from "../src/session-executor.ts";
-import { COMPUTER_USE_METHODS, TOOL_INPUT_SCHEMAS, TOOL_METADATA, type DirectMethod } from "../src/tools.ts";
+import { type DirectMethod, type DirectToolArguments } from "../src/tools.ts";
 
 function brokerResult(text: string): DirectBrokerResult {
 	return {
@@ -101,13 +102,13 @@ test("Pi distinguishes decline from headless cancellation", async () => {
 	assert.deepEqual(headless, { action: "cancel" });
 });
 
-test("Pi registers and activates the ten Computer Use tools", async () => {
-	const tools: Array<{ name: string; description: string; parameters: unknown }> = [];
+test("Pi registers and activates one composable Computer Use tool", async () => {
+	const tools: Array<{ name: string; description: string; parameters: any }> = [];
 	const commands: string[] = [];
 	const handlers = new Map<string, () => void>();
 	const active = new Set(["read"]);
 	const fakePi = {
-		registerTool(tool: { name: string; description: string; parameters: unknown }) { tools.push(tool); },
+		registerTool(tool: { name: string; description: string; parameters: any }) { tools.push(tool); },
 		registerCommand(name: string) { commands.push(name); },
 		on(name: string, handler: () => void) { handlers.set(name, handler); },
 		getActiveTools() { return [...active]; },
@@ -116,17 +117,177 @@ test("Pi registers and activates the ten Computer Use tools", async () => {
 	// SAFETY: this focused adapter test implements every ExtensionAPI member used during registration and session_start.
 	adapter(fakePi as any);
 	assert.deepEqual(commands, ["computer-use-status"]);
-	assert.deepEqual(tools.map((tool) => tool.name).sort(), COMPUTER_USE_METHODS.map((method) => `computer_use_${method}`).sort());
-	for (const method of COMPUTER_USE_METHODS) {
-		const tool = tools.find((item) => item.name === `computer_use_${method}`);
-		assert.equal(tool?.description, TOOL_METADATA[method].description);
-		assert.deepEqual(tool?.parameters, TOOL_INPUT_SCHEMAS[method]);
-	}
+	assert.deepEqual(tools.map((tool) => tool.name), ["computer_use"]);
+	assert.match(tools[0].description, /sky\.get_app_state/);
+	assert.match(tools[0].description, /sky\.type_text/);
+	assert.deepEqual(tools[0].parameters.required, ["code"]);
 	assert.equal(handlers.has("agent_settled"), true);
 	assert.equal(handlers.has("session_shutdown"), true);
 	handlers.get("session_start")?.();
-	assert.equal(active.has("read"), true);
-	for (const method of COMPUTER_USE_METHODS) assert.equal(active.has(`computer_use_${method}`), true);
+	assert.deepEqual([...active].sort(), ["computer_use", "read"]);
+});
+
+test("Computer Use code composes calls and emits only requested state", async () => {
+	const calls: Array<{ method: DirectMethod; args: DirectToolArguments }> = [];
+	const session = {
+		async execute(method: DirectMethod, args: DirectToolArguments) {
+			calls.push({ method, args });
+			if (method === "get_app_state") {
+				return {
+					isError: false,
+					content: [
+						{ type: "text", text: "AX tree" },
+						{ type: "image", data: "png-data", mimeType: "image/png" },
+					],
+				};
+			}
+			return { isError: false, content: [] };
+		},
+		async close() {},
+	};
+	const executor = new ComputerUseCodeExecutor(session);
+	const result = await executor.execute(`
+const state = await sky.get_app_state({ app: "TextEdit" });
+await sky.click({ app: "TextEdit", element_index: "7" });
+await sky.type_text({ app: "TextEdit", text: "hello" });
+emit(state.text);
+emitImage(state.screenshot);
+`, {});
+	assert.deepEqual(calls.map((call) => call.method), ["get_app_state", "click", "type_text"]);
+	assert.deepEqual(result.calls, ["get_app_state", "click", "type_text"]);
+	assert.deepEqual(result.content, [
+		{ type: "text", text: "AX tree" },
+		{ type: "image", data: "png-data", mimeType: "image/png" },
+	]);
+});
+
+test("Computer Use code waits for unawaited calls before completing", async () => {
+	let completeCall: (() => void) | undefined;
+	const session = {
+		execute() {
+			return new Promise<{ isError: boolean; content: Array<{ type: string; text: string }> }>((resolve) => {
+				completeCall = () => resolve({ isError: false, content: [{ type: "text", text: "apps" }] });
+			});
+		},
+		async close() {},
+	};
+	const executor = new ComputerUseCodeExecutor(session);
+	const execution = executor.execute(`sky.list_apps(); emit("started");`, {});
+	while (!completeCall) await new Promise((resolve) => setImmediate(resolve));
+	let settled = false;
+	void execution.then(() => { settled = true; });
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.equal(settled, false);
+	completeCall();
+	const result = await execution;
+	assert.deepEqual(result.calls, ["list_apps"]);
+	assert.deepEqual(result.content, [{ type: "text", text: "started" }]);
+});
+
+test("Computer Use code returns the official list_apps text unchanged", async () => {
+	const inventory = "Notes — Beta — /Applications/Notes Beta.app/ — example.NotesBeta [running]";
+	const session = {
+		async execute() { return { isError: false, content: [{ type: "text", text: inventory }] }; },
+		async close() {},
+	};
+	const executor = new ComputerUseCodeExecutor(session);
+	const result = await executor.execute(`emit(await sky.list_apps());`, {});
+	assert.deepEqual(result.content, [{ type: "text", text: inventory }]);
+});
+
+test("Computer Use code terminates a busy loop after an awaited call", async () => {
+	const session = {
+		async execute() { return { isError: false, content: [{ type: "text", text: "apps" }] }; },
+		async close() {},
+	};
+	const executor = new ComputerUseCodeExecutor(session, 50);
+	const result = await executor.execute(`await sky.list_apps(); while (true) {}`, {});
+	assert.match(result.error ?? "", /execution exceeded 50ms/);
+	assert.deepEqual(result.calls, ["list_apps"]);
+});
+
+test("aborting Computer Use code terminates a busy worker without blocking Pi", async () => {
+	const controller = new AbortController();
+	const session = {
+		async execute() {
+			setTimeout(() => controller.abort(), 20);
+			return { isError: false, content: [{ type: "text", text: "apps" }] };
+		},
+		async close() {},
+	};
+	const executor = new ComputerUseCodeExecutor(session);
+	await assert.rejects(
+		executor.execute(`await sky.list_apps(); while (true) {}`, { signal: controller.signal }),
+		/Computer Use code cancelled/,
+	);
+});
+
+test("Computer Use code preserves emits and call history after a mid-batch failure", async () => {
+	const session = {
+		async execute(method: DirectMethod) {
+			if (method === "click") return { isError: true, content: [{ type: "text", text: "element not found" }] };
+			return { isError: false, content: [{ type: "text", text: "initial state" }] };
+		},
+		async close() {},
+	};
+	const executor = new ComputerUseCodeExecutor(session);
+	const result = await executor.execute(`
+const state = await sky.get_app_state({ app: "TextEdit" });
+store.lastState = state.text;
+emit(state.text);
+await sky.click({ app: "TextEdit", element_index: "missing" });
+`, {});
+	assert.equal(result.error, "element not found");
+	assert.deepEqual(result.calls, ["get_app_state", "click"]);
+	assert.deepEqual(result.content, [
+		{ type: "text", text: "initial state" },
+		{ type: "text", text: "Computer Use code stopped: element not found" },
+	]);
+	assert.equal(executor.store.lastState, "initial state");
+});
+
+test("Computer Use code bounds the number of emitted blocks", async () => {
+	const session = { async execute() { return { isError: false, content: [] }; }, async close() {} };
+	const executor = new ComputerUseCodeExecutor(session);
+	const result = await executor.execute(`for (let i = 0; i < 101; i += 1) emit(i);`, {});
+	assert.match(result.error ?? "", /exceeded 100 emits/);
+	assert.equal(result.content.length, 101);
+	assert.deepEqual(result.content.at(-1), { type: "text", text: "Computer Use code stopped: Computer Use code exceeded 100 emits" });
+});
+
+test("Computer Use code bounds screenshots resolved from opaque handles", async () => {
+	const session = {
+		async execute() {
+			return { isError: false, content: [
+				{ type: "text", text: "state" },
+				{ type: "image", data: "png-data", mimeType: "image/png" },
+			] };
+		},
+		async close() {},
+	};
+	const executor = new ComputerUseCodeExecutor(session);
+	const result = await executor.execute(`
+const state = await sky.get_app_state({ app: "TextEdit" });
+for (let i = 0; i < 11; i += 1) emitImage(state.screenshot);
+`, {});
+	assert.match(result.error ?? "", /emitted images exceed 10 images/);
+	assert.equal(result.content.filter((block) => block.type === "image").length, 10);
+	assert.equal(result.content.at(-1)?.type, "text");
+});
+
+test("Computer Use code cannot escape through bridge constructors", async () => {
+	const session = { async execute() { return { isError: false, content: [] }; }, async close() {} };
+	const executor = new ComputerUseCodeExecutor(session);
+	const result = await executor.execute(`emit(sky.click.constructor("return process")());`, {});
+	assert.match(result.error ?? "", /Code generation from strings disallowed/);
+});
+
+test("Computer Use code exposes a persistent explicit store", async () => {
+	const session = { async execute() { return { isError: false, content: [] }; }, async close() {} };
+	const executor = new ComputerUseCodeExecutor(session);
+	await executor.execute(`store.count = 1;`, {});
+	const result = await executor.execute(`store.count += 1; emit(store);`, {});
+	assert.deepEqual(result.content, [{ type: "text", text: `{\n  "count": 2\n}` }]);
 });
 
 test("broker setup failures remain audited", async () => {
@@ -224,18 +385,27 @@ test("idle expiry closes a retained session", async () => {
 	}
 });
 
-test("Pi truncates text to a private spill file without spilling images", async () => {
-	const original = "x".repeat(60 * 1024);
+test("Pi truncates aggregate text to a private spill file without spilling images", async () => {
+	const first = "x".repeat(30 * 1024);
+	const second = "y".repeat(30 * 1024);
+	const original = `${first}\n\n${second}`;
 	const rendered = await toPiContent([
-		{ type: "text", text: original },
-		{ type: "image", data: "image-data", mimeType: "image/png" },
+		{ type: "text", text: first },
+		{ type: "image", data: "first-image", mimeType: "image/png" },
+		{ type: "text", text: second },
+		{ type: "image", data: "second-image", mimeType: "image/png" },
 	]);
 	assert.ok(rendered.fullOutputPath);
 	try {
 		assert.equal(await readFile(rendered.fullOutputPath, "utf8"), original);
 		assert.equal((await stat(rendered.fullOutputPath)).mode & 0o777, 0o600);
-		assert.match(rendered.content[0].type === "text" ? rendered.content[0].text : "", /Full output saved to:/);
-		assert.deepEqual(rendered.content[1], { type: "image", data: "image-data", mimeType: "image/png" });
+		assert.deepEqual(rendered.content.map((block) => block.type), ["text", "image", "text", "image"]);
+		assert.deepEqual(rendered.content[0], { type: "text", text: first });
+		assert.deepEqual(rendered.content[1], { type: "image", data: "first-image", mimeType: "image/png" });
+		assert.match(rendered.content[2].type === "text" ? rendered.content[2].text : "", /^\n\n\[Official Computer Use text truncated:.*Full output saved to:/s);
+		const returnedText = rendered.content.filter((block) => block.type === "text").map((block) => block.text).join("");
+		assert.ok(Buffer.byteLength(returnedText) < 55 * 1024);
+		assert.deepEqual(rendered.content[3], { type: "image", data: "second-image", mimeType: "image/png" });
 	} finally {
 		await rm(path.dirname(rendered.fullOutputPath), { recursive: true, force: true });
 	}
