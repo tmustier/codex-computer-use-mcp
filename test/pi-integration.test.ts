@@ -4,9 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import adapter, { handleOfficialElicitation, toPiContent } from "../integrations/pi/index.ts";
+import { ComputerUseCodeExecutor } from "../src/code-executor.ts";
 import type { DirectBrokerResult } from "../src/direct-broker.ts";
 import { DirectSessionExecutor } from "../src/session-executor.ts";
-import { COMPUTER_USE_METHODS, TOOL_INPUT_SCHEMAS, TOOL_METADATA, type DirectMethod } from "../src/tools.ts";
+import { type DirectMethod, type DirectToolArguments } from "../src/tools.ts";
 
 function brokerResult(text: string): DirectBrokerResult {
 	return {
@@ -101,13 +102,13 @@ test("Pi distinguishes decline from headless cancellation", async () => {
 	assert.deepEqual(headless, { action: "cancel" });
 });
 
-test("Pi registers and activates the ten Computer Use tools", async () => {
-	const tools: Array<{ name: string; description: string; parameters: unknown }> = [];
+test("Pi registers and activates one composable Computer Use tool", async () => {
+	const tools: Array<{ name: string; description: string; parameters: any }> = [];
 	const commands: string[] = [];
 	const handlers = new Map<string, () => void>();
 	const active = new Set(["read"]);
 	const fakePi = {
-		registerTool(tool: { name: string; description: string; parameters: unknown }) { tools.push(tool); },
+		registerTool(tool: { name: string; description: string; parameters: any }) { tools.push(tool); },
 		registerCommand(name: string) { commands.push(name); },
 		on(name: string, handler: () => void) { handlers.set(name, handler); },
 		getActiveTools() { return [...active]; },
@@ -116,17 +117,99 @@ test("Pi registers and activates the ten Computer Use tools", async () => {
 	// SAFETY: this focused adapter test implements every ExtensionAPI member used during registration and session_start.
 	adapter(fakePi as any);
 	assert.deepEqual(commands, ["computer-use-status"]);
-	assert.deepEqual(tools.map((tool) => tool.name).sort(), COMPUTER_USE_METHODS.map((method) => `computer_use_${method}`).sort());
-	for (const method of COMPUTER_USE_METHODS) {
-		const tool = tools.find((item) => item.name === `computer_use_${method}`);
-		assert.equal(tool?.description, TOOL_METADATA[method].description);
-		assert.deepEqual(tool?.parameters, TOOL_INPUT_SCHEMAS[method]);
-	}
+	assert.deepEqual(tools.map((tool) => tool.name), ["computer_use"]);
+	assert.match(tools[0].description, /sky\.get_app_state/);
+	assert.match(tools[0].description, /sky\.type_text/);
+	assert.deepEqual(tools[0].parameters.required, ["code"]);
 	assert.equal(handlers.has("agent_settled"), true);
 	assert.equal(handlers.has("session_shutdown"), true);
 	handlers.get("session_start")?.();
-	assert.equal(active.has("read"), true);
-	for (const method of COMPUTER_USE_METHODS) assert.equal(active.has(`computer_use_${method}`), true);
+	assert.deepEqual([...active].sort(), ["computer_use", "read"]);
+});
+
+test("Computer Use code composes calls and emits only requested state", async () => {
+	const calls: Array<{ method: DirectMethod; args: DirectToolArguments }> = [];
+	const session = {
+		async execute(method: DirectMethod, args: DirectToolArguments) {
+			calls.push({ method, args });
+			if (method === "get_app_state") {
+				return {
+					isError: false,
+					content: [
+						{ type: "text", text: "AX tree" },
+						{ type: "image", data: "png-data", mimeType: "image/png" },
+					],
+				};
+			}
+			return { isError: false, content: [] };
+		},
+		async close() {},
+	};
+	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
+	const executor = new ComputerUseCodeExecutor(session as any);
+	const result = await executor.execute(`
+const state = await sky.get_app_state({ app: "TextEdit" });
+await sky.click({ app: "TextEdit", element_index: "7" });
+await sky.type_text({ app: "TextEdit", text: "hello" });
+emit(state.text);
+emitImage(state.screenshot);
+`, {});
+	assert.deepEqual(calls.map((call) => call.method), ["get_app_state", "click", "type_text"]);
+	assert.deepEqual(result.calls, ["get_app_state", "click", "type_text"]);
+	assert.deepEqual(result.content, [
+		{ type: "text", text: "AX tree" },
+		{ type: "image", data: "png-data", mimeType: "image/png" },
+	]);
+});
+
+test("Computer Use code presents list_apps as the native structured app surface", async () => {
+	const session = {
+		async execute() {
+			return {
+				isError: false,
+				content: [{ type: "text", text: "TextEdit — /System/Applications/TextEdit.app/ — com.apple.TextEdit [running, last-used=2026-08-21, uses=251]" }],
+			};
+		},
+		async close() {},
+	};
+	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
+	const executor = new ComputerUseCodeExecutor(session as any);
+	const result = await executor.execute(`const apps = await sky.list_apps(); emit(apps);`, {});
+	assert.deepEqual(result.content, [{
+		type: "text",
+		text: `[
+  {
+    "id": "com.apple.TextEdit",
+    "displayName": "TextEdit",
+    "isRunning": true,
+    "lastUsedDate": "2026-08-21",
+    "useCount": 251
+  }
+]`,
+	}]);
+});
+
+test("Computer Use code cannot escape through bridge or store constructors", async () => {
+	const session = { async execute() { return { isError: false, content: [] }; }, async close() {} };
+	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
+	const executor = new ComputerUseCodeExecutor(session as any);
+	await assert.rejects(
+		executor.execute(`emit(sky.click.constructor("return process")());`, {}),
+		/Code generation from strings disallowed/,
+	);
+	await assert.rejects(
+		executor.execute(`emit(store.constructor.constructor("return process")());`, {}),
+		/Code generation from strings disallowed/,
+	);
+});
+
+test("Computer Use code exposes a persistent explicit store", async () => {
+	const session = { async execute() { return { isError: false, content: [] }; }, async close() {} };
+	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
+	const executor = new ComputerUseCodeExecutor(session as any);
+	await executor.execute(`store.count = 1;`, {});
+	const result = await executor.execute(`store.count += 1; emit(store);`, {});
+	assert.deepEqual(result.content, [{ type: "text", text: `{\n  "count": 2\n}` }]);
 });
 
 test("broker setup failures remain audited", async () => {
