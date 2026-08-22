@@ -15,7 +15,7 @@ This package is a thin transport adapter to OpenAI's official signed macOS Compu
 
 Review the exact production path and report material, reachable regressions. Do not block focused work on speculative hardening or malformed input that the official producer cannot emit.
 
-A request to review does not authorize posting to GitHub. Show Thomas the exact proposed review, comment or issue text and get approval before posting it.
+A request to review does not authorize posting to GitHub. Show the user the exact proposed review, comment or issue text and get approval before posting it.
 
 ## Verification
 
