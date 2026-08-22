@@ -40,7 +40,7 @@ const next = await sky.get_app_state({ app: "TextEdit" });
 emit(next.text);
 ```
 
-Only values passed to `emit(...)` or `emitImage(...)` are returned to Pi. `list_apps` returns the official text inventory produced by the app-server transport. Code runs in a worker so an unbounded loop can be terminated without freezing Pi; time spent inside an official Computer Use call does not count toward the code execution slice. If a later action fails, Pi still receives earlier emitted observations and the attempted method sequence.
+Only values passed to `emit(...)` or `emitImage(...)` are returned to Pi. `list_apps` returns the official text inventory produced by the app-server transport; unlike native `@oai/sky`, that transport does not provide the structured app array. `get_app_state` may return an accessibility-tree diff after the first inspection; pass `disableDiff: true` to request a fresh full tree. Screenshot payloads remain in the parent process and cross the code-worker boundary only as small opaque handles. Code runs in a worker so an unbounded loop can be terminated without freezing Pi; time spent inside an official Computer Use call does not count toward the code execution slice. If a later action fails, Pi still receives earlier emitted observations and the attempted method sequence.
 
 Use `/computer-use-status` to inspect the installed component and transport status.
 

@@ -49,6 +49,8 @@ Available globals:
 - emitImage(state.screenshot) returns a screenshot to Pi
 - store is a persistent JSON object shared across calls
 
+get_app_state may return an accessibility-tree diff after the first inspection. Pass disableDiff: true when you need a fresh full tree. Screenshot payloads stay outside the worker and cross it only as opaque handles.
+
 Example:
 const state = await sky.get_app_state({ app: "TextEdit" });
 emit(state.text);
@@ -64,29 +66,42 @@ export async function toPiContent(content: JsonObject[]): Promise<PiContentResul
   const textBlocks = content
     .filter((block) => block.type !== "image")
     .map((block) => String(block.text ?? ""));
-  const truncations = textBlocks.map((text) => truncateHead(text, {
+  const fullText = textBlocks.join("\n\n");
+  const aggregate = truncateHead(fullText, {
     maxLines: DEFAULT_MAX_LINES,
     maxBytes: DEFAULT_MAX_BYTES,
-  }));
+  });
   let fullOutputPath: string | undefined;
-  if (truncations.some((result) => result.truncated)) {
+  if (aggregate.truncated) {
     const tempDir = await mkdtemp(path.join(tmpdir(), "pi-computer-use-"));
     fullOutputPath = path.join(tempDir, "output.txt");
-    await writeFile(fullOutputPath, textBlocks.join("\n\n"), { encoding: "utf8", mode: 0o600 });
+    await writeFile(fullOutputPath, fullText, { encoding: "utf8", mode: 0o600 });
   }
 
   const result: PiContentResult = { content: [] };
+  let remainingText = aggregate.content;
   let textIndex = 0;
+  let truncationNoticeAdded = false;
+  const suffix = `\n\n[Official Computer Use text truncated: showing ${aggregate.outputLines} of ${aggregate.totalLines} lines (${formatSize(aggregate.outputBytes)} of ${formatSize(aggregate.totalBytes)}). Full output saved to: ${fullOutputPath}]`;
   for (const block of content) {
     if (block.type === "image") {
       result.content.push({ type: "image", data: String(block.data), mimeType: String(block.mimeType) });
       continue;
     }
-    const truncated = truncations[textIndex++];
-    const suffix = truncated.truncated
-      ? `\n\n[Official Computer Use text truncated: showing ${truncated.outputLines} of ${truncated.totalLines} lines (${formatSize(truncated.outputBytes)} of ${formatSize(truncated.totalBytes)}). Full output saved to: ${fullOutputPath}]`
-      : "";
-    result.content.push({ type: "text", text: `${truncated.content}${suffix}` });
+    const blockText = String(block.text ?? "");
+    if (!aggregate.truncated) {
+      result.content.push({ type: "text", text: blockText });
+      continue;
+    }
+    if (textIndex > 0 && remainingText.startsWith("\n\n")) remainingText = remainingText.slice(2);
+    textIndex += 1;
+    const retained = blockText.slice(0, remainingText.length);
+    remainingText = remainingText.slice(retained.length);
+    const truncatedHere = retained.length < blockText.length || (remainingText.length === 0 && textIndex < textBlocks.length);
+    if (!retained && !truncatedHere) continue;
+    const notice = truncatedHere && !truncationNoticeAdded ? suffix : "";
+    truncationNoticeAdded ||= truncatedHere;
+    result.content.push({ type: "text", text: `${retained}${notice}` });
   }
   if (fullOutputPath) result.fullOutputPath = fullOutputPath;
   return result;

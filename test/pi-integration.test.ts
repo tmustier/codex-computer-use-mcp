@@ -152,12 +152,14 @@ const state = await sky.get_app_state({ app: "TextEdit" });
 await sky.click({ app: "TextEdit", element_index: "7" });
 await sky.type_text({ app: "TextEdit", text: "hello" });
 emit(state.text);
+emit(state.screenshot);
 emitImage(state.screenshot);
 `, {});
 	assert.deepEqual(calls.map((call) => call.method), ["get_app_state", "click", "type_text"]);
 	assert.deepEqual(result.calls, ["get_app_state", "click", "type_text"]);
 	assert.deepEqual(result.content, [
 		{ type: "text", text: "AX tree" },
+		{ type: "text", text: `{\n  "type": "computer_use_screenshot",\n  "id": "1"\n}` },
 		{ type: "image", data: "png-data", mimeType: "image/png" },
 	]);
 });
@@ -215,6 +217,7 @@ test("Computer Use code preserves emits and call history after a mid-batch failu
 	const executor = new ComputerUseCodeExecutor(session as any);
 	const result = await executor.execute(`
 const state = await sky.get_app_state({ app: "TextEdit" });
+store.lastState = state.text;
 emit(state.text);
 await sky.click({ app: "TextEdit", element_index: "missing" });
 `, {});
@@ -224,6 +227,38 @@ await sky.click({ app: "TextEdit", element_index: "missing" });
 		{ type: "text", text: "initial state" },
 		{ type: "text", text: "Computer Use code stopped: element not found" },
 	]);
+	assert.equal(executor.store.lastState, "initial state");
+});
+
+test("Computer Use code bounds the number of emitted blocks", async () => {
+	const session = { async execute() { return { isError: false, content: [] }; }, async close() {} };
+	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
+	const executor = new ComputerUseCodeExecutor(session as any);
+	const result = await executor.execute(`for (let i = 0; i < 101; i += 1) emit(i);`, {});
+	assert.match(result.error ?? "", /exceeded 100 emits/);
+	assert.equal(result.content.length, 101);
+	assert.deepEqual(result.content.at(-1), { type: "text", text: "Computer Use code stopped: Computer Use code exceeded 100 emits" });
+});
+
+test("Computer Use code bounds screenshots resolved from opaque handles", async () => {
+	const session = {
+		async execute() {
+			return { isError: false, content: [
+				{ type: "text", text: "state" },
+				{ type: "image", data: "png-data", mimeType: "image/png" },
+			] };
+		},
+		async close() {},
+	};
+	// SAFETY: this fake implements the execute and close methods used by ComputerUseCodeExecutor.
+	const executor = new ComputerUseCodeExecutor(session as any);
+	const result = await executor.execute(`
+const state = await sky.get_app_state({ app: "TextEdit" });
+for (let i = 0; i < 11; i += 1) emitImage(state.screenshot);
+`, {});
+	assert.match(result.error ?? "", /emitted images exceed 10 images/);
+	assert.equal(result.content.filter((block) => block.type === "image").length, 10);
+	assert.equal(result.content.at(-1)?.type, "text");
 });
 
 test("Computer Use code cannot escape through bridge or store constructors", async () => {
@@ -340,18 +375,26 @@ test("idle expiry closes a retained session", async () => {
 	}
 });
 
-test("Pi truncates text to a private spill file without spilling images", async () => {
-	const original = "x".repeat(60 * 1024);
+test("Pi truncates aggregate text to a private spill file without spilling images", async () => {
+	const first = "x".repeat(30 * 1024);
+	const second = "y".repeat(30 * 1024);
+	const original = `${first}\n\n${second}`;
 	const rendered = await toPiContent([
-		{ type: "text", text: original },
-		{ type: "image", data: "image-data", mimeType: "image/png" },
+		{ type: "text", text: first },
+		{ type: "image", data: "first-image", mimeType: "image/png" },
+		{ type: "text", text: second },
+		{ type: "image", data: "second-image", mimeType: "image/png" },
 	]);
 	assert.ok(rendered.fullOutputPath);
 	try {
 		assert.equal(await readFile(rendered.fullOutputPath, "utf8"), original);
 		assert.equal((await stat(rendered.fullOutputPath)).mode & 0o777, 0o600);
-		assert.match(rendered.content[0].type === "text" ? rendered.content[0].text : "", /Full output saved to:/);
-		assert.deepEqual(rendered.content[1], { type: "image", data: "image-data", mimeType: "image/png" });
+		assert.deepEqual(rendered.content.map((block) => block.type), ["text", "image", "text", "image"]);
+		assert.deepEqual(rendered.content[1], { type: "image", data: "first-image", mimeType: "image/png" });
+		assert.match(rendered.content[2].type === "text" ? rendered.content[2].text : "", /Full output saved to:/);
+		const returnedText = rendered.content.filter((block) => block.type === "text").map((block) => block.text).join("");
+		assert.ok(Buffer.byteLength(returnedText) < 55 * 1024);
+		assert.deepEqual(rendered.content[3], { type: "image", data: "second-image", mimeType: "image/png" });
 	} finally {
 		await rm(path.dirname(rendered.fullOutputPath), { recursive: true, force: true });
 	}

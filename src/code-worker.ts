@@ -1,5 +1,6 @@
 import vm from "node:vm";
 import { parentPort, workerData } from "node:worker_threads";
+import { z } from "zod";
 import type { JsonObject } from "./tools.ts";
 
 interface WorkerInput {
@@ -13,6 +14,10 @@ interface CallResultMessage {
 	value?: string;
 	error?: string;
 }
+
+const MAX_BRIDGE_BYTES = 1_000_000;
+const MAX_EMITS = 100;
+const bridgeStringSchema = z.string();
 
 // SAFETY: ComputerUseCodeExecutor is the sole worker creator and supplies this exact cloneable shape.
 const input = workerData as WorkerInput;
@@ -31,15 +36,33 @@ port.on("message", (message: CallResultMessage) => {
 	else waiter.resolve(message.value ?? "null");
 });
 
+let emitCount = 0;
+let emittedBytes = 0;
+const checkBridgeValue = (value: string, label: string): number => {
+	const bytes = Buffer.byteLength(value, "utf8");
+	if (bytes > MAX_BRIDGE_BYTES) throw new Error(`${label} exceeds ${MAX_BRIDGE_BYTES} bytes`);
+	return bytes;
+};
 const callBridge = (method: string, args: string): Promise<string> => {
+	checkBridgeValue(args, "Computer Use arguments");
 	const id = nextCallId++;
 	return new Promise((resolve, reject) => {
 		pending.set(id, { resolve, reject });
 		port.postMessage({ type: "call", id, method, args });
 	});
 };
-const emitBridge = (value: string): void => port.postMessage({ type: "emit", value });
-const emitImageBridge = (value: string): void => port.postMessage({ type: "emit_image", value });
+const emitValue = (type: "emit" | "emit_image", value: string): void => {
+	if (emitCount >= MAX_EMITS) throw new Error(`Computer Use code exceeded ${MAX_EMITS} emits`);
+	const bytes = checkBridgeValue(value, "Computer Use emitted value");
+	if (emittedBytes + bytes > MAX_BRIDGE_BYTES) {
+		throw new Error(`Computer Use emitted output exceeds ${MAX_BRIDGE_BYTES} bytes`);
+	}
+	emitCount += 1;
+	emittedBytes += bytes;
+	port.postMessage({ type, value });
+};
+const emitBridge = (value: string): void => emitValue("emit", value);
+const emitImageBridge = (value: string): void => emitValue("emit_image", value);
 Object.setPrototypeOf(callBridge, null);
 Object.setPrototypeOf(emitBridge, null);
 Object.setPrototypeOf(emitImageBridge, null);
@@ -84,16 +107,27 @@ const bootstrap = new vm.Script(`(() => {
 	globalThis.store = JSON.parse(storeJson);
 })()`);
 
+const serializedStore = (): string => {
+	const parsed = bridgeStringSchema.safeParse(new vm.Script("JSON.stringify(store)").runInContext(context));
+	if (!parsed.success) throw new Error("Computer Use store must remain a JSON object");
+	checkBridgeValue(parsed.data, "Computer Use store");
+	return parsed.data;
+};
+
 try {
 	bootstrap.runInContext(context);
+	port.postMessage({ type: "ready" });
 	const script = new vm.Script(`(async () => {\n${input.code}\n})()`, { filename: "computer-use.js" });
 	await script.runInContext(context);
-	const rawStore = new vm.Script("JSON.stringify(store)").runInContext(context);
-	port.postMessage({ type: "done", store: String(rawStore) });
+	port.postMessage({ type: "done", store: serializedStore() });
 } catch (error) {
+	let store = JSON.stringify(input.store);
+	try {
+		store = serializedStore();
+	} catch {}
 	port.postMessage({
 		type: "done",
-		store: JSON.stringify(input.store),
+		store,
 		error: error instanceof Error ? error.message : String(error),
 	});
 }
