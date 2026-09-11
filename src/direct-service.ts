@@ -74,7 +74,7 @@ export async function executeDirectTool(raw: JsonValue, deps: DirectServiceDepen
 			method: envelope.method,
 			arguments: validateDirectArguments(envelope.method, envelope.arguments),
 		};
-	} catch {
+	} catch (error) {
 		await appendAudit(stateRoot, {
 			timestamp: new Date().toISOString(),
 			runId,
@@ -93,7 +93,10 @@ export async function executeDirectTool(raw: JsonValue, deps: DirectServiceDepen
 			resultContentTypes: [],
 			resultBytes: 0,
 		});
-		throw new Error("Direct Computer Use request did not match a tool schema");
+		const reason = error instanceof z.ZodError
+			? error.issues.map((issue) => `${issue.path.join(".") || "request"}: ${issue.message}`).join("; ")
+			: "invalid request";
+		throw new Error(`Direct Computer Use request did not match a tool schema: ${reason}`);
 	}
 
 	const app = request.method === "list_apps" ? undefined : String(request.arguments.app);
