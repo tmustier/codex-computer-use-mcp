@@ -22,6 +22,21 @@ function brokerResult(text: string): DirectBrokerResult {
 	};
 }
 
+test("Pi marks failed batches as errors while preserving prior observations", async () => {
+	let tool: any;
+	const handlers = new Map<string, (...args: any[]) => any>();
+	// SAFETY: this registration fixture implements every ExtensionAPI method used by adapter registration.
+	adapter({ registerTool(value: any) { tool = value; }, registerCommand() {}, on(name: string, handler: (...args: any[]) => any) { handlers.set(name, handler); } } as any);
+	try {
+		const result = await tool.execute("fixture", { code: 'emit("prior observation"); throw new Error("fixture failure");' }, undefined, undefined, { hasUI: false });
+		assert.ok(result.content.some((block: any) => block.text === "prior observation"));
+		assert.match(result.details.error, /fixture failure/);
+		assert.deepEqual(handlers.get("tool_result")?.({ toolName: "computer_use", ...result, isError: false }), { isError: true });
+		assert.equal(handlers.get("tool_result")?.({ toolName: "other", ...result }), undefined);
+		assert.equal(handlers.get("tool_result")?.({ toolName: "computer_use", details: { calls: [] } }), undefined);
+	} finally { await handlers.get("session_shutdown")?.(); }
+});
+
 test("Pi returns form elicitation responses", async () => {
 	let selectedTitle = "";
 	let editorTitle = "";

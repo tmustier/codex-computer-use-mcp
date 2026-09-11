@@ -24,6 +24,13 @@ function deps(root: string, callTool: DirectServiceDependencies["callTool"]): Di
 	return { stateRoot: root, callTool };
 }
 
+test("schema errors identify the invalid field and expected type before contacting the broker", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-schema-test."));
+	try {
+		await assert.rejects(executeDirectTool({ method: "click", arguments: { app: "Fixture", element_index: 67 } }, deps(root, async () => { throw new Error("broker must not run"); })), /element_index.*expected string/i);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("direct service passes official arguments through unchanged", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-passthrough-test."));
 	const calls: Array<{ method: DirectMethod; args: DirectToolArguments }> = [];

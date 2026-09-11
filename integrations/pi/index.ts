@@ -49,6 +49,8 @@ Available globals:
 - emitImage(state.screenshot) returns a screenshot to Pi
 - store is a persistent JSON object shared across calls
 
+element_index must be a string for every method, for example "67", not 67. Keep the identifier from the current accessibility tree unchanged.
+
 get_app_state may return an accessibility-tree diff after the first inspection. Pass disableDiff: true when you need a fresh full tree.
 
 Example:
@@ -209,6 +211,14 @@ export default function directComputerUse(pi: ExtensionAPI) {
     },
   });
 
+  // Pi and captured-tool runners determine failure through this event. Keep
+  // emitted observations in the result while marking a stopped batch failed.
+  pi.on("tool_result", (event) => {
+    if (event.toolName !== "computer_use") return;
+    if (z.object({ error: z.string().min(1) }).safeParse(event.details).success) {
+      return { isError: true };
+    }
+  });
   pi.on("session_start", () => pi.setActiveTools([...new Set([...pi.getActiveTools(), "computer_use"])]));
   pi.on("agent_settled", () => codeExecutor.close());
   pi.on("session_shutdown", () => codeExecutor.close());
