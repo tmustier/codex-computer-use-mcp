@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { resolveOfficialComputerUseClient } from "../src/direct-broker.ts";
+import { resolveOfficialCodexAppServer, resolveOfficialComputerUseClient } from "../src/direct-broker.ts";
 
 const CLIENT_RELATIVE_PATH = "Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient";
 
@@ -21,6 +21,52 @@ function signedBy(team = "2DC432GLL2") {
 		return { status: 0, stdout: "", stderr: `TeamIdentifier=${team}\n` };
 	};
 }
+
+test("resolves a compatible Codex app-server from the environment after signature verification", async () => {
+	const tempRoot = await mkdtemp(path.join(os.tmpdir(), "codex-app-server-resolution."));
+	const root = realpathSync(tempRoot);
+	const previousPath = process.env.CODEX_COMPUTER_USE_CODEX_PATH;
+	try {
+		const codexPath = path.join(root, "codex");
+		await writeFile(codexPath, "signed fixture\n", { mode: 0o700 });
+		process.env.CODEX_COMPUTER_USE_CODEX_PATH = codexPath;
+		const commands: Array<{ command: string; args: string[] }> = [];
+		const resolved = resolveOfficialCodexAppServer({
+			runSync: (command, args) => {
+				commands.push({ command, args });
+				if (command === codexPath && args[0] === "--version") {
+					return { status: 0, stdout: "codex-cli 0.153.4\n", stderr: "" };
+				}
+				return signedBy()(command, args);
+			},
+		});
+		assert.deepEqual(resolved, { codexPath: realpathSync(codexPath), brokerVersion: "codex-cli 0.153.4" });
+		assert.deepEqual(commands.map(({ command, args }) => [command, ...args]), [
+			["/usr/bin/codesign", "--verify", "--strict", codexPath],
+			["/usr/bin/codesign", "-dv", "--verbose=2", codexPath],
+			[codexPath, "--version"],
+		]);
+	} finally {
+		if (previousPath === undefined) delete process.env.CODEX_COMPUTER_USE_CODEX_PATH;
+		else process.env.CODEX_COMPUTER_USE_CODEX_PATH = previousPath;
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("rejects a configured Codex app-server with the wrong signing Team ID", async () => {
+	const tempRoot = await mkdtemp(path.join(os.tmpdir(), "codex-app-server-wrong-team."));
+	const root = realpathSync(tempRoot);
+	try {
+		const codexPath = path.join(root, "codex");
+		await writeFile(codexPath, "signed fixture\n", { mode: 0o700 });
+		assert.throws(
+			() => resolveOfficialCodexAppServer({ codexPath, runSync: signedBy("NOT_OPENAI") }),
+			/not signed by the expected OpenAI team/,
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
 
 test("resolves and verifies ChatGPT's current per-user installed component path", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "cu-current-resolution."));
