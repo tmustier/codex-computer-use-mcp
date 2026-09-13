@@ -14,6 +14,14 @@ OpenAI does not produce or endorse this independent project. It relies on an exp
 
 macOS Screen Recording, Accessibility and TCC controls still apply.
 
+If the Codex binary bundled with ChatGPT is temporarily incompatible with the installed Computer Use component, set `CODEX_COMPUTER_USE_CODEX_PATH` to the canonical path of a compatible native Codex binary from an official OpenAI installation:
+
+```bash
+export CODEX_COMPUTER_USE_CODEX_PATH=/absolute/path/to/codex
+```
+
+The adapter verifies the selected binary's code signature and OpenAI Team ID before use. It rejects unsigned binaries, binaries signed by another team and symlinked paths.
+
 ## Pi
 
 Install from npm:
