@@ -8,7 +8,11 @@ import { z } from "zod";
 import type { DirectMethod, DirectToolArguments, JsonObject, JsonValue } from "./tools.ts";
 import { PACKAGE_VERSION } from "./version.ts";
 
-const CODEX_PATH = "/Applications/ChatGPT.app/Contents/Resources/codex";
+// ChatGPT 26.924 moved the bundled CLI into CodexCLI.app; older builds ship it at Resources/codex.
+const CODEX_PATHS = [
+	"/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+	"/Applications/ChatGPT.app/Contents/Resources/codex",
+];
 const COMPUTER_USE_PLUGIN_ROOT =
 	"/Applications/ChatGPT.app/Contents/Resources/plugins/openai-bundled/plugins/computer-use";
 const COMPUTER_USE_APP_RELATIVE_PATH = "computer-use/Codex Computer Use.app";
@@ -150,7 +154,15 @@ interface ResolveOfficialComputerUseClientOptions {
 	userHome?: string;
 	/** Test-only legacy root override. */
 	legacyPluginRoot?: string;
+	/** Test-only override for the app-bundled Codex CLI locations, in preference order. */
+	codexPaths?: readonly string[];
 	runSync?: RunSync;
+}
+
+export function resolveBundledCodexPath(candidates: readonly string[] = CODEX_PATHS): string {
+	const found = candidates.find((candidate) => existsSync(candidate));
+	if (!found) throw new BrokerVerificationError("The app-bundled Codex CLI was not found in a supported location");
+	return found;
 }
 
 function checkedCandidate(appPath: string, clientPath: string, layout: OfficialComputerUseClient["layout"], runSync: RunSync): OfficialComputerUseClient | undefined {
@@ -189,9 +201,10 @@ export function resolveOfficialComputerUseClient(options: ResolveOfficialCompute
 
 export function verifyOfficialDirectBroker(options: ResolveOfficialComputerUseClientOptions = {}) {
 	const runSync = options.runSync ?? productionRunSync;
-	verifySignedBinary(CODEX_PATH, runSync);
+	const codexPath = resolveBundledCodexPath(options.codexPaths);
+	verifySignedBinary(codexPath, runSync);
 	const client = resolveOfficialComputerUseClient({ ...options, runSync });
-	const version = runSync(CODEX_PATH, ["--version"]);
+	const version = runSync(codexPath, ["--version"]);
 	if (version.status !== 0 || !/^codex-cli\s+\d+\./.test((version.stdout ?? "").trim())) {
 		throw new BrokerVerificationError("Could not verify the app-bundled Codex app-server version");
 	}
@@ -200,7 +213,7 @@ export function verifyOfficialDirectBroker(options: ResolveOfficialComputerUseCl
 	if (build.status !== 0 || !clientBuild) {
 		throw new BrokerVerificationError("Could not verify the official Computer Use client build");
 	}
-	return { brokerVersion: (version.stdout ?? "").trim(), clientBuild, client };
+	return { brokerVersion: (version.stdout ?? "").trim(), clientBuild, client, codexPath };
 }
 
 function buildBrokerEnv(codexHome: string, tempRoot: string): NodeJS.ProcessEnv {
@@ -426,7 +439,7 @@ export async function createOfficialDirectToolSession(
 	options: DirectBrokerOptions = {},
 ): Promise<OfficialDirectToolSession> {
 	const verification = options.skipSignatureVerification
-		? { brokerVersion: "test-app-server", clientBuild: "test-client", client: undefined }
+		? { brokerVersion: "test-app-server", clientBuild: "test-client", client: undefined, codexPath: undefined }
 		: verifyOfficialDirectBroker();
 	const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pi-direct-computer-use."));
 	const codexHome = path.join(tempRoot, "codex-home");
@@ -515,7 +528,8 @@ export async function createOfficialDirectToolSession(
 	};
 
 	try {
-		const command = options.appServerCommand ?? CODEX_PATH;
+		const command = options.appServerCommand ?? verification.codexPath;
+		if (!command) throw new BrokerVerificationError("The app-bundled Codex CLI was not verified");
 		let commandArgs = options.appServerArgs;
 		if (!commandArgs) {
 			if (!verification.client) throw new BrokerVerificationError("The official Computer Use client was not verified");

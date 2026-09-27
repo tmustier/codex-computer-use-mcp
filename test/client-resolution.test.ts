@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { resolveOfficialComputerUseClient } from "../src/direct-broker.ts";
+import { resolveBundledCodexPath, resolveOfficialComputerUseClient } from "../src/direct-broker.ts";
 
 const CLIENT_RELATIVE_PATH = "Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient";
 
@@ -108,4 +108,23 @@ test("retains the strict legacy plugin-bundle layout when the current component 
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
+});
+
+test("prefers the CodexCLI.app binary and falls back to the older Resources/codex layout", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "cu-codex-path."));
+	try {
+		const current = path.join(root, "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex");
+		const legacy = path.join(root, "codex");
+		await writeFile(legacy, "legacy", { mode: 0o700 });
+		assert.equal(resolveBundledCodexPath([current, legacy]), legacy);
+		await mkdir(path.dirname(current), { recursive: true });
+		await writeFile(current, "current", { mode: 0o700 });
+		assert.equal(resolveBundledCodexPath([current, legacy]), current);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("fails closed when no bundled Codex CLI exists", () => {
+	assert.throws(() => resolveBundledCodexPath(["/nonexistent/codex"]), /Codex CLI was not found/);
 });
