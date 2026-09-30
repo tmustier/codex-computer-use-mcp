@@ -1,6 +1,7 @@
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -75,6 +76,8 @@ export interface DirectBrokerOptions {
 	appServerArgs?: string[];
 	/** Test-only signature bypass. */
 	skipSignatureVerification?: boolean;
+	/** Test-only client fixture, used only with skipSignatureVerification. */
+	computerUseClient?: OfficialComputerUseClient;
 	/** Test-only process-enumerator override. */
 	processEnumeratorCommand?: string;
 	onSpawn?: (pid: number) => void;
@@ -502,7 +505,7 @@ export async function createOfficialDirectToolSession(
 	options: DirectBrokerOptions = {},
 ): Promise<OfficialDirectToolSession> {
 	const verification = options.skipSignatureVerification
-		? { brokerVersion: "test-app-server", clientBuild: "test-client", client: undefined, codexPath: undefined }
+		? { brokerVersion: "test-app-server", clientBuild: "test-client", client: options.computerUseClient, codexPath: undefined }
 		: verifyOfficialDirectBroker({ configPath: options.configPath });
 	const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pi-direct-computer-use."));
 	const codexHome = path.join(tempRoot, "codex-home");
@@ -521,6 +524,10 @@ export async function createOfficialDirectToolSession(
 	let modelTurnsStarted = 0;
 	let ephemeralThread = false;
 	let threadId = "";
+	const turnId = randomUUID();
+	let toolCallAttempted = false;
+	let cleanupRequestId: string | undefined;
+	let toolResponse: { id: string; done: Promise<void>; finish(): void } | undefined;
 	let closed = false;
 	let closePromise: Promise<void> | undefined;
 	let callActive = false;
@@ -543,26 +550,48 @@ export async function createOfficialDirectToolSession(
 		rejectAll(fatalError);
 		void ensureTerminated().catch(() => undefined);
 	};
+	const cancel = (error: Error): void => {
+		fatalError ??= error;
+		rejectAll(fatalError);
+		// Cancellation and tool timeouts leave the signed transport usable.
+		void close().catch(() => undefined);
+	};
 	const send = (message: JsonValue): void => {
 		if (!proc?.stdin.writable) throw new Error("Official app-server stdin is unavailable");
 		proc.stdin.write(`${JSON.stringify(message)}\n`, "utf8");
 	};
-	const request = (methodName: string, params: JsonValue, timeoutMs: number): Promise<JsonValue> => {
+	const request = (methodName: string, params: JsonValue, timeoutMs: number, cleanup = false): Promise<JsonValue> => {
 		const id = String(nextId++);
+		if (cleanup) cleanupRequestId = id;
+		if (methodName === "mcpServer/tool/call") {
+			let finish!: () => void;
+			const done = new Promise<void>((resolve) => { finish = resolve; });
+			toolResponse = { id, done, finish };
+		}
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
 				pending.delete(id);
 				const error = new Error(`Official app-server request timed out: ${methodName}`);
 				reject(error);
-				fail(error);
+				if (methodName === "mcpServer/tool/call") cancel(error);
+				else fail(error);
 			}, timeoutMs);
 			pending.set(id, { resolve, reject, timer });
 			try { send({ method: methodName, id, params }); }
 			catch (error) {
 				clearTimeout(timer);
 				pending.delete(id);
+				if (toolResponse?.id === id) { toolResponse.finish(); toolResponse = undefined; }
 				reject(error instanceof Error ? error : new Error(String(error)));
 			}
+		});
+	};
+	const drainToolResponse = (timeoutMs: number): Promise<boolean> => {
+		if (!toolResponse) return Promise.resolve(true);
+		const response = toolResponse;
+		return new Promise((resolve) => {
+			const timer = setTimeout(() => resolve(false), timeoutMs);
+			void response.done.then(() => { clearTimeout(timer); resolve(true); });
 		});
 	};
 
@@ -570,6 +599,38 @@ export async function createOfficialDirectToolSession(
 		closePromise ??= (async () => {
 			closed = true;
 			rejectAll(new Error("Official app-server closed"));
+			let turnCleanupError: unknown;
+			const client = verification.client;
+			if (toolCallAttempted && client && !termination) {
+				try {
+					if (!proc?.stdin.writable) throw new Error("Official app-server transport is unavailable before turn cleanup");
+					// A rejected caller is not a completed native request. Ending its
+					// turn too early can let the late request recreate the cursor.
+					if (!await drainToolResponse(1_000)) throw new Error("Native Computer Use request did not settle before teardown");
+					if (termination) throw fatalError ?? new Error("Official app-server transport failed during teardown");
+					let componentHome = path.dirname(path.dirname(client.appPath));
+					if (path.join(componentHome, COMPUTER_USE_APP_RELATIVE_PATH) !== client.appPath) {
+						// Configured apps may live outside the native resolver layout.
+						// Expose the already verified bundle through a private resolver home.
+						componentHome = path.join(tempRoot, "turn-cleanup-home");
+						await mkdir(path.join(componentHome, "computer-use"), { recursive: true, mode: 0o700 });
+						await symlink(client.appPath, path.join(componentHome, COMPUTER_USE_APP_RELATIVE_PATH));
+					}
+					// Use the signed parent's zero-turn command API: a direct Node child
+					// lacks the native sender identity. Only this command needs the real
+					// component location; the broker keeps its isolated CODEX_HOME.
+					const result = z.object({ exitCode: z.number().int() }).parse(await request("command/exec", {
+						command: [client.clientPath, "turn-ended", JSON.stringify({
+							type: "agent-turn-complete", "thread-id": threadId, "turn-id": turnId,
+						})],
+						cwd: workDir,
+						env: { CODEX_HOME: componentHome },
+						sandboxPolicy: { type: "dangerFullAccess" },
+						timeoutMs: 2_000,
+					}, 3_000, true));
+					if (result.exitCode !== 0) throw new Error(`Official turn-ended notification exited with code ${result.exitCode}`);
+				} catch (error) { turnCleanupError = error; }
+			}
 			let cleanupError: Error | undefined;
 			try {
 				await ensureTerminated();
@@ -585,6 +646,9 @@ export async function createOfficialDirectToolSession(
 				cleanupError = error instanceof Error ? error : new Error(String(error));
 			}
 			if (cleanupError) throw new Error("Official direct Computer Use broker cleanup failed", { cause: cleanupError });
+			if (turnCleanupError) throw new Error(`${fatalError ? `${fatalError.message}; ` : ""}Official Computer Use turn cleanup failed`, {
+				cause: fatalError ? new AggregateError([fatalError, turnCleanupError]) : turnCleanupError,
+			});
 			if (fatalError || modelTurnsStarted !== 0) throw fatalError ?? new BrokerVerificationError("Model-turn activity was observed during broker teardown");
 		})();
 		return closePromise;
@@ -612,7 +676,7 @@ export async function createOfficialDirectToolSession(
 		proc.stderr.setEncoding("utf8");
 		proc.stderr.on("data", (chunk: string) => { if (stderr.length < 16_384) stderr += chunk.slice(0, 16_384 - stderr.length); });
 		proc.once("error", (error) => fail(error));
-		proc.once("close", (code) => { if (!closed && pending.size > 0) fail(new Error(`Official app-server exited before completing the request (${code ?? "unknown"})`)); });
+		proc.once("close", (code) => { if (pending.size > 0) fail(new Error(`Official app-server exited before completing the request (${code ?? "unknown"})`)); });
 
 		const processProtocolLine = (line: string): void => {
 			let parsedMessage: ReturnType<typeof protocolMessageSchema.safeParse>;
@@ -625,7 +689,13 @@ export async function createOfficialDirectToolSession(
 				fail(new Error("Official app-server unexpectedly emitted model-turn activity during direct dispatch"));
 				return;
 			}
-			if (fatalError) return;
+			if (toolResponse?.id === String(message.id) && (message.result !== undefined || message.error !== undefined)) {
+				toolResponse.finish();
+				toolResponse = undefined;
+			}
+			// After shutdown starts, only its own reply may complete. Continue
+			// detecting malformed output and model activity before this filter.
+			if ((fatalError || closed) && String(message.id) !== cleanupRequestId) return;
 			try {
 				if (message.id != null && (message.result !== undefined || message.error !== undefined)) {
 					const waiter = pending.get(String(message.id));
@@ -690,12 +760,16 @@ export async function createOfficialDirectToolSession(
 			let abortHandler: (() => void) | undefined;
 			try {
 				if (callOptions.signal) {
-					abortHandler = () => fail(new Error("Direct Computer Use request cancelled"));
+					abortHandler = () => cancel(new Error("Direct Computer Use request cancelled"));
 					if (callOptions.signal.aborted) abortHandler();
 					else callOptions.signal.addEventListener("abort", abortHandler, { once: true });
 				}
 				if (fatalError) throw fatalError;
-				const raw = await request("mcpServer/tool/call", { threadId, server: "computer-use", tool: method, arguments: args }, callOptions.timeoutMs ?? 120_000);
+				toolCallAttempted = true;
+				const raw = await request("mcpServer/tool/call", {
+					threadId, server: "computer-use", tool: method, arguments: args,
+					_meta: { "x-codex-turn-metadata": { thread_id: threadId, session_id: threadId, turn_id: turnId } },
+				}, callOptions.timeoutMs ?? 120_000);
 				directCalls = 1;
 				if (modelTurnsStarted !== 0) throw new BrokerVerificationError("Model-turn activity was observed during direct dispatch");
 				const result = directResultSchema.parse(raw);
