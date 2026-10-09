@@ -77,6 +77,8 @@ export interface DirectBrokerOptions {
 	skipSignatureVerification?: boolean;
 	/** Test-only process-enumerator override. */
 	processEnumeratorCommand?: string;
+	/** Test-only synchronous command runner for verification and service startup. */
+	runSync?: RunSync;
 	onSpawn?: (pid: number) => void;
 	/** Path configuration file; see `readOfficialPathConfig`. */
 	configPath?: string;
@@ -277,6 +279,16 @@ export function verifyOfficialDirectBroker(options: ResolveOfficialComputerUseCl
 		throw new BrokerVerificationError("Could not verify the official Computer Use client build");
 	}
 	return { brokerVersion: (version.stdout ?? "").trim(), clientBuild, client, codexPath };
+}
+
+/** Start the shared service through Launch Services before its client inherits the private broker HOME. */
+export function launchOfficialComputerUseApp(appPath: string, runSync: RunSync = productionRunSync): void {
+	// The signed client alone does not attest the app executable that Launch Services will run.
+	verifySignedBinary(appPath, runSync);
+	const opened = runSync("/usr/bin/open", ["-g", appPath]);
+	if (opened.status !== 0) {
+		throw new BrokerVerificationError("Could not start the official Computer Use app via Launch Services. Open it manually and retry.");
+	}
 }
 
 function buildBrokerEnv(codexHome: string, tempRoot: string): NodeJS.ProcessEnv {
@@ -501,9 +513,12 @@ export interface OfficialDirectToolSession {
 export async function createOfficialDirectToolSession(
 	options: DirectBrokerOptions = {},
 ): Promise<OfficialDirectToolSession> {
+	options.signal?.throwIfAborted();
 	const verification = options.skipSignatureVerification
 		? { brokerVersion: "test-app-server", clientBuild: "test-client", client: undefined, codexPath: undefined }
-		: verifyOfficialDirectBroker({ configPath: options.configPath });
+		: verifyOfficialDirectBroker({ configPath: options.configPath, runSync: options.runSync });
+	if (verification.client) launchOfficialComputerUseApp(verification.client.appPath, options.runSync);
+	options.signal?.throwIfAborted();
 	const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pi-direct-computer-use."));
 	const codexHome = path.join(tempRoot, "codex-home");
 	const workDir = path.join(tempRoot, "work");

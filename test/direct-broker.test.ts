@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -294,6 +294,92 @@ test("directCalls remains zero when no tool-call response confirms dispatch", as
 		catch (error) { observed = error; }
 		assert.equal(observed?.directCalls, 0);
 		assert.equal(observed?.cleanupVerified, true);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+async function verifiedStartupOptions(root: string, script: string, launchStatus = 0) {
+	const appPath = path.join(root, "Configured Computer Use.app");
+	const clientPath = path.join(appPath, "Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient");
+	await mkdir(path.dirname(clientPath), { recursive: true });
+	await writeFile(clientPath, "fixture");
+	const configPath = path.join(root, "config.json");
+	await writeFile(configPath, JSON.stringify({ codexPath: process.execPath, computerUseAppPath: appPath }));
+	const lifecycle: string[] = [];
+	return {
+		lifecycle,
+		brokerOptions: {
+			...options(script),
+			skipSignatureVerification: false,
+			configPath,
+			onSpawn: () => { lifecycle.push("broker-spawn"); },
+			runSync: (command: string, args: string[]) => {
+				if (command === "/usr/bin/open") {
+					assert.equal(args[0], "-g");
+					assert.ok(args[1].endsWith("Configured Computer Use.app"));
+					lifecycle.push("service-launch");
+					return { status: launchStatus };
+				}
+				if (args[0] === "--version") return { status: 0, stdout: "codex-cli 0.160.1" };
+				if (command === "/usr/bin/plutil") return { status: 0, stdout: "1001365" };
+				assert.equal(command, "/usr/bin/codesign");
+				return { status: 0, stderr: "TeamIdentifier=2DC432GLL2\n" };
+			},
+		},
+	};
+}
+
+test("launches the configured service before the isolated broker and retains it across calls", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-service-startup."));
+	try {
+		const { script, log } = await makeFake(root);
+		const { lifecycle, brokerOptions } = await verifiedStartupOptions(root, script);
+		const session = await createOfficialDirectToolSession(brokerOptions);
+		try {
+			await session.call("get_app_state", { app: "Calculator" });
+			await session.call("press_key", { app: "Calculator", key: "Escape" });
+		} finally { await session.close(); }
+		assert.deepEqual(lifecycle, ["service-launch", "broker-spawn"]);
+		const records = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+		assert.deepEqual(records.filter((item) => item.method === "mcpServer/tool/call").map((item) => item.params.tool), ["get_app_state", "press_key"]);
+		assert.ok(records.every((item) => item.home.includes("pi-direct-computer-use.") && !item.hasOpenAIKey));
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a transport exit after dispatch never replays a UI action or relaunches the service", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-service-no-replay."));
+	try {
+		const { script, log } = await makeFake(root);
+		const { lifecycle, brokerOptions } = await verifiedStartupOptions(root, script);
+		await assert.rejects(callOfficialDirectTool("press_key", { app: "Calculator", key: "Escape" }, {
+			...brokerOptions,
+			appServerArgs: [script, "close-before-tool"],
+		}), /exited before completing/);
+		assert.deepEqual(lifecycle, ["service-launch", "broker-spawn"]);
+		const records = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+		assert.deepEqual(records.filter((item) => item.method === "mcpServer/tool/call").map((item) => item.params.tool), ["press_key"]);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("service launch failure stops before starting a broker or dispatching a tool", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-service-failure."));
+	try {
+		const { script, log } = await makeFake(root);
+		const { lifecycle, brokerOptions } = await verifiedStartupOptions(root, script, 1);
+		await assert.rejects(callOfficialDirectTool("press_key", { app: "Calculator", key: "Escape" }, brokerOptions), /Could not start the official Computer Use app/);
+		assert.deepEqual(lifecycle, ["service-launch"]);
+		await assert.rejects(readFile(log, "utf8"), { code: "ENOENT" });
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("an already cancelled request does not launch the shared service", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-service-cancel."));
+	try {
+		const { script } = await makeFake(root);
+		const { lifecycle, brokerOptions } = await verifiedStartupOptions(root, script);
+		const controller = new AbortController();
+		controller.abort();
+		await assert.rejects(createOfficialDirectToolSession({ ...brokerOptions, signal: controller.signal }), { name: "AbortError" });
+		assert.deepEqual(lifecycle, []);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 

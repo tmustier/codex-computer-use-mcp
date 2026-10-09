@@ -80,7 +80,9 @@ Example Pi MCP configuration:
 
 The adapter has one mode. Pi exposes the ten official methods through the single `computer_use` code tool; MCP exposes them as ten typed methods. Both are available without wrapper permission prompts. It adds no app allowlist, action gate, intent classifier, selector rewrite or focus policy. App-server uses Codex Full access. The adapter forwards any elicitation that the official host still emits.
 
-Production calls require verified OpenAI-signed app-server and Computer Use binaries with Team ID `2DC432GLL2`. The adapter uses an isolated, credential-free app-server context. It rejects any model-turn activity. Calls after `get_app_state` reuse the signed session, preserving element identifiers and official app state.
+Production calls require verified OpenAI-signed app-server and Computer Use binaries with Team ID `2DC432GLL2`. Before starting a new private broker, the adapter also verifies the Computer Use app bundle and opens it in the background through macOS Launch Services. This requests service startup in the logged-in user session instead of relying on the first client inside the broker's temporary `HOME`. Launch Services accepting the request is not a readiness probe; the official transport still handles initialization, and this does not claim to repair every app-server exit. Startup does not grant platform permissions, restart or terminate an existing shared service, or retry UI actions. If Launch Services fails, the call stops before dispatch with an instruction to open the app manually.
+
+The adapter uses an isolated, credential-free app-server context. It rejects any model-turn activity. Calls after `get_app_state` reuse the signed session, preserving element identifiers and official app state.
 
 Audit records contain bounded metadata. They exclude arguments, app content, screenshots, prompts and credentials. MCP and CLI state defaults to `~/.direct-computer-use`. Pi state defaults to `direct-computer-use` under the Pi agent directory. Set `CODEX_COMPUTER_USE_HOME` to override either default.
 
