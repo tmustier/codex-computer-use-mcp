@@ -153,34 +153,27 @@ export async function executeDirectTool(raw: JsonValue, deps: DirectServiceDepen
 	};
 }
 
-interface DirectStatus extends JsonObject {
+type DirectStatus = {
 	stateRoot: string;
 	permissionMode: "no-permissions";
 	configPath: string;
-	brokerVerified: boolean;
-	brokerError?: string;
-	brokerVersion?: string;
-	clientBuild?: string;
-	codexPath?: string;
 	methods: DirectMethod[];
-}
+} & (
+	| { brokerVerified: true; brokerVersion: string; clientBuild: string; codexPath: string }
+	| { brokerVerified: false; brokerError: string }
+);
 
 export function getDirectStatus(stateRoot = defaultStateRoot()): DirectStatus {
-	const status: DirectStatus = {
+	const status = {
 		stateRoot,
 		configPath: pathConfigFile(stateRoot),
-		permissionMode: "no-permissions",
-		brokerVerified: false,
+		permissionMode: "no-permissions" as const,
 		methods: [...COMPUTER_USE_METHODS],
 	};
 	try {
-		const verification = verifyOfficialDirectBroker({ configPath: status.configPath });
-		status.brokerVerified = true;
-		status.codexPath = verification.codexPath;
-		status.brokerVersion = verification.brokerVersion;
-		status.clientBuild = verification.clientBuild;
+		const { codexPath, brokerVersion, clientBuild } = verifyOfficialDirectBroker({ configPath: status.configPath });
+		return { ...status, brokerVerified: true, codexPath, brokerVersion, clientBuild };
 	} catch (error) {
-		status.brokerError = error instanceof Error ? error.message : String(error);
+		return { ...status, brokerVerified: false, brokerError: error instanceof Error ? error.message : String(error) };
 	}
-	return status;
 }
