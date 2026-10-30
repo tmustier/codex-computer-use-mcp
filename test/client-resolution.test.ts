@@ -81,7 +81,10 @@ test("fails closed when the client has the wrong signing Team ID", async () => {
 	}
 });
 
-test("rejects a symlinked client layout rather than accepting an arbitrary resolved path", async () => {
+// Creating symlinks on Windows needs Developer Mode or elevation.
+const symlinkTest = process.platform === "win32" ? test.skip : test;
+
+symlinkTest("rejects a symlinked client layout rather than accepting an arbitrary resolved path", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "cu-symlink-path."));
 	try {
 		const actualApp = path.join(root, "elsewhere", "Codex Computer Use.app");

@@ -127,7 +127,7 @@ When ChatGPT is installed elsewhere or moves these files, set either path in `co
 }
 ```
 
-On Windows the adapter uses the newest `@oai/sky` package under `%LOCALAPPDATA%\OpenAI\Codex\runtimes\cua_node\<runtime>\bin\node_modules\@oai\sky`. Set `computerUseAppPath` to that package directory to use another copy; `codexPath` is not used on Windows.
+On Windows the adapter uses the newest `@oai/sky` package under `%LOCALAPPDATA%\OpenAI\Codex\runtimes\cua_node\<runtime>\bin\node_modules\@oai\sky`. Set `computerUseAppPath` to that package directory to use another copy. The helper matching the Node architecture is preferred; when only the other one is installed (for example x64 Node on Windows on Arm, where the Codex app installs only `codex-computer-use-arm64.exe`), that signed helper is used. The helper asks `codex app-server` for its ChatGPT auth token, so the adapter passes it `CODEX_CLI_PATH`: `codexPath` when set, otherwise the newest signed `codex.exe` under `%LOCALAPPDATA%\OpenAI\Codex\bin\<version>\`. A `CODEX_CLI_PATH` already in the environment is left to the helper.
 
 The adapter reads this file when it starts each Computer Use session, so changes apply without restarting Pi or the MCP server. Configured binaries must pass the same OpenAI signature checks. When a component is missing, the error lists the paths checked and the config file to edit. `/computer-use-status` and `codex-computer-use-mcp --status` show the platform, the config path and the current error.
 

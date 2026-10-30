@@ -160,34 +160,30 @@ export async function executeDirectTool(raw: JsonValue, deps: DirectServiceDepen
 	};
 }
 
-interface DirectStatus extends JsonObject {
+type DirectStatus = {
 	stateRoot: string;
 	platform: ComputerUsePlatform["name"];
 	permissionMode: "no-permissions";
 	configPath: string;
-	brokerVerified: boolean;
-	brokerError?: string;
-	brokerVersion?: string;
-	clientBuild?: string;
 	methods: DirectMethod[];
-}
+} & (
+	// The Windows helper finds Codex itself when no installed Codex is verified for it.
+	| { brokerVerified: true; brokerVersion: string; clientBuild: string; codexPath?: string | undefined }
+	| { brokerVerified: false; brokerError: string }
+);
 
 export function getDirectStatus(stateRoot = defaultStateRoot(), platform = hostPlatform()): DirectStatus {
-	const status: DirectStatus = {
+	const status = {
 		stateRoot,
 		platform: platform.name,
 		configPath: pathConfigFile(stateRoot),
-		permissionMode: "no-permissions",
-		brokerVerified: false,
+		permissionMode: "no-permissions" as const,
 		methods: [...platform.methods],
 	};
 	try {
-		const verification = platform.verify(status.configPath);
-		status.brokerVerified = true;
-		status.brokerVersion = verification.brokerVersion;
-		status.clientBuild = verification.clientBuild;
+		const { codexPath, brokerVersion, clientBuild } = platform.verify(status.configPath);
+		return { ...status, brokerVerified: true, codexPath, brokerVersion, clientBuild };
 	} catch (error) {
-		status.brokerError = error instanceof Error ? error.message : String(error);
+		return { ...status, brokerVerified: false, brokerError: error instanceof Error ? error.message : String(error) };
 	}
-	return status;
 }

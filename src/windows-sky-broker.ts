@@ -26,11 +26,19 @@ import { isWindowsDirectMethod, type WindowsDirectMethod } from "./windows-tools
 const SKY_PACKAGE_NAME = "@oai/sky";
 const CODEX_RUNTIMES_RELATIVE_PATH = path.join("AppData", "Local", "OpenAI", "Codex", "runtimes", "cua_node");
 const SKY_PACKAGE_RELATIVE_PATH = path.join("bin", "node_modules", "@oai", "sky");
-export const WINDOWS_HELPER_RELATIVE_PATH = path.join(
-	"bin",
-	"windows",
-	process.arch === "arm64" ? "codex-computer-use-arm64.exe" : "codex-computer-use.exe",
-);
+// The Codex app installs only the helper for the machine's architecture, and its
+// own Node matches it. This process may run under another architecture's Node
+// (x64 Node emulated on Windows on Arm), so prefer the helper for process.arch and
+// fall back to the other signed helper in the same package.
+const WINDOWS_HELPER_FILE_NAMES = process.arch === "arm64"
+	? ["codex-computer-use-arm64.exe", "codex-computer-use.exe"]
+	: ["codex-computer-use.exe", "codex-computer-use-arm64.exe"];
+export const WINDOWS_HELPER_RELATIVE_PATHS = WINDOWS_HELPER_FILE_NAMES.map((name) => path.join("bin", "windows", name));
+export const WINDOWS_HELPER_RELATIVE_PATH = WINDOWS_HELPER_RELATIVE_PATHS[0];
+
+function helperRelativePath(packagePath: string): string | undefined {
+	return WINDOWS_HELPER_RELATIVE_PATHS.find((relativePath) => existsSync(path.join(packagePath, relativePath)));
+}
 const CLIENT_MODULE_RELATIVE_PATH = "dist/project/cua/sky_js/src/targets/windows/internal/computer_use_client.js";
 const TRANSPORT_MODULE_RELATIVE_PATH = "dist/project/cua/sky_js/src/targets/windows/internal/helper_transport.js";
 // A helper turn shows the official "ChatGPT is using your computer" overlay and
@@ -144,8 +152,9 @@ function readSkyPackageVersion(packagePath: string): string {
 }
 
 function checkedCandidate(packagePath: string, layout: OfficialWindowsClient["layout"], runSync: RunSync): OfficialWindowsClient | undefined {
-	const clientPath = path.join(packagePath, WINDOWS_HELPER_RELATIVE_PATH);
-	if (!existsSync(clientPath)) return undefined;
+	const relativePath = helperRelativePath(packagePath);
+	if (relativePath === undefined) return undefined;
+	const clientPath = path.join(packagePath, relativePath);
 	let canonicalPackage: string;
 	let canonicalClient: string;
 	try {
@@ -173,8 +182,10 @@ function installedRuntimeCandidates(runtimesRoot: string): string[] {
 	for (const entry of readdirSync(runtimesRoot, { withFileTypes: true })) {
 		if (!entry.isDirectory()) continue;
 		const packagePath = path.join(runtimesRoot, entry.name, SKY_PACKAGE_RELATIVE_PATH);
+		const relativePath = helperRelativePath(packagePath);
+		if (relativePath === undefined) continue;
 		try {
-			candidates.push({ packagePath, modified: statSync(path.join(packagePath, WINDOWS_HELPER_RELATIVE_PATH)).mtimeMs });
+			candidates.push({ packagePath, modified: statSync(path.join(packagePath, relativePath)).mtimeMs });
 		} catch {
 			// A runtime without the helper is not a Computer Use runtime.
 		}
@@ -193,7 +204,7 @@ export function resolveOfficialWindowsClient(options: ResolveOfficialWindowsClie
 		const configured = checkedCandidate(configuredPackage, "configured", runSync);
 		if (configured) return configured;
 		throw new BrokerVerificationError(
-			`Official Windows Computer Use helper was not found. Checked: ${path.join(configuredPackage, WINDOWS_HELPER_RELATIVE_PATH)}. ${hint}`,
+			`Official Windows Computer Use helper was not found. Checked: ${WINDOWS_HELPER_RELATIVE_PATHS.map((relativePath) => path.join(configuredPackage, relativePath)).join(", ")}. ${hint}`,
 		);
 	}
 	const userHome = options.userHome ?? os.userInfo().homedir;
@@ -209,10 +220,58 @@ export function resolveOfficialWindowsClient(options: ResolveOfficialWindowsClie
 	);
 }
 
+// The helper asks `codex app-server` for the ChatGPT auth token its policy check
+// needs, finding it through CODEX_CLI_PATH or else PATH. The Codex app sets that
+// for its own helper; its codex.exe is not on PATH, so this process sets it too.
+const CODEX_CLI_PATH_ENV = "CODEX_CLI_PATH";
+const CODEX_BIN_RELATIVE_PATH = path.join("AppData", "Local", "OpenAI", "Codex", "bin");
+
+/** Newest first: the Codex app keeps one bin directory per installed version. */
+function installedCodexCandidates(binRoot: string): string[] {
+	if (!existsSync(binRoot)) return [];
+	const candidates: Array<{ codexPath: string; modified: number }> = [];
+	for (const entry of readdirSync(binRoot, { withFileTypes: true })) {
+		if (!entry.isDirectory()) continue;
+		const codexPath = path.join(binRoot, entry.name, "codex.exe");
+		try {
+			candidates.push({ codexPath, modified: statSync(codexPath).mtimeMs });
+		} catch {
+			// A bin directory without codex.exe holds other Codex tools.
+		}
+	}
+	return candidates.sort((left, right) => right.modified - left.modified).map((candidate) => candidate.codexPath);
+}
+
+/**
+ * The verified Codex executable to hand the helper: the configured `codexPath`, or
+ * else the newest one installed by the Codex app. Undefined when the caller already
+ * set CODEX_CLI_PATH or no installed Codex exists; the helper then resolves it itself.
+ */
+export function resolveOfficialWindowsCodex(options: ResolveOfficialWindowsClientOptions & { env?: NodeJS.ProcessEnv } = {}): string | undefined {
+	const runSync = options.runSync ?? productionRunSync;
+	const config = options.configPath ? readOfficialPathConfig(options.configPath) : {};
+	let candidate: string | undefined;
+	if (config.codexPath) {
+		candidate = path.resolve(config.codexPath);
+		if (!existsSync(candidate)) {
+			throw new BrokerVerificationError(`Codex was not found. Checked: ${candidate}. Set "codexPath" to the OpenAI-signed codex.exe in ${options.configPath}.`);
+		}
+	} else {
+		if ((options.env ?? process.env)[CODEX_CLI_PATH_ENV]) return undefined;
+		const userHome = options.userHome ?? os.userInfo().homedir;
+		candidate = installedCodexCandidates(path.join(existsSync(userHome) ? realpathSync(userHome) : path.resolve(userHome), CODEX_BIN_RELATIVE_PATH))[0];
+		if (candidate === undefined) return undefined;
+	}
+	const codexPath = realpathSync(candidate);
+	verifyAuthenticodeBinary(codexPath, runSync);
+	return codexPath;
+}
+
 export function verifyOfficialWindowsBroker(options: ResolveOfficialWindowsClientOptions = {}) {
 	const client = resolveOfficialWindowsClient(options);
+	const codexPath = resolveOfficialWindowsCodex(options);
 	const clientBuild = createHash("sha256").update(readFileSync(client.clientPath)).digest("hex").slice(0, 16);
-	return { brokerVersion: `${SKY_PACKAGE_NAME} ${client.version}`, clientBuild, client };
+	return { brokerVersion: `${SKY_PACKAGE_NAME} ${client.version}`, clientBuild, client, codexPath };
 }
 
 /** The official `WindowsComputerUseClient` surface this broker uses; results are the official JSON values. */
@@ -231,7 +290,12 @@ export interface WindowsSkyRuntime {
 	endTurn(turnMeta: JsonObject): Promise<void>;
 }
 
-type WindowsSkyTransportConstructor = new (options: { helperCommand: string; helperArgs: string[]; timeoutMs?: number }) => WindowsSkyTransport;
+type WindowsSkyTransportConstructor = new (options: {
+	helperCommand: string;
+	helperArgs: string[];
+	helperEnv: Record<string, string> | undefined;
+	timeoutMs?: number;
+}) => WindowsSkyTransport;
 type WindowsSkyClientConstructor = new (options: { transport: WindowsSkyTransport }) => WindowsSkyClient;
 
 export interface WindowsBrokerOptions extends Pick<DirectBrokerOptions, "timeoutMs" | "signal" | "onElicitation" | "supportsOpenAiFormElicitation" | "configPath"> {
@@ -243,7 +307,7 @@ export interface WindowsBrokerOptions extends Pick<DirectBrokerOptions, "timeout
 	turnIdleMs?: number;
 }
 
-async function loadOfficialRuntime(client: OfficialWindowsClient): Promise<WindowsSkyRuntime> {
+async function loadOfficialRuntime(client: OfficialWindowsClient, codexPath: string | undefined): Promise<WindowsSkyRuntime> {
 	const moduleUrl = (relativePath: string) => pathToFileURL(path.join(client.packagePath, relativePath)).href;
 	const transportModule = transportModuleSchema.safeParse(await import(moduleUrl(TRANSPORT_MODULE_RELATIVE_PATH)));
 	const clientModule = clientModuleSchema.safeParse(await import(moduleUrl(CLIENT_MODULE_RELATIVE_PATH)));
@@ -259,6 +323,8 @@ async function loadOfficialRuntime(client: OfficialWindowsClient): Promise<Windo
 	const transport = new WindowsHelperTransport({
 		helperCommand: client.clientPath,
 		helperArgs: ["--parent-pid", String(process.pid)],
+		// The official transport adds helperEnv to this process's environment; undefined inherits it unchanged.
+		helperEnv: codexPath === undefined ? undefined : { [CODEX_CLI_PATH_ENV]: codexPath },
 		timeoutMs: 60_000,
 	});
 	return {
@@ -454,7 +520,7 @@ const transportFailurePattern = /helper exited|helper .*timed out|client is clos
 
 export async function createOfficialWindowsToolSession(options: WindowsBrokerOptions = {}): Promise<OfficialDirectToolSession> {
 	const verification = options.skipSignatureVerification
-		? { brokerVersion: "test-sky", clientBuild: "test-helper", client: undefined }
+		? { brokerVersion: "test-sky", clientBuild: "test-helper", client: undefined, codexPath: undefined }
 		: verifyOfficialWindowsBroker({ configPath: options.configPath });
 	const evidence = { brokerVersion: verification.brokerVersion, clientBuild: verification.clientBuild };
 	let runtime: WindowsSkyRuntime;
@@ -464,7 +530,7 @@ export async function createOfficialWindowsToolSession(options: WindowsBrokerOpt
 		installNodeReplHostShim();
 		nodeReplHostShim.requestMeta = turnMeta;
 		if (options.loadRuntime) runtime = await options.loadRuntime();
-		else if (verification.client) runtime = await loadOfficialRuntime(verification.client);
+		else if (verification.client) runtime = await loadOfficialRuntime(verification.client, verification.codexPath);
 		else throw new BrokerVerificationError("The official Windows Computer Use client was not verified");
 	} catch (error) {
 		const primary = error instanceof Error ? error : new Error(String(error));

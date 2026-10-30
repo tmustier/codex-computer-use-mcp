@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
@@ -17,7 +18,6 @@ const COMPUTER_USE_PLUGIN_ROOT =
 	"/Applications/ChatGPT.app/Contents/Resources/plugins/openai-bundled/plugins/computer-use";
 const COMPUTER_USE_APP_RELATIVE_PATH = "computer-use/Codex Computer Use.app";
 const CLIENT_RELATIVE_PATH = "Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient";
-const COMPUTER_USE_CLIENT_PATH = path.join(os.userInfo().homedir, ".codex", COMPUTER_USE_APP_RELATIVE_PATH, CLIENT_RELATIVE_PATH);
 const OPENAI_TEAM_ID = "2DC432GLL2";
 
 const jsonObjectSchema = z.record(z.string(), z.json());
@@ -301,33 +301,6 @@ function normalizeBrokerError(error: Error, stderr: string): Error {
 	return /authentication|bearer|token/i.test(`${error.message}\n${stderr}`)
 		? new Error("Official direct Computer Use broker reported an authentication failure", { cause: error })
 		: error;
-}
-
-export function buildDirectAppServerArgs(mcpCwd = COMPUTER_USE_PLUGIN_ROOT, clientPath = COMPUTER_USE_CLIENT_PATH): string[] {
-	const mcpTable = `{"computer-use" = { command = ${JSON.stringify(clientPath)}, args = ["mcp"], cwd = ${JSON.stringify(mcpCwd)}, enabled = true, startup_timeout_sec = 30, tool_timeout_sec = 120 }}`;
-	const disabledProvider = '{ name = "Direct dispatch disabled provider", base_url = "http://127.0.0.1:9/v1", wire_api = "responses", request_max_retries = 0, stream_max_retries = 0, supports_websockets = false, requires_openai_auth = false }';
-	return [
-		"-c", 'model_provider="direct_disabled"',
-		"-c", 'model="direct-disabled"',
-		"-c", `model_providers.direct_disabled=${disabledProvider}`,
-		"-c", "features.shell_tool=false",
-		"-c", "features.unified_exec=false",
-		"-c", "features.multi_agent=false",
-		"-c", "features.memories=false",
-		"-c", "memories.use_memories=false",
-		"-c", "memories.generate_memories=false",
-		"-c", "features.remote_plugin=false",
-		"-c", "features.plugins=false",
-		"-c", "features.remote_control=false",
-		"-c", "features.hooks=false",
-		"-c", "analytics.enabled=false",
-		"-c", 'otel.exporter="none"',
-		"-c", 'web_search="disabled"',
-		"-c", 'history.persistence="none"',
-		"-c", `mcp_servers=${mcpTable}`,
-		"-c", "plugins={}",
-		"app-server", "--stdio",
-	];
 }
 
 function processExists(pid: number): boolean {
@@ -660,8 +633,31 @@ export async function createOfficialDirectToolSession(
 		if (!command) throw new BrokerVerificationError("The Codex app-server was not verified");
 		let commandArgs = options.appServerArgs;
 		if (!commandArgs) {
-			if (!verification.client) throw new BrokerVerificationError("The official Computer Use client was not verified");
-			commandArgs = buildDirectAppServerArgs(workDir, verification.client.clientPath);
+			assert(verification.client && verification.codexPath, "Test brokers must supply appServerArgs");
+			const mcpTable = `{"computer-use" = { command = ${JSON.stringify(verification.client.clientPath)}, args = ["mcp"], cwd = ${JSON.stringify(workDir)}, enabled = true, startup_timeout_sec = 30, tool_timeout_sec = 120, env = { CODEX_CLI_PATH = ${JSON.stringify(verification.codexPath)} } }}`;
+			const disabledProvider = '{ name = "Direct dispatch disabled provider", base_url = "http://127.0.0.1:9/v1", wire_api = "responses", request_max_retries = 0, stream_max_retries = 0, supports_websockets = false, requires_openai_auth = false }';
+			commandArgs = [
+				"-c", 'model_provider="direct_disabled"',
+				"-c", 'model="direct-disabled"',
+				"-c", `model_providers.direct_disabled=${disabledProvider}`,
+				"-c", "features.shell_tool=false",
+				"-c", "features.unified_exec=false",
+				"-c", "features.multi_agent=false",
+				"-c", "features.memories=false",
+				"-c", "memories.use_memories=false",
+				"-c", "memories.generate_memories=false",
+				"-c", "features.remote_plugin=false",
+				"-c", "features.plugins=false",
+				"-c", "features.remote_control=false",
+				"-c", "features.hooks=false",
+				"-c", "analytics.enabled=false",
+				"-c", 'otel.exporter="none"',
+				"-c", 'web_search="disabled"',
+				"-c", 'history.persistence="none"',
+				"-c", `mcp_servers=${mcpTable}`,
+				"-c", "plugins={}",
+				"app-server", "--stdio",
+			];
 		}
 		proc = spawn(command, commandArgs, {
 			cwd: workDir,

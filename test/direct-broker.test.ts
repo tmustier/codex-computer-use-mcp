@@ -9,7 +9,7 @@ import test from "node:test";
 // The macOS app-server transport fixtures rely on process groups, pgrep and lsof.
 const macTest = process.platform === "darwin" ? test : test.skip;
 import { z } from "zod";
-import { buildDirectAppServerArgs, callOfficialDirectTool, createOfficialDirectToolSession, DirectBrokerCallError } from "../src/direct-broker.ts";
+import { callOfficialDirectTool, createOfficialDirectToolSession, DirectBrokerCallError } from "../src/direct-broker.ts";
 import packageMetadata from "../package.json" with { type: "json" };
 
 const packageVersion = packageMetadata.version;
@@ -93,18 +93,6 @@ async function waitForChildPid(log: string): Promise<number> {
 	}
 	throw new Error("Fake app-server did not report its child process");
 }
-
-macTest("production app-server args disable model transport, plugins, and remote control", () => {
-	const serialized = buildDirectAppServerArgs().join(" ");
-	assert.match(serialized, /model_provider="direct_disabled"/);
-	assert.match(serialized, /127\.0\.0\.1:9\/v1/);
-	assert.match(serialized, /supports_websockets = false/);
-	assert.match(serialized, /features\.plugins=false/);
-	assert.match(serialized, /features\.remote_control=false/);
-	assert.match(serialized, /app-server --stdio$/);
-	assert.doesNotMatch(serialized, /\bexec\b/);
-	assert.match(buildDirectAppServerArgs("/tmp/private-broker-work").join(" "), /cwd = "\/tmp\/private-broker-work"/);
-});
 
 macTest("direct broker isolates credentials and ends its native turn through a signed zero-turn command", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-test."));

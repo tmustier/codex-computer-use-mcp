@@ -46,7 +46,7 @@ export interface ComputerUsePlatform {
 	opensSession(method: DirectMethod): boolean;
 	createSession(options: SessionOptions): Promise<OfficialDirectToolSession>;
 	callTool(method: DirectMethod, args: DirectToolArguments, options: CallOptions): Promise<DirectBrokerResult>;
-	verify(configPath: string): { brokerVersion: string; clientBuild: string };
+	verify(configPath: string): { brokerVersion: string; clientBuild: string; codexPath?: string | undefined };
 }
 
 export const MAC_PLATFORM: ComputerUsePlatform = {
