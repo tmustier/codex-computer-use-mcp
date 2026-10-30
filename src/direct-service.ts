@@ -4,25 +4,17 @@ import path from "node:path";
 import { z } from "zod";
 import { appendAudit, type AuditRecord } from "./audit.ts";
 import {
-	callOfficialDirectTool,
 	DirectBrokerCallError,
 	pathConfigFile,
-	verifyOfficialDirectBroker,
 	type DirectBrokerElicitationRequest,
 	type DirectBrokerElicitationResponse,
 	type DirectBrokerResult,
 } from "./direct-broker.ts";
-import {
-	COMPUTER_USE_METHODS,
-	validateDirectArguments,
-	type DirectMethod,
-	type DirectToolArguments,
-	type JsonObject,
-	type JsonValue,
-} from "./tools.ts";
+import { hostPlatform, type ComputerUsePlatform } from "./platform.ts";
+import type { DirectMethod, DirectToolArguments, JsonObject, JsonValue } from "./tools.ts";
 
 const requestSchema = z.object({
-	method: z.enum(COMPUTER_USE_METHODS),
+	method: z.string(),
 	arguments: z.record(z.string(), z.json()).default({}),
 });
 interface DirectRequest {
@@ -43,7 +35,9 @@ export interface DirectServiceDependencies {
 		request: DirectBrokerElicitationRequest,
 	) => DirectBrokerElicitationResponse | Promise<DirectBrokerElicitationResponse>;
 	supportsOpenAiFormElicitation?: boolean;
-	callTool?: typeof callOfficialDirectTool;
+	callTool?: ComputerUsePlatform["callTool"];
+	/** Official transport to dispatch through; defaults to the host platform. */
+	platform?: ComputerUsePlatform;
 }
 
 export function defaultStateRoot(): string {
@@ -53,6 +47,17 @@ export function defaultStateRoot(): string {
 function auditAppIdentifier(app?: string): string | null {
 	if (!app) return null;
 	return `target-sha256:${crypto.createHash("sha256").update(app).digest("hex").slice(0, 16)}`;
+}
+
+// macOS methods name the app directly; Windows methods carry it inside the window object.
+const auditTargetSchema = z.union([
+	z.object({ app: z.string() }).transform((value) => value.app),
+	z.object({ window: z.object({ app: z.string() }) }).transform((value) => value.window.app),
+]);
+
+function auditTarget(args: DirectToolArguments): string | undefined {
+	const target = auditTargetSchema.safeParse(args);
+	return target.success ? target.data : undefined;
 }
 
 function inputByteCount(value: JsonValue): number {
@@ -66,14 +71,16 @@ function contentMetadata(content: JsonObject[]) {
 
 export async function executeDirectTool(raw: JsonValue, deps: DirectServiceDependencies = {}): Promise<DirectResponse> {
 	const stateRoot = deps.stateRoot ?? defaultStateRoot();
+	const platform = deps.platform ?? hostPlatform();
 	const runId = crypto.randomUUID();
 	const startedAt = Date.now();
 	let request: DirectRequest;
 	try {
 		const envelope = requestSchema.parse(raw);
+		if (!platform.isMethod(envelope.method)) throw new Error(`Unknown method: ${envelope.method}`);
 		request = {
 			method: envelope.method,
-			arguments: validateDirectArguments(envelope.method, envelope.arguments),
+			arguments: platform.validateArguments(envelope.method, envelope.arguments),
 		};
 	} catch {
 		await appendAudit(stateRoot, {
@@ -97,7 +104,7 @@ export async function executeDirectTool(raw: JsonValue, deps: DirectServiceDepen
 		throw new Error("Direct Computer Use request did not match a tool schema");
 	}
 
-	const app = request.method === "list_apps" ? undefined : String(request.arguments.app);
+	const app = auditTarget(request.arguments);
 	let broker: DirectBrokerResult | undefined;
 	let brokerFailure: DirectBrokerCallError | undefined;
 	let outcome = "broker_failed";
@@ -105,7 +112,7 @@ export async function executeDirectTool(raw: JsonValue, deps: DirectServiceDepen
 	let failure: Error | undefined;
 
 	try {
-		broker = await (deps.callTool ?? callOfficialDirectTool)(request.method, request.arguments, {
+		broker = await (deps.callTool ?? platform.callTool)(request.method, request.arguments, {
 			signal: deps.signal,
 			timeoutMs: 120_000,
 			onElicitation: deps.onElicitation,
@@ -155,23 +162,26 @@ export async function executeDirectTool(raw: JsonValue, deps: DirectServiceDepen
 
 type DirectStatus = {
 	stateRoot: string;
+	platform: ComputerUsePlatform["name"];
 	permissionMode: "no-permissions";
 	configPath: string;
 	methods: DirectMethod[];
 } & (
-	| { brokerVerified: true; brokerVersion: string; clientBuild: string; codexPath: string }
+	// The Windows helper finds Codex itself when no installed Codex is verified for it.
+	| { brokerVerified: true; brokerVersion: string; clientBuild: string; codexPath?: string | undefined }
 	| { brokerVerified: false; brokerError: string }
 );
 
-export function getDirectStatus(stateRoot = defaultStateRoot()): DirectStatus {
+export function getDirectStatus(stateRoot = defaultStateRoot(), platform = hostPlatform()): DirectStatus {
 	const status = {
 		stateRoot,
+		platform: platform.name,
 		configPath: pathConfigFile(stateRoot),
 		permissionMode: "no-permissions" as const,
-		methods: [...COMPUTER_USE_METHODS],
+		methods: [...platform.methods],
 	};
 	try {
-		const { codexPath, brokerVersion, clientBuild } = verifyOfficialDirectBroker({ configPath: status.configPath });
+		const { codexPath, brokerVersion, clientBuild } = platform.verify(status.configPath);
 		return { ...status, brokerVerified: true, codexPath, brokerVersion, clientBuild };
 	} catch (error) {
 		return { ...status, brokerVerified: false, brokerError: error instanceof Error ? error.message : String(error) };

@@ -1,19 +1,17 @@
-import {
-	createOfficialDirectToolSession,
-	pathConfigFile,
-	type OfficialDirectToolSession,
-} from "./direct-broker.ts";
+import { pathConfigFile, type OfficialDirectToolSession } from "./direct-broker.ts";
 import {
 	defaultStateRoot,
 	executeDirectTool,
 	type DirectResponse,
 	type DirectServiceDependencies,
 } from "./direct-service.ts";
+import { hostPlatform, type ComputerUsePlatform } from "./platform.ts";
 import type { DirectMethod, DirectToolArguments } from "./tools.ts";
 
 interface DirectSessionExecutorDependencies {
-	createSession?: typeof createOfficialDirectToolSession;
+	createSession?: ComputerUsePlatform["createSession"];
 	idleTimeoutMs?: number;
+	platform?: ComputerUsePlatform;
 }
 
 export class DirectSessionExecutor {
@@ -72,23 +70,25 @@ export class DirectSessionExecutor {
 				throw failure;
 			}
 			this.clearIdleTimer();
+			const platform = dependencies.platform ?? this.dependencies.platform ?? hostPlatform();
+			const serviceDependencies: DirectServiceDependencies = { ...dependencies, platform };
 			const session = this.session;
 			try {
 				const response = await executeDirectTool(
 					{ method, arguments: params },
 					session ? {
-						...dependencies,
+						...serviceDependencies,
 						callTool: (directMethod, args, options) => session.call(directMethod, args, options),
-					} : method === "get_app_state" ? {
-						...dependencies,
+					} : platform.opensSession(method) ? {
+						...serviceDependencies,
 						callTool: async (directMethod, args, options) => {
-							this.session = await (this.dependencies.createSession ?? createOfficialDirectToolSession)({
+							this.session = await (this.dependencies.createSession ?? platform.createSession)({
 								supportsOpenAiFormElicitation: dependencies.supportsOpenAiFormElicitation === true,
 								configPath: pathConfigFile(dependencies.stateRoot ?? defaultStateRoot()),
 							});
 							return this.session.call(directMethod, args, options);
 						},
-					} : dependencies,
+					} : serviceDependencies,
 				);
 				if (response.isError) await this.closeSession();
 				else this.scheduleIdleClose();

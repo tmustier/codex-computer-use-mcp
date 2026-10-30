@@ -8,8 +8,9 @@ import test from "node:test";
 
 const broker = await import("../src/direct-broker.ts");
 const service = await import("../src/direct-service.ts");
+const macTest = process.platform === "darwin" ? test : test.skip;
 
-test("the nested Computer Use server receives only the verified Codex path", async (t) => {
+macTest("the nested Computer Use server receives only the verified Codex path", async (t) => {
 	const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "cu-nested-codex.")));
 	const previous = process.env.CODEX_CLI_PATH;
 	try {

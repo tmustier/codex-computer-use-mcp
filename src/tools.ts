@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { WindowsDirectMethod } from "./windows-tools.ts";
 
 type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | JsonObject;
@@ -23,7 +24,9 @@ export const COMPUTER_USE_METHODS = [
 	"type_text",
 ] as const;
 
-export type DirectMethod = typeof COMPUTER_USE_METHODS[number];
+export type MacDirectMethod = typeof COMPUTER_USE_METHODS[number];
+/** Any official method on a supported platform; the active platform decides which are registered. */
+export type DirectMethod = MacDirectMethod | WindowsDirectMethod;
 export type DirectToolArguments = JsonObject;
 
 const DIRECT_TOOL_SCHEMAS = {
@@ -70,9 +73,9 @@ const DIRECT_TOOL_SCHEMAS = {
 	}).catchall(additionalArgument),
 	press_key: z.object({ app, key: z.string().describe("Key or key combination to press") }).catchall(additionalArgument),
 	type_text: z.object({ app, text: z.string().describe("Literal text to type") }).catchall(additionalArgument),
-} satisfies Record<DirectMethod, z.ZodType>;
+} satisfies Record<MacDirectMethod, z.ZodType>;
 
-interface ToolMetadata {
+export interface ToolMetadata {
 	description: string;
 	annotations: {
 		destructiveHint: boolean;
@@ -136,15 +139,15 @@ export const TOOL_METADATA = {
 		description: "Type literal text using keyboard input",
 		annotations: actionAnnotations,
 	},
-} satisfies Record<DirectMethod, ToolMetadata>;
+} satisfies Record<MacDirectMethod, ToolMetadata>;
 
 const methodNames = new Set<string>(COMPUTER_USE_METHODS);
 
-export function isDirectMethod(value: string): value is DirectMethod {
+export function isDirectMethod(value: string): value is MacDirectMethod {
 	return methodNames.has(value);
 }
 
-export function validateDirectArguments(method: DirectMethod, value: JsonObject): DirectToolArguments {
+export function validateDirectArguments(method: MacDirectMethod, value: JsonObject): DirectToolArguments {
 	return DIRECT_TOOL_SCHEMAS[method].parse(value);
 }
 
@@ -152,6 +155,8 @@ function inputSchema(schema: z.ZodType) {
 	const { $schema: _schema, ...result } = z.toJSONSchema(schema);
 	return result;
 }
+
+export type ToolInputSchema = ReturnType<typeof inputSchema>;
 
 export const TOOL_INPUT_SCHEMAS = {
 	list_apps: inputSchema(DIRECT_TOOL_SCHEMAS.list_apps),
@@ -164,4 +169,4 @@ export const TOOL_INPUT_SCHEMAS = {
 	drag: inputSchema(DIRECT_TOOL_SCHEMAS.drag),
 	press_key: inputSchema(DIRECT_TOOL_SCHEMAS.press_key),
 	type_text: inputSchema(DIRECT_TOOL_SCHEMAS.type_text),
-} satisfies Record<DirectMethod, ReturnType<typeof inputSchema>>;
+} satisfies Record<MacDirectMethod, ToolInputSchema>;

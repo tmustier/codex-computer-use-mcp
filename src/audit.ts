@@ -38,7 +38,8 @@ export async function appendAudit(stateDir: string, record: AuditRecord): Promis
 	const auditDir = path.join(stateDir, "audit");
 	await ensurePrivateDirectory(auditDir);
 	const auditPath = path.join(auditDir, "direct-computer-use.jsonl");
-	const flags = constants.O_APPEND | constants.O_CREAT | constants.O_WRONLY | constants.O_NOFOLLOW;
+	// Windows has no O_NOFOLLOW; the lstat checks above still reject symlinked directories there.
+	const flags = constants.O_APPEND | constants.O_CREAT | constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0);
 	const handle = await open(auditPath, flags, 0o600);
 	try {
 		if (!(await handle.stat()).isFile()) throw new Error("Audit target must be a regular file");

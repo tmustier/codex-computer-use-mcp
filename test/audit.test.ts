@@ -29,7 +29,7 @@ test("audit is mode-0600 metadata without arguments, output, or secrets", async 
 	try {
 		await appendAudit(root, record);
 		const auditPath = path.join(root, "audit", "direct-computer-use.jsonl");
-		assert.equal((await stat(auditPath)).mode & 0o777, 0o600);
+		if (process.platform !== "win32") assert.equal((await stat(auditPath)).mode & 0o777, 0o600);
 		const parsed = JSON.parse((await readFile(auditPath, "utf8")).trim());
 		assert.equal(parsed.method, "type_text");
 		assert.equal(parsed.modelTurnsStarted, 0);
@@ -43,7 +43,10 @@ test("audit is mode-0600 metadata without arguments, output, or secrets", async 
 	}
 });
 
-test("audit refuses symlinked state and log targets", async () => {
+// Creating file symlinks on Windows needs Developer Mode or elevation.
+const symlinkTest = process.platform === "win32" ? test.skip : test;
+
+symlinkTest("audit refuses symlinked state and log targets", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-audit-symlink-test."));
 	const outside = path.join(root, "outside.txt");
 	try {

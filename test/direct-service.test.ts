@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { DirectBrokerCallError, type DirectBrokerResult } from "../src/direct-broker.ts";
 import { executeDirectTool, type DirectServiceDependencies } from "../src/direct-service.ts";
+import { MAC_PLATFORM } from "../src/platform.ts";
 import type { DirectMethod, DirectToolArguments } from "../src/tools.ts";
 
 function brokerResult(content = "ok", isError = false): DirectBrokerResult {
@@ -21,7 +22,7 @@ function brokerResult(content = "ok", isError = false): DirectBrokerResult {
 }
 
 function deps(root: string, callTool: DirectServiceDependencies["callTool"]): DirectServiceDependencies {
-	return { stateRoot: root, callTool };
+	return { stateRoot: root, callTool, platform: MAC_PLATFORM };
 }
 
 test("direct service passes official arguments through unchanged", async () => {

@@ -6,10 +6,11 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { z } from "zod";
-import { COMPUTER_USE_METHODS, TOOL_INPUT_SCHEMAS, TOOL_METADATA } from "../src/tools.ts";
+import { hostPlatform } from "../src/platform.ts";
 import packageMetadata from "../package.json" with { type: "json" };
 
 const packageVersion = packageMetadata.version;
+const platform = hostPlatform();
 
 function stringEnvironment(): Record<string, string> {
 	return Object.fromEntries(
@@ -31,14 +32,14 @@ test("stdio MCP exposes the Computer Use tools and status", async () => {
 		await client.connect(transport);
 		assert.deepEqual(client.getServerVersion(), { name: "codex-computer-use-mcp", version: packageVersion });
 		const listed = await client.listTools();
-		assert.deepEqual(listed.tools.map((tool) => tool.name).sort(), [...COMPUTER_USE_METHODS, "computer_use_status"].sort());
-		for (const method of COMPUTER_USE_METHODS) {
+		assert.deepEqual(listed.tools.map((tool) => tool.name).sort(), [...platform.methods, "computer_use_status"].sort());
+		for (const method of platform.methods) {
 			const tool = listed.tools.find((item) => item.name === method);
 			assert.deepEqual(tool, {
 				name: method,
-				description: TOOL_METADATA[method].description,
-				inputSchema: TOOL_INPUT_SCHEMAS[method],
-				annotations: TOOL_METADATA[method].annotations,
+				description: platform.metadata[method].description,
+				inputSchema: platform.inputSchemas[method],
+				annotations: platform.metadata[method].annotations,
 			});
 		}
 
@@ -46,10 +47,11 @@ test("stdio MCP exposes the Computer Use tools and status", async () => {
 		assert.equal(statusResult.isError, undefined);
 		const status = z.object({
 			permissionMode: z.literal("no-permissions"),
-			methods: z.array(z.enum(COMPUTER_USE_METHODS)),
+			platform: z.literal(platform.name),
+			methods: z.array(z.string()),
 			brokerVerified: z.boolean(),
 		}).passthrough().parse(statusResult.structuredContent);
-		assert.deepEqual(status.methods, COMPUTER_USE_METHODS);
+		assert.deepEqual(status.methods, [...platform.methods]);
 		assert.equal(status.brokerVerified, true);
 	} finally {
 		await client.close().catch(() => undefined);

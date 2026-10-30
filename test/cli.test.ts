@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
+import { hostPlatform } from "../src/platform.ts";
 
 const execFileAsync = promisify(execFile);
 const serverPath = path.resolve("src/mcp-server.ts");
@@ -22,7 +23,8 @@ test("CLI exposes durable no-permissions status and no mode-selection route", as
 		const { stdout } = await run(stateRoot, ["--status"]);
 		const status = JSON.parse(stdout);
 		assert.equal(status.permissionMode, "no-permissions");
-		assert.equal(status.methods.length, 10);
+		assert.equal(status.platform, hostPlatform().name);
+		assert.deepEqual(status.methods, [...hostPlatform().methods]);
 
 		await assert.rejects(run(stateRoot, ["--configure", "safe"]), /Usage:/);
 		await assert.rejects(access(path.join(stateRoot, "config.json")));

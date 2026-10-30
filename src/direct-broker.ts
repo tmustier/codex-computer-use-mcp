@@ -85,7 +85,7 @@ export interface DirectBrokerOptions {
 	configPath?: string;
 }
 
-class BrokerVerificationError extends Error {
+export class BrokerVerificationError extends Error {
 	constructor(message: string) {
 		super(message);
 		this.name = "BrokerVerificationError";
@@ -125,13 +125,13 @@ export class DirectBrokerCallError extends Error {
 	}
 }
 
-interface CommandResult {
+export interface CommandResult {
 	status: number | null;
 	stdout?: string;
 	stderr?: string;
 }
 
-type RunSync = (command: string, args: string[]) => CommandResult;
+export type RunSync = (command: string, args: string[]) => CommandResult;
 
 function productionRunSync(command: string, args: string[]): CommandResult {
 	return spawnSync(command, args, { encoding: "utf8", timeout: 10_000 });

@@ -16,14 +16,9 @@ import {
   type DirectBrokerElicitationRequest,
   type DirectBrokerElicitationResponse,
 } from "../../dist/direct-broker.js";
+import { hostPlatform, type ComputerUsePlatform } from "../../dist/platform.js";
 import { DirectSessionExecutor } from "../../dist/session-executor.js";
-import {
-  COMPUTER_USE_METHODS,
-  TOOL_INPUT_SCHEMAS,
-  TOOL_METADATA,
-  type DirectMethod,
-  type JsonObject,
-} from "../../dist/tools.js";
+import { type DirectMethod, type JsonObject } from "../../dist/tools.js";
 
 const jsonObjectSchema = z.record(z.string(), z.json());
 
@@ -44,9 +39,44 @@ Calls run one at a time, in the order the script makes them.
 list_apps resolves to the official text inventory. A failed call rejects with the official error text.`,
 };
 
+export const WINDOWS_COMPUTER_USE_NAMESPACE: ToolNamespace = {
+  name: "computer_use",
+  description: "OpenAI's official signed Windows Computer Use. Pick a window from list_apps or list_windows, call get_window_state for it before acting, run known actions in sequence, then call get_window_state again before deciding the next step.",
+  instructions: `Compose these tools in codemode scripts:
+
+const { apps } = await tools.computer_use_list_apps({});
+const window = apps.find((app) => app.displayName === "Notepad")?.windows[0];
+const state = await tools.computer_use_get_window_state({ window, include_text: true });
+text(state.accessibility?.tree ?? "");
+for (const shot of state.screenshots) if (shot.image) image(shot.image);
+await tools.computer_use_click({ window, element_index: 7 });
+await tools.computer_use_type_text({ window, text: "hello" });
+
+list_apps resolves to { apps } and list_windows to { windows }. A window is { app, id, title }; pass it unchanged as the window argument of later calls, and use launch_app for an app without an open window.
+get_window_state resolves to { window, accessibility, screenshots }. accessibility.tree is the indexed element tree when include_text is true; each screenshot carries an image block for image() plus its id, size and origin. Take element_index values from the latest get_window_state, and inspect again after acting.
+scroll takes a window-relative x, y start point and scrollX, scrollY deltas. press_key uses keysym names such as Return, Tab or Control_L+a.
+Calls run one at a time, in the order the script makes them. The first use of an app asks for approval in Pi. A failed call rejects with the official error text.
+Computer Use holds the desktop during a turn, which ends when the agent settles or after 15 s without calls; element indexes are valid within one turn, so inspect again before acting after a pause.`,
+};
+
+export function computerUseNamespace(platform: ComputerUsePlatform): ToolNamespace {
+  return platform.name === "windows" ? WINDOWS_COMPUTER_USE_NAMESPACE : COMPUTER_USE_NAMESPACE;
+}
+
 export function computerUseToolName(method: DirectMethod): string {
   return `computer_use_${method}`;
 }
+
+const imageBlockSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["type", "data", "mimeType"],
+  properties: {
+    type: { type: "string", const: "image" },
+    data: { type: "string" },
+    mimeType: { type: "string" },
+  },
+} as const;
 
 const appStateOutputSchema = {
   type: "object",
@@ -55,23 +85,104 @@ const appStateOutputSchema = {
   properties: {
     app: { type: "string" },
     text: { type: "string", description: "Accessibility tree, or a diff after the first inspection" },
-    screenshot: {
+    screenshot: { anyOf: [imageBlockSchema, { type: "null" }] },
+  },
+} as const;
+
+const windowSchema = {
+  type: "object",
+  required: ["app", "id"],
+  properties: {
+    app: { type: "string", description: "App identifier that owns the window" },
+    id: { type: "integer", description: "Opaque window identifier" },
+    title: { type: "string" },
+  },
+} as const;
+
+const windowStateOutputSchema = {
+  type: "object",
+  required: ["window", "accessibility", "screenshots"],
+  properties: {
+    window: windowSchema,
+    accessibility: {
       anyOf: [
         {
           type: "object",
-          additionalProperties: false,
-          required: ["type", "data", "mimeType"],
+          required: ["tree"],
           properties: {
-            type: { type: "string", const: "image" },
-            data: { type: "string" },
-            mimeType: { type: "string" },
+            tree: { type: "string", description: "Indexed accessibility tree" },
+            focused_element: { type: "string" },
+            selected_text: { type: "string" },
+            selected_elements: { type: "array", items: { type: "string" } },
+            document_text: { type: "string" },
           },
         },
         { type: "null" },
       ],
     },
+    screenshots: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "image"],
+        properties: {
+          id: { type: "string" },
+          zIndex: { type: "number" },
+          width: { type: "number" },
+          height: { type: "number" },
+          originX: { type: "number" },
+          originY: { type: "number" },
+          image: { anyOf: [imageBlockSchema, { type: "null" }] },
+        },
+      },
+    },
   },
 } as const;
+
+const appListOutputSchema = {
+  type: "object",
+  required: ["apps"],
+  properties: {
+    apps: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id"],
+        properties: {
+          id: { type: "string" },
+          displayName: { type: "string" },
+          isRunning: { type: "boolean" },
+          lastUsedDate: { type: "string" },
+          useCount: { type: "number" },
+          windows: { type: "array", items: windowSchema },
+        },
+      },
+    },
+  },
+} as const;
+
+const windowListOutputSchema = {
+  type: "object",
+  required: ["windows"],
+  properties: { windows: { type: "array", items: windowSchema } },
+} as const;
+
+const windowOutputSchema = {
+  type: "object",
+  required: ["window"],
+  properties: { window: windowSchema },
+} as const;
+
+function outputSchemaFor(platform: ComputerUsePlatform, method: DirectMethod): object | undefined {
+  if (platform.name !== "windows") return method === "get_app_state" ? appStateOutputSchema : undefined;
+  switch (method) {
+    case "get_window_state": return windowStateOutputSchema;
+    case "list_apps": return appListOutputSchema;
+    case "list_windows": return windowListOutputSchema;
+    case "get_window": return windowOutputSchema;
+    default: return undefined;
+  }
+}
 
 interface PiContentResult {
   content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>;
@@ -129,6 +240,22 @@ interface PiElicitationContext {
   };
 }
 
+const approvalPersistLabels = new Map([
+  ["session", "Allow for this session"],
+  ["always", "Always allow"],
+]);
+const approvalSchema = z.object({
+  properties: z.object({ persist: z.object({ enum: z.array(z.string().min(1)).min(1) }) }),
+});
+
+/** The Windows helper asks the host to approve each app; the answer carries the chosen persistence. */
+function approvalPersistOptions(request: DirectBrokerElicitationRequest): string[] | undefined {
+  const meta = jsonObjectSchema.safeParse(request._meta);
+  if (!meta.success || meta.data.codex_approval_kind === undefined) return undefined;
+  const schema = approvalSchema.safeParse(request.requestedSchema);
+  return schema.success ? schema.data.properties.persist.enum : undefined;
+}
+
 export async function handleOfficialElicitation(
   request: DirectBrokerElicitationRequest,
   ctx: PiElicitationContext,
@@ -152,6 +279,15 @@ export async function handleOfficialElicitation(
   if (request.mode !== undefined && request.mode !== "form" && request.mode !== "openai/form") {
     ctx.ui.notify(`Official Computer Use sent an unsupported elicitation mode: ${request.mode}`, "warning");
     return { action: "cancel" };
+  }
+  const persistOptions = request.mode === "openai/form" ? undefined : approvalPersistOptions(request);
+  if (persistOptions) {
+    const labels = persistOptions.map((option) => approvalPersistLabels.get(option) ?? `Allow (${option})`);
+    const choice = await ctx.ui.select(message, [...labels, "Decline", "Cancel"]);
+    if (choice === "Decline") return { action: "decline" };
+    const index = choice === undefined ? -1 : labels.indexOf(choice);
+    if (index < 0) return { action: "cancel" };
+    return { action: "accept", content: { persist: persistOptions[index] } };
   }
   const openAiForm = request.mode === "openai/form";
   if (request.requestedSchema === undefined || (!openAiForm && !jsonObjectSchema.safeParse(request.requestedSchema).success)) {
@@ -178,40 +314,49 @@ export async function handleOfficialElicitation(
 
 type ComputerUseSession = Pick<DirectSessionExecutor, "execute" | "close">;
 
-export default function directComputerUse(pi: ExtensionAPI, session: ComputerUseSession = new DirectSessionExecutor()) {
+export default function directComputerUse(
+  pi: ExtensionAPI,
+  session: ComputerUseSession = new DirectSessionExecutor(),
+  platform: ComputerUsePlatform = hostPlatform(),
+) {
   const stateRoot = process.env.CODEX_COMPUTER_USE_HOME || path.join(getAgentDir(), "direct-computer-use");
-  const toolNames = COMPUTER_USE_METHODS.map(computerUseToolName);
+  const toolNames = platform.methods.map(computerUseToolName);
+  const namespace = computerUseNamespace(platform);
+  const openUrl = async (url: string, signal: AbortSignal | undefined): Promise<boolean> => {
+    const [command, args] = process.platform === "win32"
+      ? ["rundll32.exe", ["url.dll,FileProtocolHandler", url]]
+      : ["/usr/bin/open", ["--", url]];
+    return (await pi.exec(command, args, { signal, timeout: 15_000 })).code === 0;
+  };
 
   pi.registerCommand("computer-use-status", {
     description: "Show Computer Use status",
     handler: async (_args, ctx) => {
-      ctx.ui.notify(JSON.stringify(getDirectStatus(stateRoot), null, 2), "info");
+      ctx.ui.notify(JSON.stringify(getDirectStatus(stateRoot, platform), null, 2), "info");
     },
   });
 
-  for (const method of COMPUTER_USE_METHODS) {
+  for (const method of platform.methods) {
+    const outputSchema = outputSchemaFor(platform, method);
     pi.registerTool({
       name: computerUseToolName(method),
       label: `Computer Use ${method}`,
-      description: TOOL_METADATA[method].description,
+      description: platform.metadata[method].description,
       // SAFETY: Pi accepts standard JSON Schema objects as custom-tool parameter schemas.
-      parameters: TOOL_INPUT_SCHEMAS[method] as any,
+      parameters: platform.inputSchemas[method] as any,
       // SAFETY: Pi accepts standard JSON Schema objects as custom-tool output schemas.
-      outputSchema: method === "get_app_state" ? appStateOutputSchema as any : undefined,
+      outputSchema: outputSchema as any,
       exposure: "codemode",
-      namespace: COMPUTER_USE_NAMESPACE,
-      annotations: TOOL_METADATA[method].annotations,
+      namespace,
+      annotations: platform.metadata[method].annotations,
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
         const args = jsonObjectSchema.parse(params);
         const response = await session.execute(method, args, {
           stateRoot,
           signal,
+          platform,
           supportsOpenAiFormElicitation: true,
-          onElicitation: (request) => handleOfficialElicitation(
-            request,
-            ctx,
-            async (url) => (await pi.exec("/usr/bin/open", ["--", url], { signal, timeout: 15_000 })).code === 0,
-          ),
+          onElicitation: (request) => handleOfficialElicitation(request, ctx, (url) => openUrl(url, signal)),
         });
         const text = response.content
           .filter((block) => block.type !== "image")
@@ -221,6 +366,13 @@ export default function directComputerUse(pi: ExtensionAPI, session: ComputerUse
         const rendered = await toPiContent(response.content);
         const details: JsonObject = {};
         if (rendered.fullOutputPath) details.fullOutputPath = rendered.fullOutputPath;
+        if (platform.name === "windows") {
+          // The official JavaScript result is already the structured value.
+          const structured = jsonObjectSchema.safeParse(response.structuredContent);
+          return outputSchema && structured.success
+            ? { content: rendered.content, details, structuredContent: structured.data }
+            : { content: rendered.content, details };
+        }
         if (method !== "get_app_state") return { content: rendered.content, details };
         const screenshot = response.content.find((block) => block.type === "image");
         return {

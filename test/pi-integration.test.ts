@@ -5,11 +5,14 @@ import path from "node:path";
 import test from "node:test";
 import adapter, {
 	COMPUTER_USE_NAMESPACE,
+	WINDOWS_COMPUTER_USE_NAMESPACE,
 	computerUseToolName,
 	handleOfficialElicitation,
 	toPiContent,
 } from "../integrations/pi/index.ts";
 import type { DirectBrokerResult } from "../src/direct-broker.ts";
+import type { DirectServiceDependencies } from "../src/direct-service.ts";
+import { MAC_PLATFORM, WINDOWS_PLATFORM, type ComputerUsePlatform } from "../src/platform.ts";
 import { DirectSessionExecutor } from "../src/session-executor.ts";
 import {
 	COMPUTER_USE_METHODS,
@@ -19,6 +22,7 @@ import {
 	type DirectToolArguments,
 	type JsonValue,
 } from "../src/tools.ts";
+import { approvalElicitation } from "../src/windows-sky-broker.ts";
 
 function brokerResult(text: string): DirectBrokerResult {
 	return {
@@ -145,7 +149,11 @@ interface RegisteredTool {
 	}>;
 }
 
-function loadAdapter(session: { execute: DirectSessionExecutor["execute"]; close(): Promise<void> }, active = ["read"]) {
+function loadAdapter(
+	session: { execute: DirectSessionExecutor["execute"]; close(): Promise<void> },
+	active = ["read"],
+	platform: ComputerUsePlatform = MAC_PLATFORM,
+) {
 	const tools: RegisteredTool[] = [];
 	const commands: string[] = [];
 	const handlers = new Map<string, TestHandler>();
@@ -159,7 +167,7 @@ function loadAdapter(session: { execute: DirectSessionExecutor["execute"]; close
 		setActiveTools() { activeToolsChanged = true; },
 	};
 	// SAFETY: this focused adapter test implements every ExtensionAPI member the adapter uses.
-	adapter(fakePi as any, session);
+	adapter(fakePi as any, session, platform);
 	const tool = (method: DirectMethod) => tools.find((candidate) => candidate.name === computerUseToolName(method))!;
 	return { tools, commands, handlers, tool, activeToolsChanged: () => activeToolsChanged };
 }
@@ -274,6 +282,7 @@ test("broker setup failures remain audited", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "pi-direct-setup-audit-test."));
 	try {
 		const executor = new DirectSessionExecutor({
+			platform: MAC_PLATFORM,
 			createSession: async () => { throw new Error("verified broker setup failed"); },
 		});
 		await assert.rejects(
@@ -292,6 +301,7 @@ test("retained sessions advertise only the caller's elicitation capability", asy
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-session-capability-test."));
 	const advertised: boolean[] = [];
 	const createExecutor = () => new DirectSessionExecutor({
+		platform: MAC_PLATFORM,
 		createSession: async (options) => {
 			advertised.push(options.supportsOpenAiFormElicitation === true);
 			return {
@@ -321,6 +331,7 @@ test("one signed client session supports a multi-action sequence", async () => {
 	let sessionsCreated = 0;
 	let sessionsClosed = 0;
 	const executor = new DirectSessionExecutor({
+		platform: MAC_PLATFORM,
 		createSession: async () => {
 			const session = ++sessionsCreated;
 			return {
@@ -350,6 +361,7 @@ test("idle expiry closes a retained session", async () => {
 	let sessionsClosed = 0;
 	const executor = new DirectSessionExecutor({
 		idleTimeoutMs: 10,
+		platform: MAC_PLATFORM,
 		createSession: async () => ({
 			async call() { return brokerResult("state"); },
 			async close() { sessionsClosed += 1; },
@@ -378,7 +390,7 @@ test("Pi truncates aggregate text to a private spill file without spilling image
 	assert.ok(rendered.fullOutputPath);
 	try {
 		assert.equal(await readFile(rendered.fullOutputPath, "utf8"), original);
-		assert.equal((await stat(rendered.fullOutputPath)).mode & 0o777, 0o600);
+		if (process.platform !== "win32") assert.equal((await stat(rendered.fullOutputPath)).mode & 0o777, 0o600);
 		assert.deepEqual(rendered.content.map((block) => block.type), ["text", "image", "text", "image"]);
 		assert.deepEqual(rendered.content[0], { type: "text", text: first });
 		assert.deepEqual(rendered.content[1], { type: "image", data: "first-image", mimeType: "image/png" });
@@ -389,4 +401,74 @@ test("Pi truncates aggregate text to a private spill file without spilling image
 	} finally {
 		await rm(path.dirname(rendered.fullOutputPath), { recursive: true, force: true });
 	}
+});
+
+test("Pi registers the official Windows methods on Windows hosts and passes structured results through", async () => {
+	const calls: Array<{ method: DirectMethod; args: DirectToolArguments; platform?: ComputerUsePlatform }> = [];
+	const window = { app: "Chrome", id: 7, title: "Tab" };
+	const image = { type: "image", data: "png-data", mimeType: "image/png" };
+	const { tools, tool } = loadAdapter({
+		async execute(method, args, dependencies: DirectServiceDependencies) {
+			calls.push({ method, args, platform: dependencies.platform });
+			if (method === "get_window_state") {
+				return {
+					isError: false,
+					content: [{ type: "text", text: "window: 7 — Chrome" }, image],
+					structuredContent: { window, accessibility: { tree: "[0] Window" }, screenshots: [{ id: "shot-0", zIndex: 0, image }] },
+				};
+			}
+			if (method === "list_apps") return { isError: false, content: [{ type: "text", text: "Chrome" }], structuredContent: { apps: [] } };
+			return { isError: false, content: [{ type: "text", text: "ok" }] };
+		},
+		async close() {},
+	}, ["read"], WINDOWS_PLATFORM);
+	assert.deepEqual(tools.map((item) => item.name), WINDOWS_PLATFORM.methods.map(computerUseToolName));
+	for (const item of tools) {
+		assert.equal(item.namespace, WINDOWS_COMPUTER_USE_NAMESPACE);
+		assert.equal(item.exposure, "codemode");
+	}
+	const structuredMethods = ["list_apps", "list_windows", "get_window", "get_window_state"];
+	assert.deepEqual(
+		tools.filter((item) => item.outputSchema !== undefined).map((item) => item.name),
+		WINDOWS_PLATFORM.methods.filter((method) => structuredMethods.includes(method)).map(computerUseToolName),
+	);
+	assert.match(WINDOWS_COMPUTER_USE_NAMESPACE.instructions ?? "", /tools\.computer_use_get_window_state/);
+
+	const state = await tool("get_window_state").execute("1", { window, include_text: true }, undefined, undefined, headlessContext);
+	assert.deepEqual(state.content, [{ type: "text", text: "window: 7 — Chrome" }, image]);
+	assert.deepEqual(state.structuredContent, { window, accessibility: { tree: "[0] Window" }, screenshots: [{ id: "shot-0", zIndex: 0, image }] });
+	const apps = await tool("list_apps").execute("2", {}, undefined, undefined, headlessContext);
+	assert.deepEqual(apps.structuredContent, { apps: [] });
+	const click = await tool("click").execute("3", { window, element_index: 7 }, undefined, undefined, headlessContext);
+	assert.equal(click.structuredContent, undefined);
+	assert.deepEqual(calls.map((call) => call.method), ["get_window_state", "list_apps", "click"]);
+	assert.deepEqual(calls[2].args, { window, element_index: 7 });
+	assert.equal(calls.every((call) => call.platform === WINDOWS_PLATFORM), true);
+});
+
+test("Pi answers official Windows app approvals with the chosen persistence", async () => {
+	const request = approvalElicitation({
+		message: "Allow Codex to use Notepad?",
+		meta: { codex_approval_kind: "mcp_tool_call", persist: ["session", "always"], tool_params: { app: "notepad.exe" } },
+	});
+	const ask = (answer: string | undefined) => {
+		let title = "";
+		let options: string[] = [];
+		const response = handleOfficialElicitation(request, {
+			hasUI: true,
+			ui: {
+				async select(selectTitle, selectOptions) { title = selectTitle; options = selectOptions; return answer; },
+				async editor() { throw new Error("approvals never open the editor"); },
+				notify() {},
+			},
+		}, async () => false);
+		return response.then((value) => ({ value, title, options }));
+	};
+	const always = await ask("Always allow");
+	assert.equal(always.title, "Allow Codex to use Notepad?");
+	assert.deepEqual(always.options, ["Allow for this session", "Always allow", "Decline", "Cancel"]);
+	assert.deepEqual(always.value, { action: "accept", content: { persist: "always" } });
+	assert.deepEqual((await ask("Allow for this session")).value, { action: "accept", content: { persist: "session" } });
+	assert.deepEqual((await ask("Decline")).value, { action: "decline" });
+	assert.deepEqual((await ask(undefined)).value, { action: "cancel" });
 });
