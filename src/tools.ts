@@ -9,6 +9,7 @@ export interface JsonObject {
 const app = z.string().describe("App name, full app path, or unambiguous bundle identifier");
 const selectTextApp = z.string().describe("App name or bundle identifier");
 const additionalArgument = z.json();
+const elementIndex = z.union([z.string(), z.number().int()]).transform(String);
 
 export const COMPUTER_USE_METHODS = [
 	"list_apps",
@@ -32,24 +33,24 @@ const DIRECT_TOOL_SCHEMAS = {
 	click: z.object({
 		app,
 		click_count: z.number().int().describe("Number of clicks. Defaults to 1").optional(),
-		element_index: z.string().describe("Element index to click").optional(),
+		element_index: elementIndex.describe("Element index to click (string or integer)").optional(),
 		mouse_button: z.enum(["left", "right", "middle"]).describe("Mouse button to click. Defaults to left.").optional(),
 		x: z.number().describe("X coordinate in screenshot pixel coordinates").optional(),
 		y: z.number().describe("Y coordinate in screenshot pixel coordinates").optional(),
 	}).catchall(additionalArgument),
 	perform_secondary_action: z.object({
 		app,
-		element_index: z.string().describe("Element identifier"),
+		element_index: elementIndex.describe("Element identifier (string or integer)"),
 		action: z.string().describe("Secondary accessibility action name"),
 	}).catchall(additionalArgument),
 	set_value: z.object({
 		app,
-		element_index: z.string().describe("Element identifier"),
+		element_index: elementIndex.describe("Element identifier (string or integer)"),
 		value: z.string().describe("Value to assign"),
 	}).catchall(additionalArgument),
 	select_text: z.object({
 		app: selectTextApp,
-		element_index: z.string().describe("Text element identifier"),
+		element_index: elementIndex.describe("Text element identifier (string or integer)"),
 		text: z.string().describe("Target text as shown in the accessibility tree"),
 		prefix: z.string().describe("Optional text immediately before the target, used to disambiguate repeated matches").optional(),
 		selection: z.enum(["text", "cursor_before", "cursor_after"]).describe("Whether to select the text or place the cursor before or after it. Defaults to text.").optional(),
@@ -57,7 +58,7 @@ const DIRECT_TOOL_SCHEMAS = {
 	}).catchall(additionalArgument),
 	scroll: z.object({
 		app,
-		element_index: z.string().describe("Element identifier"),
+		element_index: elementIndex.describe("Element identifier (string or integer)"),
 		direction: z.string().describe("Scroll direction: up, down, left, or right"),
 		pages: z.number().describe("Number of pages to scroll. Fractional values are supported. Defaults to 1").optional(),
 	}).catchall(additionalArgument),
@@ -149,7 +150,7 @@ export function validateDirectArguments(method: DirectMethod, value: JsonObject)
 }
 
 function inputSchema(schema: z.ZodType) {
-	const { $schema: _schema, ...result } = z.toJSONSchema(schema);
+	const { $schema: _schema, ...result } = z.toJSONSchema(schema, { io: "input" });
 	return result;
 }
 

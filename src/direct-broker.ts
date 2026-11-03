@@ -10,12 +10,11 @@ import { z } from "zod";
 import type { DirectMethod, DirectToolArguments, JsonObject, JsonValue } from "./tools.ts";
 import { PACKAGE_VERSION } from "./version.ts";
 
-const DEFAULT_CODEX_PATHS = [
-	"/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
-	"/Applications/ChatGPT.app/Contents/Resources/codex",
+const CODEX_RELATIVE_PATHS = [
+	"Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+	"Contents/Resources/codex",
 ];
-const COMPUTER_USE_PLUGIN_ROOT =
-	"/Applications/ChatGPT.app/Contents/Resources/plugins/openai-bundled/plugins/computer-use";
+const COMPUTER_USE_PLUGIN_RELATIVE_PATH = "Contents/Resources/plugins/openai-bundled/plugins/computer-use";
 const COMPUTER_USE_APP_RELATIVE_PATH = "computer-use/Codex Computer Use.app";
 const CLIENT_RELATIVE_PATH = "Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient";
 const OPENAI_TEAM_ID = "2DC432GLL2";
@@ -183,8 +182,12 @@ export function readOfficialPathConfig(configPath: string): OfficialPathConfig {
 function notFoundError(component: string, checked: string[], key: keyof OfficialPathConfig, hint: string, configPath?: string): BrokerVerificationError {
 	const where = configPath ? `in ${configPath}` : "in the Computer Use config.json in the state directory";
 	return new BrokerVerificationError(
-		`${component} was not found. Checked: ${checked.join(", ")}. ${hint} Then set "${key}" to its absolute path ${where}.`,
+		`${component} was not found. Checked: ${checked.join(", ")}. ${hint} Then set "${key}" to its absolute path ${where}, or remove "${key}" to restore automatic discovery.`,
 	);
+}
+
+function defaultChatGptAppPaths(userHome = os.userInfo().homedir): string[] {
+	return ["/Applications/ChatGPT.app", path.join(userHome, "Applications", "ChatGPT.app")];
 }
 
 interface ResolveOfficialComputerUseClientOptions {
@@ -192,8 +195,8 @@ interface ResolveOfficialComputerUseClientOptions {
 	userHome?: string;
 	/** Test-only legacy root override. */
 	legacyPluginRoot?: string;
-	/** Test-only default Codex locations override. */
-	defaultCodexPaths?: string[];
+	/** Test-only installed ChatGPT app locations override. */
+	chatGptAppPaths?: string[];
 	configPath?: string;
 	runSync?: RunSync;
 }
@@ -219,7 +222,7 @@ function checkedCandidate(appPath: string, clientPath: string, layout: OfficialC
 export function resolveOfficialComputerUseClient(options: ResolveOfficialComputerUseClientOptions = {}): OfficialComputerUseClient {
 	const runSync = options.runSync ?? productionRunSync;
 	const config = options.configPath ? readOfficialPathConfig(options.configPath) : {};
-	const clientHint = "Find the OpenAI-signed \"Codex Computer Use.app\" installed by ChatGPT.";
+	const clientHint = "Install or update the official ChatGPT macOS app (https://chatgpt.com/download), then open it and install its Computer Use component.";
 	if (config.computerUseAppPath) {
 		const configuredApp = existsSync(config.computerUseAppPath) ? realpathSync(config.computerUseAppPath) : path.resolve(config.computerUseAppPath);
 		const configured = checkedCandidate(configuredApp, path.join(configuredApp, CLIENT_RELATIVE_PATH), "configured", runSync);
@@ -232,14 +235,20 @@ export function resolveOfficialComputerUseClient(options: ResolveOfficialCompute
 	const current = checkedCandidate(currentApp, path.join(currentApp, CLIENT_RELATIVE_PATH), "installed-component", runSync);
 	if (current) return current;
 
-	const legacyRoot = options.legacyPluginRoot ?? COMPUTER_USE_PLUGIN_ROOT;
-	const canonicalLegacyRoot = existsSync(legacyRoot) ? realpathSync(legacyRoot) : path.resolve(legacyRoot);
-	const legacyApp = path.join(canonicalLegacyRoot, "Codex Computer Use.app");
-	const legacy = checkedCandidate(legacyApp, path.join(legacyApp, CLIENT_RELATIVE_PATH), "legacy-plugin-bundle", runSync);
-	if (legacy) return legacy;
+	const checked = [path.join(currentApp, CLIENT_RELATIVE_PATH)];
+	const legacyRoots = options.legacyPluginRoot ? [options.legacyPluginRoot]
+		: (options.chatGptAppPaths ?? defaultChatGptAppPaths(userHome)).map((app) => path.join(app, COMPUTER_USE_PLUGIN_RELATIVE_PATH));
+	for (const legacyRoot of legacyRoots) {
+		const canonicalLegacyRoot = existsSync(legacyRoot) ? realpathSync(legacyRoot) : path.resolve(legacyRoot);
+		const legacyApp = path.join(canonicalLegacyRoot, "Codex Computer Use.app");
+		const clientPath = path.join(legacyApp, CLIENT_RELATIVE_PATH);
+		checked.push(clientPath);
+		const legacy = checkedCandidate(legacyApp, clientPath, "legacy-plugin-bundle", runSync);
+		if (legacy) return legacy;
+	}
 	throw notFoundError(
 		"Official Computer Use client",
-		[path.join(currentApp, CLIENT_RELATIVE_PATH), path.join(legacyApp, CLIENT_RELATIVE_PATH)],
+		checked,
 		"computerUseAppPath",
 		clientHint,
 		options.configPath,
@@ -250,14 +259,15 @@ export function resolveOfficialComputerUseClient(options: ResolveOfficialCompute
 export function resolveOfficialCodex(options: ResolveOfficialComputerUseClientOptions = {}): string {
 	const runSync = options.runSync ?? productionRunSync;
 	const config = options.configPath ? readOfficialPathConfig(options.configPath) : {};
-	const candidates = config.codexPath ? [path.resolve(config.codexPath)] : options.defaultCodexPaths ?? DEFAULT_CODEX_PATHS;
+	const candidates = config.codexPath ? [path.resolve(config.codexPath)]
+		: (options.chatGptAppPaths ?? defaultChatGptAppPaths(options.userHome)).flatMap((app) => CODEX_RELATIVE_PATHS.map((relative) => path.join(app, relative)));
 	const found = candidates.find((candidate) => existsSync(candidate));
 	if (!found) {
 		throw notFoundError(
 			"Codex app-server",
 			candidates,
 			"codexPath",
-			"Find the OpenAI-signed \"codex\" executable inside ChatGPT.app.",
+			"Install or update the official ChatGPT macOS app (https://chatgpt.com/download), then open it.",
 			options.configPath,
 		);
 	}

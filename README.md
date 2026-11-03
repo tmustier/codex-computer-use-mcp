@@ -35,6 +35,8 @@ const next = await tools.computer_use_get_app_state({ app: "TextEdit" });
 text(next.text);
 ```
 
+`element_index` accepts a string or a safe integer for all five methods that use it. Integers are converted to strings before reaching the official tools; string identifiers are preserved exactly. Use indices from the latest app state, because actions can invalidate earlier indices.
+
 The extension does not change which tools are active. Turn on `codemode` with `"defaultTools": ["+codemode"]` in `settings.json` or with `pi --tools +codemode`; Pi also turns it on when an MCP server uses `codemode` exposure. When neither `codemode` nor a Computer Use tool is active, the extension shows one notice at the first prompt.
 
 `computer_use_get_app_state` resolves to `{ app, text, screenshot }`, where `screenshot` is an image block for `image()` or `null`. It may return an accessibility-tree diff after the first inspection; pass `disableDiff: true` to request a fresh full tree. `computer_use_list_apps` resolves to the official text inventory produced by the app-server transport; unlike native `@oai/sky`, that transport does not provide the structured app array. Other methods resolve to their official text output. A failed call rejects with the official error text. Calls run one at a time, and calls after `get_app_state` reuse the signed session until the agent settles. The namespace instructions, available from `describeNamespace("computer_use")`, summarise this workflow.
@@ -85,7 +87,7 @@ Audit records contain bounded metadata. They exclude arguments, app content, scr
 
 ### Paths
 
-By default the adapter uses the Codex app-server at `/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex`, falling back to `/Applications/ChatGPT.app/Contents/Resources/codex` on older ChatGPT builds. It uses the Computer Use app at `~/.codex/computer-use/Codex Computer Use.app`, falling back to the copy bundled in older ChatGPT builds.
+By default the adapter checks `/Applications/ChatGPT.app`, then `~/Applications/ChatGPT.app` in the OS account's home directory. In each bundle it looks for `Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex`, then `Contents/Resources/codex` on older ChatGPT builds. It uses the Computer Use app at `~/.codex/computer-use/Codex Computer Use.app`, falling back to the copy bundled in either ChatGPT installation on older builds. It does not use an arbitrary `codex` on `PATH` or the ambient `CODEX_CLI_PATH`.
 
 When ChatGPT is installed elsewhere or moves these files, set either path in `config.json` in the state directory:
 
@@ -96,7 +98,9 @@ When ChatGPT is installed elsewhere or moves these files, set either path in `co
 }
 ```
 
-The adapter reads this file when it starts each Computer Use session, so changes apply without restarting Pi or the MCP server. Configured binaries must pass the same OpenAI signature and Team ID checks. When a component is missing, the error lists the paths checked and the config file to edit. `/computer-use-status` and `codex-computer-use-mcp --status` show the config path and the current error.
+The adapter reads this file when it starts each Computer Use session, so changes apply without restarting Pi or the MCP server. Configured binaries must pass the same OpenAI signature and Team ID checks. Explicit overrides take precedence: a missing or invalid configured binary never silently falls back to another installation.
+
+If a component is missing, install or update the [official ChatGPT macOS app](https://chatgpt.com/download), open it, and install its Computer Use component. Installing this npm package alone does not install those signed components. The error lists every path checked and the exact config file to edit. Correct `codexPath` / `computerUseAppPath` there, or remove a stale override to restore automatic discovery. For Pi this is normally `~/.pi/agent/direct-computer-use/config.json`; for standalone MCP/CLI it is `~/.direct-computer-use/config.json`. `CODEX_COMPUTER_USE_HOME` overrides the state directory. `/computer-use-status` and `codex-computer-use-mcp --status` show the effective config path and the current error.
 
 Pi limits returned text to 50KB or 2,000 lines. When text exceeds that limit, the complete text is written to a mode-0600 file in a private directory under `/tmp`. Images are returned directly and are never spilled to disk.
 
