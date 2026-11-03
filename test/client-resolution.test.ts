@@ -131,6 +131,49 @@ async function makeExecutable(filePath: string): Promise<string> {
 	return realpathSync(filePath);
 }
 
+test("discovers and verifies both bundled components in a per-user ChatGPT installation", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "cu-user-applications."));
+	try {
+		const systemApp = path.join(root, "Applications/ChatGPT.app");
+		const userApp = path.join(root, "user/Applications/ChatGPT.app");
+		const options = { userHome: path.join(root, "user"), chatGptAppPaths: [systemApp, userApp], runSync: signedBy() };
+		const codex = await makeExecutable(path.join(userApp, "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"));
+		const appPath = path.join(userApp, "Contents/Resources/plugins/openai-bundled/plugins/computer-use/Codex Computer Use.app");
+		const clientPath = await makeClient(appPath);
+		assert.equal(resolveOfficialCodex(options), codex);
+		assert.deepEqual(resolveOfficialComputerUseClient(options), {
+			appPath: realpathSync(appPath), clientPath: realpathSync(clientPath), layout: "legacy-plugin-bundle",
+		});
+		assert.throws(() => resolveOfficialCodex({ ...options, runSync: signedBy("NOT_OPENAI") }), /not signed by the expected OpenAI team/);
+		assert.throws(() => resolveOfficialComputerUseClient({ ...options, runSync: signedBy("NOT_OPENAI") }), /not signed by the expected OpenAI team/);
+		// Preserve the system installation's precedence, even when its layout is older.
+		const systemCodex = await makeExecutable(path.join(systemApp, "Contents/Resources/codex"));
+		assert.equal(resolveOfficialCodex(options), systemCodex);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a stale explicit Codex path fails with repair instructions rather than silently selecting another binary", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "cu-stale-codex."));
+	try {
+		const app = path.join(root, "ChatGPT.app");
+		await makeExecutable(path.join(app, "Contents/Resources/codex"));
+		const missing = path.join(root, "old-codex");
+		const configPath = path.join(root, "config.json");
+		await writeFile(configPath, JSON.stringify({ codexPath: missing }));
+		assert.throws(() => resolveOfficialCodex({ configPath, chatGptAppPaths: [app], runSync: signedBy() }), (error: Error) => {
+			assert.match(error.message, /Install or update the official ChatGPT macOS app/);
+			assert.ok(error.message.includes(missing));
+			assert.ok(error.message.includes(configPath));
+			assert.match(error.message, /remove "codexPath".*automatic discovery/);
+			return true;
+		});
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("finds Codex in ChatGPT's current CodexCLI.app layout before the legacy location", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "cu-codex-current."));
 	try {
@@ -138,7 +181,7 @@ test("finds Codex in ChatGPT's current CodexCLI.app layout before the legacy loc
 		const legacy = path.join(root, "ChatGPT.app/Contents/Resources/codex");
 		const expected = await makeExecutable(current);
 		await makeExecutable(legacy);
-		assert.equal(resolveOfficialCodex({ defaultCodexPaths: [current, legacy], runSync: signedBy() }), expected);
+		assert.equal(resolveOfficialCodex({ chatGptAppPaths: [path.join(root, "ChatGPT.app")], runSync: signedBy() }), expected);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -147,9 +190,8 @@ test("finds Codex in ChatGPT's current CodexCLI.app layout before the legacy loc
 test("falls back to the legacy Codex location on older ChatGPT builds", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "cu-codex-legacy."));
 	try {
-		const current = path.join(root, "ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex");
 		const expected = await makeExecutable(path.join(root, "ChatGPT.app/Contents/Resources/codex"));
-		assert.equal(resolveOfficialCodex({ defaultCodexPaths: [current, expected], runSync: signedBy() }), expected);
+		assert.equal(resolveOfficialCodex({ chatGptAppPaths: [path.join(root, "ChatGPT.app")], runSync: signedBy() }), expected);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -161,9 +203,9 @@ test("uses a configured Codex path and still verifies its signature", async () =
 		const configured = await makeExecutable(path.join(root, "Somewhere/codex"));
 		const configPath = path.join(root, "config.json");
 		await writeFile(configPath, JSON.stringify({ codexPath: configured }));
-		assert.equal(resolveOfficialCodex({ defaultCodexPaths: [], configPath, runSync: signedBy() }), configured);
+		assert.equal(resolveOfficialCodex({ chatGptAppPaths: [], configPath, runSync: signedBy() }), configured);
 		assert.throws(
-			() => resolveOfficialCodex({ defaultCodexPaths: [], configPath, runSync: signedBy("NOT_OPENAI") }),
+			() => resolveOfficialCodex({ chatGptAppPaths: [], configPath, runSync: signedBy("NOT_OPENAI") }),
 			/not signed by the expected OpenAI team/,
 		);
 	} finally {
@@ -177,10 +219,11 @@ test("reports a missing Codex as not found, naming the checked paths and the con
 		const missing = path.join(root, "ChatGPT.app/Contents/Resources/codex");
 		const configPath = path.join(root, "config.json");
 		assert.throws(
-			() => resolveOfficialCodex({ defaultCodexPaths: [missing], configPath, runSync: signedBy() }),
+			() => resolveOfficialCodex({ chatGptAppPaths: [path.join(root, "ChatGPT.app")], configPath, runSync: signedBy() }),
 			(error: Error) => error.message.includes("Codex app-server was not found")
 				&& error.message.includes(missing)
 				&& error.message.includes(`set "codexPath" to its absolute path in ${configPath}`)
+				&& error.message.includes("Install or update the official ChatGPT macOS app")
 				&& !/Signature verification failed/.test(error.message),
 		);
 	} finally {
@@ -194,7 +237,7 @@ test("reads paths from a config file that earlier versions wrote other settings 
 		const configured = await makeExecutable(path.join(root, "Somewhere/codex"));
 		const configPath = path.join(root, "config.json");
 		await writeFile(configPath, JSON.stringify({ version: 1, permissionMode: "full-permissions", codexPath: configured }));
-		assert.equal(resolveOfficialCodex({ defaultCodexPaths: [], configPath, runSync: signedBy() }), configured);
+		assert.equal(resolveOfficialCodex({ chatGptAppPaths: [], configPath, runSync: signedBy() }), configured);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
