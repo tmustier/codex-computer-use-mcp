@@ -182,7 +182,7 @@ export function readOfficialPathConfig(configPath: string): OfficialPathConfig {
 function notFoundError(component: string, checked: string[], key: keyof OfficialPathConfig, hint: string, configPath?: string): BrokerVerificationError {
 	const where = configPath ? `in ${configPath}` : "in the Computer Use config.json in the state directory";
 	return new BrokerVerificationError(
-		`${component} was not found. Checked: ${checked.join(", ")}. ${hint} Then set "${key}" to its absolute path ${where}, or remove "${key}" from that file to retry automatic discovery if the override is stale.`,
+		`${component} was not found. Checked: ${checked.join(", ")}. ${hint} Then set "${key}" to its absolute path ${where}, or remove "${key}" to restore automatic discovery.`,
 	);
 }
 
@@ -222,7 +222,7 @@ function checkedCandidate(appPath: string, clientPath: string, layout: OfficialC
 export function resolveOfficialComputerUseClient(options: ResolveOfficialComputerUseClientOptions = {}): OfficialComputerUseClient {
 	const runSync = options.runSync ?? productionRunSync;
 	const config = options.configPath ? readOfficialPathConfig(options.configPath) : {};
-	const clientHint = "Install or update the official ChatGPT macOS app (https://chatgpt.com/download), then open it and install its Computer Use component. Find the OpenAI-signed \"Codex Computer Use.app\" it installs.";
+	const clientHint = "Install or update the official ChatGPT macOS app (https://chatgpt.com/download), then open it and install its Computer Use component.";
 	if (config.computerUseAppPath) {
 		const configuredApp = existsSync(config.computerUseAppPath) ? realpathSync(config.computerUseAppPath) : path.resolve(config.computerUseAppPath);
 		const configured = checkedCandidate(configuredApp, path.join(configuredApp, CLIENT_RELATIVE_PATH), "configured", runSync);
@@ -267,7 +267,7 @@ export function resolveOfficialCodex(options: ResolveOfficialComputerUseClientOp
 			"Codex app-server",
 			candidates,
 			"codexPath",
-			"Install or update the official ChatGPT macOS app (https://chatgpt.com/download) in /Applications or ~/Applications, then open it. If installed elsewhere, find its OpenAI-signed \"codex\" executable inside ChatGPT.app.",
+			"Install or update the official ChatGPT macOS app (https://chatgpt.com/download), then open it.",
 			options.configPath,
 		);
 	}
