@@ -22,10 +22,12 @@ const log=${JSON.stringify(log)}; const mode=process.argv[2]||"ok";
 const send=x=>process.stdout.write(JSON.stringify(x)+"\\n");
 const rl=createInterface({input:process.stdin});
 let pendingTool; let activeApp;
+if(mode==="config-rejected"){process.stderr.write("\\u001b[31mError\\u001b[0m: invalid type: unit variant, expected string only\\nin \`web_search\`\\n");process.exit(1);}
 if(mode==="child-hang"||mode==="orphan-exit"){const child=spawn(process.execPath,["-e","process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{detached:true,stdio:"ignore"});child.unref();appendFileSync(log,JSON.stringify({childPid:child.pid})+"\\n");if(mode==="orphan-exit")process.exit(0);}
 rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify({method:m.method,id:m.id,params:m.params,result:m.result,codexHome:process.env.CODEX_HOME,home:process.env.HOME,tmpdir:process.env.TMPDIR,hasOpenAIKey:Boolean(process.env.OPENAI_API_KEY)})+"\\n");
  if(m.method==="initialize") return send({id:m.id,result:{userAgent:"fake",platformFamily:"unix",platformOs:"macos"}});
  if(m.method==="initialized") return;
+ if(m.method==="thread/start"&&mode==="protocol-drift") return send({id:m.id,error:{code:-32600,message:"Invalid request: unknown variant \`thread/start\`, expected one of \`initialize\`, \`thread/begin\`, \`thread/resume\`"}});
  if(m.method==="thread/start"){send({id:m.id,result:{thread:{id:"thread-test"}}}); if(mode==="model-event")send({method:"turn/started",params:{}}); return;}
  if(m.method==="command/exec"){
    if(mode==="configured-client") appendFileSync(log,JSON.stringify({resolvedApp:realpathSync(m.params.env.CODEX_HOME+"/computer-use/Codex Computer Use.app"),cleanupHomeEntries:readdirSync(m.params.env.CODEX_HOME)})+"\\n");
@@ -49,6 +51,7 @@ rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify(
      child.once("exit",()=>send({id:m.id,error:{message:"native transport closed"}}));
      return;
    }
+   if(mode==="bootstrap-timeout") return send({id:m.id,result:{content:[{type:"text",text:"bootstrapTimedOut"}],isError:true}});
    if(mode==="tool-error") return send({id:m.id,result:{content:[{type:"text",text:"official error"}],isError:true}});
    if(mode==="lease"){
      if(m.params.tool==="get_app_state") activeApp=m.params.arguments.app;
@@ -469,6 +472,57 @@ test("closing an unused session does not send a native turn-ended notification",
 		await session.close();
 		const records = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
 		assert.equal(records.some((item) => item.method === "command/exec"), false);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("an app-server that rejects its startup settings reports its own reason and how to recover", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-config-rejected-test."));
+	try {
+		const { script } = await makeFake(root);
+		await assert.rejects(callOfficialDirectTool("list_apps", {}, options(script, "config-rejected")), (error: Error) => {
+			assert.match(error.message, /exited before completing the request \(1\)/);
+			assert.match(error.message, /Error: invalid type: unit variant, expected string only\nin `web_search`/);
+			assert.equal(error.message.includes("\u001b"), false);
+			assert.match(error.message, /out of step \(codex-computer-use-mcp \d+\.\d+\.\d+, test-app-server\)/);
+			assert.match(error.message, /update codex-computer-use-mcp to its latest release/);
+			return true;
+		});
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("an app-server protocol error is shortened and says how to recover from version drift", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-protocol-drift-test."));
+	try {
+		const { script } = await makeFake(root);
+		await assert.rejects(callOfficialDirectTool("list_apps", {}, options(script, "protocol-drift")), (error: Error) => {
+			assert.match(error.message, /^Official app-server error: Invalid request: unknown variant `thread\/start`\. ChatGPT and codex-computer-use-mcp may be out of step/);
+			assert.doesNotMatch(error.message, /expected one of|thread\/begin/);
+			return true;
+		});
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a tool timeout says how to restart a stuck Computer Use service", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-timeout-hint-test."));
+	try {
+		const { script } = await makeFake(root);
+		await assert.rejects(
+			callOfficialDirectTool("get_app_state", { app: "Calculator" }, { ...options(script, "late-result"), timeoutMs: 1 }),
+			/request timed out: mcpServer\/tool\/call\. The target app may be unresponsive\. .*pkill -f MacOS\/SkyComputerUseService/,
+		);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("an official stuck-service error keeps its text and gains a recovery step", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-bootstrap-test."));
+	try {
+		const { script } = await makeFake(root);
+		const stuck = await callOfficialDirectTool("get_app_state", { app: "Calculator" }, options(script, "bootstrap-timeout"));
+		assert.equal(stuck.isError, true);
+		assert.equal(stuck.content[0].text, "bootstrapTimedOut");
+		assert.match(String(stuck.content[1]?.text), /pkill -f MacOS\/SkyComputerUseService.*relaunches on the next call/);
+		const other = await callOfficialDirectTool("get_app_state", { app: "Calculator" }, options(script, "tool-error"));
+		assert.deepEqual(other.content, [{ type: "text", text: "official error" }]);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
