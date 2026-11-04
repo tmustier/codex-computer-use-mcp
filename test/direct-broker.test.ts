@@ -22,7 +22,7 @@ const log=${JSON.stringify(log)}; const mode=process.argv[2]||"ok";
 const send=x=>process.stdout.write(JSON.stringify(x)+"\\n");
 const rl=createInterface({input:process.stdin});
 let pendingTool; let activeApp;
-if(mode==="config-rejected"){process.stderr.write("\\u001b[31mError\\u001b[0m: invalid type: unit variant, expected string only\\nin \`web_search\`\\n");process.exit(1);}
+if(mode==="config-rejected"){process.stderr.write("startup log\\n".repeat(2000)+"\\u001b[31mError\\u001b[0m: invalid type: unit variant, expected string only\\nin \`web_search\`\\n",()=>process.exit(1));}
 if(mode==="child-hang"||mode==="orphan-exit"){const child=spawn(process.execPath,["-e","process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{detached:true,stdio:"ignore"});child.unref();appendFileSync(log,JSON.stringify({childPid:child.pid})+"\\n");if(mode==="orphan-exit")process.exit(0);}
 rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify({method:m.method,id:m.id,params:m.params,result:m.result,codexHome:process.env.CODEX_HOME,home:process.env.HOME,tmpdir:process.env.TMPDIR,hasOpenAIKey:Boolean(process.env.OPENAI_API_KEY)})+"\\n");
  if(m.method==="initialize") return send({id:m.id,result:{userAgent:"fake",platformFamily:"unix",platformOs:"macos"}});
@@ -475,7 +475,7 @@ test("closing an unused session does not send a native turn-ended notification",
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("an app-server that rejects its startup settings reports its own reason and how to recover", async () => {
+test("an app-server that rejects its startup settings reports the end of stderr and how to recover", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-config-rejected-test."));
 	try {
 		const { script } = await makeFake(root);
@@ -483,6 +483,7 @@ test("an app-server that rejects its startup settings reports its own reason and
 			assert.match(error.message, /exited before completing the request \(1\)/);
 			assert.match(error.message, /Error: invalid type: unit variant, expected string only\nin `web_search`/);
 			assert.equal(error.message.includes("\u001b"), false);
+			assert.ok(error.message.length < 2_000);
 			assert.match(error.message, /out of step \(codex-computer-use-mcp \d+\.\d+\.\d+, test-app-server\)/);
 			assert.match(error.message, /update codex-computer-use-mcp to its latest release/);
 			return true;
@@ -490,13 +491,12 @@ test("an app-server that rejects its startup settings reports its own reason and
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("an app-server protocol error is shortened and says how to recover from version drift", async () => {
+test("an app-server protocol error preserves the official text and says how to recover from version drift", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-protocol-drift-test."));
 	try {
 		const { script } = await makeFake(root);
 		await assert.rejects(callOfficialDirectTool("list_apps", {}, options(script, "protocol-drift")), (error: Error) => {
-			assert.match(error.message, /^Official app-server error: Invalid request: unknown variant `thread\/start`\. ChatGPT and codex-computer-use-mcp may be out of step/);
-			assert.doesNotMatch(error.message, /expected one of|thread\/begin/);
+			assert.match(error.message, /^Official app-server error: Invalid request: unknown variant `thread\/start`, expected one of `initialize`, `thread\/begin`, `thread\/resume`\. ChatGPT and codex-computer-use-mcp may be out of step/);
 			return true;
 		});
 	} finally { await rm(root, { recursive: true, force: true }); }
