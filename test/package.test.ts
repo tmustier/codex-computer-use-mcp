@@ -39,8 +39,9 @@ test("registry and git packages install and start from a plain npm consumer", as
 			"dist/version.js",
 			"integrations/pi/index.ts",
 			"package.json",
+			"src/version.ts",
 		]) assert.ok(files.includes(required), required);
-		for (const excluded of ["package-lock.json", "src/version.ts", "test/package.test.ts", "tsconfig.json"]) {
+		for (const excluded of ["package-lock.json", "test/package.test.ts", "tsconfig.json"]) {
 			assert.equal(files.includes(excluded), false, excluded);
 		}
 

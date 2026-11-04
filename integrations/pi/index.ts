@@ -11,19 +11,19 @@ import {
   type ToolNamespace,
 } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
-import { getDirectStatus } from "../../dist/direct-service.js";
+import { getDirectStatus } from "../../src/direct-service.ts";
 import {
   type DirectBrokerElicitationRequest,
   type DirectBrokerElicitationResponse,
-} from "../../dist/direct-broker.js";
-import { DirectSessionExecutor } from "../../dist/session-executor.js";
+} from "../../src/direct-broker.ts";
+import { DirectSessionExecutor } from "../../src/session-executor.ts";
 import {
   COMPUTER_USE_METHODS,
   TOOL_INPUT_SCHEMAS,
   TOOL_METADATA,
   type DirectMethod,
   type JsonObject,
-} from "../../dist/tools.js";
+} from "../../src/tools.ts";
 
 const jsonObjectSchema = z.record(z.string(), z.json());
 
