@@ -169,6 +169,33 @@ test("discovers and verifies both bundled components in a per-user ChatGPT insta
 	}
 });
 
+test("finds ChatGPT by bundle ID when the classic ChatGPT app holds ChatGPT.app", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "cu-bundle-id."));
+	try {
+		const classicApp = path.join(root, "Applications/ChatGPT.app");
+		await mkdir(path.join(classicApp, "Contents/Resources"), { recursive: true });
+		const codexApp = path.join(root, "Applications/Codex.app");
+		const codex = await makeExecutable(path.join(codexApp, "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"));
+		const clientApp = path.join(codexApp, "Contents/Resources/plugins/openai-bundled/plugins/computer-use/Codex Computer Use.app");
+		const clientPath = await makeClient(clientApp);
+		const queries: string[][] = [];
+		const signed = signedBy();
+		const runSync = (command: string, args: string[]) => {
+			if (command !== "/usr/bin/mdfind") return signed(command, args);
+			queries.push(args);
+			return { status: 0, stdout: `${codexApp}\n`, stderr: "" };
+		};
+		const options = { userHome: path.join(root, "user"), chatGptAppPaths: [classicApp], runSync };
+		assert.equal(resolveOfficialCodex(options), codex);
+		assert.deepEqual(resolveOfficialComputerUseClient(options), {
+			appPath: realpathSync(clientApp), clientPath: realpathSync(clientPath), layout: "legacy-plugin-bundle",
+		});
+		assert.deepEqual(queries[0], ['kMDItemCFBundleIdentifier == "com.openai.codex"']);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("a stale explicit Codex path fails with repair instructions rather than silently selecting another binary", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "cu-stale-codex."));
 	try {

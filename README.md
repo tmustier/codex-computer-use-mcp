@@ -89,7 +89,7 @@ Audit records contain bounded metadata. They exclude arguments, app content, scr
 
 ### Paths
 
-By default the adapter checks `/Applications/ChatGPT.app`, then `~/Applications/ChatGPT.app` in the OS account's home directory. In each bundle it looks for `Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex`, then `Contents/Resources/codex` on older ChatGPT builds. It uses the Computer Use app at `~/.codex/computer-use/Codex Computer Use.app`, falling back to the copy bundled in either ChatGPT installation on older builds. It does not use an arbitrary `codex` on `PATH` or the ambient `CODEX_CLI_PATH`.
+By default the adapter checks `/Applications/ChatGPT.app`, then `~/Applications/ChatGPT.app` in the OS account's home directory, then any other app Spotlight finds with ChatGPT's bundle ID `com.openai.codex` (for example an install still named `Codex.app` because the classic ChatGPT app occupies `ChatGPT.app`). In each bundle it looks for `Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex`, then `Contents/Resources/codex` on older ChatGPT builds. It uses the Computer Use app at `~/.codex/computer-use/Codex Computer Use.app`, falling back to the copy bundled in any of those ChatGPT installations on older builds. It does not use an arbitrary `codex` on `PATH` or the ambient `CODEX_CLI_PATH`.
 
 When ChatGPT is installed elsewhere or moves these files, set either path in `config.json` in the state directory:
 
