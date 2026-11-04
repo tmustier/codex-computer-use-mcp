@@ -3,22 +3,12 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import adapter, {
-	COMPUTER_USE_NAMESPACE,
-	computerUseToolName,
-	handleOfficialElicitation,
-	toPiContent,
-} from "../integrations/pi/index.ts";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import adapter, { handleOfficialElicitation, PI_TOOL_NAMES, toPiContent } from "../integrations/pi/index.ts";
 import type { DirectBrokerResult } from "../src/direct-broker.ts";
+import { officialToolDefinitions } from "../src/direct-service.ts";
 import { DirectSessionExecutor } from "../src/session-executor.ts";
-import {
-	COMPUTER_USE_METHODS,
-	TOOL_INPUT_SCHEMAS,
-	TOOL_METADATA,
-	type DirectMethod,
-	type DirectToolArguments,
-	type JsonValue,
-} from "../src/tools.ts";
+import type { CuaReplArguments, CuaReplTool, JsonValue } from "../src/tools.ts";
 
 function brokerResult(text: string): DirectBrokerResult {
 	return {
@@ -124,83 +114,79 @@ interface TestToolContext {
 	ui: TestUi;
 }
 
-interface TestEventContext {
-	ui: Pick<TestUi, "notify">;
-}
-
-type TestEvent = Record<string, never>;
-type TestHandler = (event: TestEvent, ctx: TestEventContext) => void | Promise<void>;
+type TestHandler = (event: Record<string, never>, ctx: Record<string, never>) => void | Promise<void>;
 
 interface RegisteredTool {
 	name: string;
+	label: string;
 	description: string;
 	parameters: unknown;
-	outputSchema?: unknown;
 	exposure?: string;
-	namespace?: { name: string; instructions?: string };
 	annotations?: unknown;
-	execute(toolCallId: string, params: DirectToolArguments, signal: AbortSignal | undefined, onUpdate: undefined, ctx: TestToolContext): Promise<{
+	execute(toolCallId: string, params: CuaReplArguments, signal: AbortSignal | undefined, onUpdate: undefined, ctx: TestToolContext): Promise<{
 		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
-		structuredContent?: JsonValue;
+		isError?: boolean;
+		details?: JsonValue;
 	}>;
 }
 
-function loadAdapter(session: { execute: DirectSessionExecutor["execute"]; close(): Promise<void> }, active = ["read"]) {
+type TestSession = Pick<DirectSessionExecutor, "execute" | "endTurn" | "close">;
+
+function loadAdapter(session: TestSession) {
 	const tools: RegisteredTool[] = [];
 	const commands: string[] = [];
 	const handlers = new Map<string, TestHandler>();
-	const activeTools = new Set(active);
-	let activeToolsChanged = false;
 	const fakePi = {
 		registerTool(tool: RegisteredTool) { tools.push(tool); },
 		registerCommand(name: string) { commands.push(name); },
 		on(name: string, handler: TestHandler) { handlers.set(name, handler); },
-		getActiveTools() { return [...activeTools]; },
-		setActiveTools() { activeToolsChanged = true; },
 	};
 	// SAFETY: this focused adapter test implements every ExtensionAPI member the adapter uses.
 	adapter(fakePi as any, session);
-	const tool = (method: DirectMethod) => tools.find((candidate) => candidate.name === computerUseToolName(method))!;
-	return { tools, commands, handlers, tool, activeToolsChanged: () => activeToolsChanged };
+	const tool = (name: CuaReplTool) => tools.find((candidate) => candidate.name === PI_TOOL_NAMES[name])!;
+	return { tools, commands, handlers, tool };
 }
 
-const noUi = { notify() {} };
 const headlessContext: TestToolContext = {
 	hasUI: false,
 	ui: { async select() { return undefined; }, async editor() { return undefined; }, notify() {} },
 };
 
-test("Pi registers the ten official methods as codemode tools without changing the active tools", async () => {
-	let closed = 0;
-	const { tools, commands, handlers, activeToolsChanged } = loadAdapter({
+function testSession(overrides: Partial<TestSession> = {}): TestSession {
+	return {
 		async execute() { return { isError: false, content: [] }; },
-		async close() { closed += 1; },
-	});
+		async endTurn() {},
+		async close() {},
+		...overrides,
+	};
+}
+
+test("Pi registers the official cua_repl tools as ordinary tools and ends the turn when the agent settles", async () => {
+	const events: string[] = [];
+	const { tools, commands, handlers } = loadAdapter(testSession({
+		async endTurn() { events.push("endTurn"); },
+		async close() { events.push("close"); },
+	}));
 	assert.deepEqual(commands, ["computer-use-status"]);
-	assert.deepEqual(tools.map((tool) => tool.name), COMPUTER_USE_METHODS.map(computerUseToolName));
-	for (const [index, method] of COMPUTER_USE_METHODS.entries()) {
-		const tool = tools[index];
-		assert.equal(tool.exposure, "codemode");
-		assert.equal(tool.namespace, COMPUTER_USE_NAMESPACE);
-		assert.equal(tool.description, TOOL_METADATA[method].description);
-		assert.deepEqual(tool.parameters, TOOL_INPUT_SCHEMAS[method]);
-		assert.deepEqual(tool.annotations, TOOL_METADATA[method].annotations);
-		assert.equal(tool.outputSchema !== undefined, method === "get_app_state", method);
+	const official = officialToolDefinitions(process.env.CODEX_COMPUTER_USE_HOME || path.join(getAgentDir(), "direct-computer-use"));
+	assert.deepEqual(tools.map((tool) => tool.name), ["cua_repl", "cua_repl_reset"]);
+	for (const [index, definition] of official.tools.entries()) {
+		const tool = tools[index]!;
+		assert.equal(tool.exposure, undefined);
+		assert.equal(tool.description, definition.description);
+		assert.deepEqual(tool.parameters, definition.inputSchema);
+		assert.deepEqual(tool.annotations, definition.annotations);
 	}
-	assert.match(COMPUTER_USE_NAMESPACE.instructions ?? "", /tools\.computer_use_get_app_state/);
-	handlers.get("session_start")?.({}, { ui: noUi });
-	assert.equal(activeToolsChanged(), false);
-	await handlers.get("agent_settled")?.({}, { ui: noUi });
-	await handlers.get("session_shutdown")?.({}, { ui: noUi });
-	assert.equal(closed, 2);
+	await handlers.get("agent_settled")?.({}, {});
+	await handlers.get("session_shutdown")?.({}, {});
+	assert.deepEqual(events, ["endTurn", "close"]);
 });
 
-test("codemode calls share one session and return structured app state", async () => {
-	const calls: Array<{ method: DirectMethod; args: DirectToolArguments; supportsOpenAiFormElicitation?: boolean }> = [];
-	const { tool } = loadAdapter({
-		async execute(method, args, dependencies) {
-			calls.push({ method, args, supportsOpenAiFormElicitation: dependencies.supportsOpenAiFormElicitation });
-			if (method !== "get_app_state") return { isError: false, content: [] };
+test("cua_repl calls pass their arguments through and return text and images in order", async () => {
+	const calls: Array<{ tool: CuaReplTool; args: CuaReplArguments; supportsOpenAiFormElicitation?: boolean }> = [];
+	const { tool } = loadAdapter(testSession({
+		async execute(name, args, dependencies) {
+			calls.push({ tool: name, args, supportsOpenAiFormElicitation: dependencies.supportsOpenAiFormElicitation });
 			return {
 				isError: false,
 				content: [
@@ -209,65 +195,31 @@ test("codemode calls share one session and return structured app state", async (
 				],
 			};
 		},
-		async close() {},
-	});
-	const state = await tool("get_app_state").execute("1", { app: "TextEdit" }, undefined, undefined, headlessContext);
-	assert.deepEqual(state.structuredContent, {
-		app: "TextEdit",
-		text: "AX tree",
-		screenshot: { type: "image", data: "png-data", mimeType: "image/png" },
-	});
+	}));
+	const code = 'let app = await cua.getApp("TextEdit");';
+	const state = await tool("js").execute("1", { code, title: "Opening TextEdit" }, undefined, undefined, headlessContext);
 	assert.deepEqual(state.content, [
 		{ type: "text", text: "AX tree" },
 		{ type: "image", data: "png-data", mimeType: "image/png" },
 	]);
-	const click = await tool("click").execute("2", { app: "TextEdit", element_index: "7" }, undefined, undefined, headlessContext);
-	assert.equal(click.structuredContent, undefined);
-	await tool("type_text").execute("3", { app: "TextEdit", text: "hello" }, undefined, undefined, headlessContext);
-	assert.deepEqual(calls.map((call) => call.method), ["get_app_state", "click", "type_text"]);
-	assert.deepEqual(calls[1].args, { app: "TextEdit", element_index: "7" });
+	assert.equal(state.isError, false);
+	await tool("js_reset").execute("2", {}, undefined, undefined, headlessContext);
+	assert.deepEqual(calls.map((call) => [call.tool, call.args]), [["js", { code, title: "Opening TextEdit" }], ["js_reset", {}]]);
 	assert.equal(calls.every((call) => call.supportsOpenAiFormElicitation === true), true);
 });
 
-test("list_apps returns the official text inventory unchanged", async () => {
-	const inventory = "Notes — Beta — /Applications/Notes Beta.app/ — example.NotesBeta [running]";
-	const { tool } = loadAdapter({
-		async execute() { return { isError: false, content: [{ type: "text", text: inventory }] }; },
-		async close() {},
-	});
-	const result = await tool("list_apps").execute("1", {}, undefined, undefined, headlessContext);
-	assert.deepEqual(result.content, [{ type: "text", text: inventory }]);
-});
-
-test("an official error rejects the call with the official text", async () => {
-	const { tool } = loadAdapter({
-		async execute() { return { isError: true, content: [{ type: "text", text: "element not found" }] }; },
-		async close() {},
-	});
-	await assert.rejects(
-		tool("click").execute("1", { app: "TextEdit", element_index: "missing" }, undefined, undefined, headlessContext),
-		/^Error: element not found$/,
-	);
-});
-
-test("Pi warns once when neither codemode nor a Computer Use tool is active", async () => {
-	const session = { async execute() { return { isError: false, content: [] }; }, async close() {} };
-	const notices: string[] = [];
-	const ctx = { ui: { notify(message: string) { notices.push(message); } } };
-
-	const inactive = loadAdapter(session);
-	inactive.handlers.get("session_start")?.({}, ctx);
-	inactive.handlers.get("before_agent_start")?.({}, ctx);
-	inactive.handlers.get("before_agent_start")?.({}, ctx);
-	assert.equal(notices.length, 1);
-	assert.match(notices[0], /\+codemode/);
-
-	for (const active of [["read", "codemode"], ["read", computerUseToolName("click")]]) {
-		const reachable = loadAdapter(session, active);
-		reachable.handlers.get("session_start")?.({}, ctx);
-		reachable.handlers.get("before_agent_start")?.({}, ctx);
-	}
-	assert.equal(notices.length, 1);
+test("an official error is returned as an error result that keeps its content", async () => {
+	const { tool } = loadAdapter(testSession({
+		async execute() {
+			return { isError: true, content: [{ type: "text", text: "ReferenceError: app is not defined" }, { type: "image", data: "png", mimeType: "image/png" }] };
+		},
+	}));
+	const result = await tool("js").execute("1", { code: "await app.click(3)" }, undefined, undefined, headlessContext);
+	assert.equal(result.isError, true);
+	assert.deepEqual(result.content, [
+		{ type: "text", text: "ReferenceError: app is not defined" },
+		{ type: "image", data: "png", mimeType: "image/png" },
+	]);
 });
 
 test("broker setup failures remain audited", async () => {
@@ -277,7 +229,7 @@ test("broker setup failures remain audited", async () => {
 			createSession: async () => { throw new Error("verified broker setup failed"); },
 		});
 		await assert.rejects(
-			executor.execute("get_app_state", { app: "TextEdit" }, { stateRoot: root }),
+			executor.execute("js", { code: "1" }, { stateRoot: root }),
 			/verified broker setup failed/,
 		);
 		const audit = JSON.parse(await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8"));
@@ -288,26 +240,28 @@ test("broker setup failures remain audited", async () => {
 	}
 });
 
+function fakeSession(log: string[], id: number, result = brokerResult("ok")) {
+	return {
+		async call(tool: CuaReplTool) { log.push(`${id}:${tool}`); return result; },
+		async endTurn() { log.push(`${id}:endTurn`); },
+		async close() { log.push(`${id}:close`); },
+	};
+}
+
 test("retained sessions advertise only the caller's elicitation capability", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-session-capability-test."));
 	const advertised: boolean[] = [];
 	const createExecutor = () => new DirectSessionExecutor({
 		createSession: async (options) => {
 			advertised.push(options.supportsOpenAiFormElicitation === true);
-			return {
-				async call() { return brokerResult("state"); },
-				async close() {},
-			};
+			return fakeSession([], 0);
 		},
 	});
 	const genericExecutor = createExecutor();
 	const piExecutor = createExecutor();
 	try {
-		await genericExecutor.execute("get_app_state", { app: "TextEdit" }, { stateRoot: root });
-		await piExecutor.execute("get_app_state", { app: "TextEdit" }, {
-			stateRoot: root,
-			supportsOpenAiFormElicitation: true,
-		});
+		await genericExecutor.execute("js", { code: "1" }, { stateRoot: root });
+		await piExecutor.execute("js", { code: "1" }, { stateRoot: root, supportsOpenAiFormElicitation: true });
 		assert.deepEqual(advertised, [false, true]);
 	} finally {
 		await Promise.all([genericExecutor.close(), piExecutor.close()]);
@@ -315,50 +269,50 @@ test("retained sessions advertise only the caller's elicitation capability", asy
 	}
 });
 
-test("one signed client session supports a multi-action sequence", async () => {
+test("one session serves every call and turn, and a transport failure replaces it", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "pi-direct-session-test."));
-	const calls: Array<{ session: number; method: DirectMethod }> = [];
+	const log: string[] = [];
 	let sessionsCreated = 0;
-	let sessionsClosed = 0;
+	let failNext = false;
 	const executor = new DirectSessionExecutor({
 		createSession: async () => {
-			const session = ++sessionsCreated;
+			const id = ++sessionsCreated;
+			const session = fakeSession(log, id);
 			return {
-				async call(method: DirectMethod) { calls.push({ session, method }); return brokerResult(method); },
-				async close() { sessionsClosed += 1; },
+				...session,
+				async call(tool: CuaReplTool) {
+					if (failNext) { failNext = false; log.push(`${id}:${tool}:transport-failed`); throw new Error("transport failed"); }
+					log.push(`${id}:${tool}`);
+					return brokerResult("ok");
+				},
 			};
 		},
 	});
 	try {
-		await executor.execute("get_app_state", { app: "Chrome" }, { stateRoot: root });
-		await executor.execute("click", { app: "Chrome", x: 10, y: 10 }, { stateRoot: root });
-		await executor.execute("type_text", { app: "Chrome", text: "hello" }, { stateRoot: root });
-		await executor.execute("press_key", { app: "Chrome", key: "Escape" }, { stateRoot: root });
-		assert.deepEqual(calls.map((call) => call.method), ["get_app_state", "click", "type_text", "press_key"]);
-		assert.equal(sessionsCreated, 1);
-		assert.equal(sessionsClosed, 0);
+		await executor.execute("js", { code: "let app = await cua.getApp('Chrome')" }, { stateRoot: root });
+		await executor.execute("js", { code: "await app.click(3)" }, { stateRoot: root });
+		await executor.endTurn();
+		await executor.execute("js", { code: "await app.getAXState()" }, { stateRoot: root });
+		failNext = true;
+		await assert.rejects(executor.execute("js", { code: "1" }, { stateRoot: root }), /transport failed/);
+		await executor.execute("js_reset", {}, { stateRoot: root });
 		await executor.close();
-		assert.equal(sessionsClosed, 1);
+		assert.deepEqual(log, ["1:js", "1:js", "1:endTurn", "1:js", "1:js:transport-failed", "1:close", "2:js_reset", "2:close"]);
 	} finally {
 		await executor.close();
 		await rm(root, { recursive: true, force: true });
 	}
 });
 
-test("idle expiry closes a retained session", async () => {
+test("a quiet MCP session ends its turn but keeps its REPL", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "pi-direct-idle-test."));
-	let sessionsClosed = 0;
-	const executor = new DirectSessionExecutor({
-		idleTimeoutMs: 10,
-		createSession: async () => ({
-			async call() { return brokerResult("state"); },
-			async close() { sessionsClosed += 1; },
-		}),
-	});
+	const log: string[] = [];
+	const executor = new DirectSessionExecutor({ idleTurnEndMs: 10, createSession: async () => fakeSession(log, 1) });
 	try {
-		await executor.execute("get_app_state", { app: "TextEdit" }, { stateRoot: root });
+		await executor.execute("js", { code: "1" }, { stateRoot: root });
 		await new Promise((resolve) => setTimeout(resolve, 40));
-		assert.equal(sessionsClosed, 1);
+		await executor.execute("js", { code: "2" }, { stateRoot: root });
+		assert.deepEqual(log, ["1:js", "1:endTurn", "1:js"]);
 	} finally {
 		await executor.close();
 		await rm(root, { recursive: true, force: true });

@@ -22,7 +22,7 @@ test("CLI exposes durable no-permissions status and no mode-selection route", as
 		const { stdout } = await run(stateRoot, ["--status"]);
 		const status = JSON.parse(stdout);
 		assert.equal(status.permissionMode, "no-permissions");
-		assert.equal(status.methods.length, 10);
+		assert.deepEqual(status.tools, ["js", "js_reset"]);
 
 		await assert.rejects(run(stateRoot, ["--configure", "safe"]), /Usage:/);
 		await assert.rejects(access(path.join(stateRoot, "config.json")));

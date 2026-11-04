@@ -9,20 +9,31 @@ import test from "node:test";
 const broker = await import("../src/direct-broker.ts");
 const service = await import("../src/direct-service.ts");
 
-test("the nested Computer Use server receives only the verified Codex path", async (t) => {
+test("the app-server receives ChatGPT's cua_repl entry unchanged, with the real home and a private cwd", async (t) => {
 	const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "cu-nested-codex.")));
 	const previous = process.env.CODEX_CLI_PATH;
 	try {
 		const codex = path.join(root, 'Official Codex "binary"');
 		const alias = path.join(root, "configured-codex");
-		const app = path.join(root, "Codex Computer Use.app");
-		const client = path.join(app, "Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient");
-		await mkdir(path.dirname(client), { recursive: true });
-		await writeFile(client, "signed fixture\n");
-		await writeFile(codex, "signed fixture\n");
+		const nodeRepl = path.join(root, "cua_node/bin/node_repl");
+		const computerUseApp = path.join(root, "Codex Computer Use.app");
+		const serviceBinary = path.join(computerUseApp, "Contents/MacOS/SkyComputerUseService");
+		for (const file of [codex, nodeRepl, serviceBinary]) {
+			await mkdir(path.dirname(file), { recursive: true });
+			await writeFile(file, "signed fixture\n");
+		}
 		await symlink(codex, alias);
+		const server = {
+			command: "/bin/sh",
+			args: ["-c", 'export X="${X-}"; exec "$@"', "cua-repl", nodeRepl],
+			env: { SKY_CUA_SERVICE_PATH: computerUseApp, NODE_REPL_TOOL_OVERRIDES: '{"a":"b\\nc"}' },
+			enabled_tools: ["js", "js_reset", "turn_ended"],
+			tools: { js: { output_token_limit: 25000 } },
+		};
+		const cuaReplConfigPath = path.join(root, "cua.mcp.json");
+		await writeFile(cuaReplConfigPath, JSON.stringify({ mcpServers: { cua_repl: server } }));
 		const configPath = path.join(root, "config.json");
-		await writeFile(configPath, JSON.stringify({ codexPath: alias, computerUseAppPath: app }));
+		await writeFile(configPath, JSON.stringify({ codexPath: alias, cuaReplConfigPath }));
 		process.env.CODEX_CLI_PATH = "/ambient/unverified/codex";
 
 		t.mock.method(childProcess, "spawnSync", (command: string, args: string[]) => {
@@ -38,23 +49,23 @@ test("the nested Computer Use server receives only the verified Codex path", asy
 			assert.ok(env);
 			assert.equal(env.CODEX_CLI_PATH, undefined);
 			assert.equal(env.PATH, "/usr/bin:/bin:/usr/sbin:/sbin");
+			assert.notEqual(env.HOME, os.userInfo().homedir);
 			const table = args.find((arg) => arg.startsWith("mcp_servers="));
-			assert.ok(table);
-			assert.ok(table.includes(`command = ${JSON.stringify(client)}`));
-			assert.ok(table.includes(`cwd = ${JSON.stringify(cwd)}`));
-			const nativeEnv = /, env = \{ CODEX_CLI_PATH = ("(?:[^"\\]|\\.)*") \}/.exec(table);
-			assert.ok(nativeEnv);
-			assert.equal(JSON.parse(nativeEnv[1]!), codex);
+			assert.equal(table, `mcp_servers=${broker.toToml({
+				cua_repl: { ...server, env: { ...server.env, HOME: os.userInfo().homedir }, cwd: String(cwd), enabled: true },
+			})}`);
 			throw new Error("captured app-server spawn");
 		});
 		syncBuiltinESMExports();
 
-		await assert.rejects(broker.createOfficialDirectToolSession({ configPath }), /captured app-server spawn/);
+		await assert.rejects(broker.createOfficialCuaReplSession({ configPath }), /captured app-server spawn/);
 		assert.equal(spawn.mock.callCount(), 1);
 
 		const status = service.getDirectStatus(root);
 		assert.ok(status.brokerVerified);
 		assert.equal(status.codexPath, codex);
+		assert.equal(status.nodeReplPath, nodeRepl);
+		assert.equal(status.cuaReplConfigPath, cuaReplConfigPath);
 	} finally {
 		t.mock.restoreAll();
 		syncBuiltinESMExports();

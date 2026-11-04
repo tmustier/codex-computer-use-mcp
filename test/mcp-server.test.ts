@@ -6,7 +6,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { z } from "zod";
-import { COMPUTER_USE_METHODS, TOOL_INPUT_SCHEMAS, TOOL_METADATA } from "../src/tools.ts";
+import { officialToolDefinitions } from "../src/direct-service.ts";
 import packageMetadata from "../package.json" with { type: "json" };
 
 const packageVersion = packageMetadata.version;
@@ -17,7 +17,7 @@ function stringEnvironment(): Record<string, string> {
 	);
 }
 
-test("stdio MCP exposes the Computer Use tools and status", async () => {
+test("stdio MCP exposes the official cua_repl tools and status", async () => {
 	const stateRoot = await mkdtemp(path.join(os.tmpdir(), "direct-computer-use-mcp-test."));
 	const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
 	const transport = new StdioClientTransport({
@@ -30,26 +30,20 @@ test("stdio MCP exposes the Computer Use tools and status", async () => {
 	try {
 		await client.connect(transport);
 		assert.deepEqual(client.getServerVersion(), { name: "codex-computer-use-mcp", version: packageVersion });
+		const official = officialToolDefinitions(stateRoot);
+		assert.equal(client.getInstructions(), official.instructions);
 		const listed = await client.listTools();
-		assert.deepEqual(listed.tools.map((tool) => tool.name).sort(), [...COMPUTER_USE_METHODS, "computer_use_status"].sort());
-		for (const method of COMPUTER_USE_METHODS) {
-			const tool = listed.tools.find((item) => item.name === method);
-			assert.deepEqual(tool, {
-				name: method,
-				description: TOOL_METADATA[method].description,
-				inputSchema: TOOL_INPUT_SCHEMAS[method],
-				annotations: TOOL_METADATA[method].annotations,
-			});
-		}
+		assert.deepEqual(listed.tools.map((tool) => tool.name), ["js", "js_reset", "computer_use_status"]);
+		assert.deepEqual(listed.tools.slice(0, 2), official.tools);
 
 		const statusResult = await client.callTool({ name: "computer_use_status", arguments: {} });
 		assert.equal(statusResult.isError, undefined);
 		const status = z.object({
 			permissionMode: z.literal("no-permissions"),
-			methods: z.array(z.enum(COMPUTER_USE_METHODS)),
+			tools: z.array(z.string()),
 			brokerVerified: z.boolean(),
 		}).passthrough().parse(statusResult.structuredContent);
-		assert.deepEqual(status.methods, COMPUTER_USE_METHODS);
+		assert.deepEqual(status.tools, ["js", "js_reset"]);
 		assert.equal(status.brokerVerified, true);
 	} finally {
 		await client.close().catch(() => undefined);

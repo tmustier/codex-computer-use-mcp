@@ -1,7 +1,7 @@
 {
   "name": "codex-computer-use-mcp",
-  "version": "0.6.5",
-  "description": "Expose the official macOS Computer Use tools directly to Pi and MCP clients without a nested model.",
+  "version": "0.7.0",
+  "description": "Give Pi and MCP clients the official macOS Computer Use runtime that ChatGPT uses, without a nested model.",
   "author": "Thomas Mustier",
   "license": "MIT",
   "type": "module",

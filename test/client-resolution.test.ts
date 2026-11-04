@@ -1,67 +1,194 @@
 import assert from "node:assert/strict";
 import { realpathSync } from "node:fs";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { resolveOfficialCodex, resolveOfficialComputerUseClient } from "../src/direct-broker.ts";
+import { resolveOfficialCodex, resolveOfficialCuaRepl } from "../src/direct-broker.ts";
 
-const CLIENT_RELATIVE_PATH = "Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient";
+type Run = (command: string, args: string[]) => { status: number | null; stdout?: string; stderr?: string };
 
-async function makeClient(appPath: string): Promise<string> {
-	const clientPath = path.join(appPath, CLIENT_RELATIVE_PATH);
-	await mkdir(path.dirname(clientPath), { recursive: true });
-	await writeFile(clientPath, "signed fixture\n", { mode: 0o700 });
-	return clientPath;
-}
-
-function signedBy(team = "2DC432GLL2") {
-	return (_command: string, args: string[]) => {
+function signedBy(team = "2DC432GLL2", plist: Record<string, string> = {}): Run {
+	return (command: string, args: string[]) => {
+		if (command === "/usr/bin/plutil") {
+			const value = plist[`${args[3]}#${args[1]}`];
+			return value ? { status: 0, stdout: `${value}\n`, stderr: "" } : { status: 1, stdout: "", stderr: "no value" };
+		}
+		if (command === "/usr/bin/mdfind") return { status: 0, stdout: "", stderr: "" };
 		if (args.includes("--verify")) return { status: 0, stdout: "", stderr: "" };
 		return { status: 0, stdout: "", stderr: `TeamIdentifier=${team}\n` };
 	};
 }
 
-test("resolves and verifies ChatGPT's current per-user installed component path", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "cu-current-resolution."));
+async function makeExecutable(filePath: string): Promise<string> {
+	await mkdir(path.dirname(filePath), { recursive: true });
+	await writeFile(filePath, "signed fixture\n", { mode: 0o700 });
+	return realpathSync(filePath);
+}
+
+interface Fixture {
+	root: string;
+	userHome: string;
+	codex: string;
+	nodeRepl: string;
+	node: string;
+	computerUseApp: string;
+	service: string;
+	configPath: string;
+	plist: Record<string, string>;
+	server: { command: string; args: string[]; env: Record<string, string>; enabled_tools: string[] };
+}
+
+/** A ChatGPT install whose plugin cache holds the cua_repl entry ChatGPT writes for its version. */
+async function makeChatGpt(root: string, version = "26.1029.61003"): Promise<Fixture> {
+	const app = path.join(root, "Applications/ChatGPT.app");
+	const userHome = path.join(root, "user");
+	const codex = await makeExecutable(path.join(app, "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"));
+	const nodeRepl = await makeExecutable(path.join(app, "Contents/Resources/cua_node/bin/node_repl"));
+	const node = await makeExecutable(path.join(app, "Contents/Resources/cua_node/bin/node"));
+	const computerUseApp = path.join(userHome, ".codex/computer-use/Codex Computer Use.app");
+	const service = await makeExecutable(path.join(computerUseApp, "Contents/MacOS/SkyComputerUseService"));
+	const server = {
+		command: "/bin/sh",
+		args: ["-c", 'exec "$@"', "cua-repl", nodeRepl],
+		env: { NODE_REPL_NODE_PATH: node, SKY_CUA_SERVICE_PATH: computerUseApp, CUA_REPL_ENABLED_SURFACES: "browser,computer" },
+		enabled_tools: ["js", "js_reset", "turn_ended"],
+	};
+	const configPath = path.join(userHome, ".codex/plugins/cache/openai-bundled/unified-computer-use", version, ".mcp.json");
+	await mkdir(path.dirname(configPath), { recursive: true });
+	await writeFile(configPath, JSON.stringify({ mcpServers: { cua_repl: server } }));
+	const plist = {
+		[`${realpathSync(app)}/Contents/Info.plist#CFBundleShortVersionString`]: version,
+		[`${computerUseApp}/Contents/Info.plist#CFBundleVersion`]: "1001730",
+	};
+	return { root, userHome, codex, nodeRepl, node, computerUseApp, service, configPath, plist, server };
+}
+
+test("reads ChatGPT's own cua_repl entry for the installed version and verifies every executable it names", async () => {
+	const root = realpathSync(await mkdtemp(path.join(os.tmpdir(), "cu-repl-resolution.")));
 	try {
-		const appPath = path.join(root, ".codex", "computer-use", "Codex Computer Use.app");
-		const clientPath = await makeClient(appPath);
-		const resolved = resolveOfficialComputerUseClient({
-			userHome: root,
-			legacyPluginRoot: path.join(root, "missing-legacy"),
-			runSync: signedBy(),
+		const fixture = await makeChatGpt(root);
+		const verified: string[] = [];
+		const signed = signedBy("2DC432GLL2", fixture.plist);
+		const runSync: Run = (command, args) => {
+			if (command === "/usr/bin/codesign" && args[0] === "--verify") verified.push(args.at(-1)!);
+			return signed(command, args);
+		};
+		const resolved = resolveOfficialCuaRepl(fixture.codex, { userHome: fixture.userHome, runSync });
+		assert.deepEqual(resolved, {
+			configPath: fixture.configPath,
+			server: fixture.server,
+			nodeReplPath: fixture.nodeRepl,
+			computerUseAppPath: fixture.computerUseApp,
+			clientBuild: "1001730",
 		});
-		assert.deepEqual(resolved, { appPath: realpathSync(appPath), clientPath: realpathSync(clientPath), layout: "installed-component" });
+		assert.deepEqual(verified, [fixture.nodeRepl, fixture.node, fixture.service]);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
 });
 
-test("fails closed when no supported client path exists", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "cu-missing-resolution."));
+test("a ChatGPT that has not prepared its runtime for this version says to open it", async () => {
+	const root = realpathSync(await mkdtemp(path.join(os.tmpdir(), "cu-repl-unprepared.")));
 	try {
+		const fixture = await makeChatGpt(root, "26.1000.1");
+		const plist = { ...fixture.plist, [Object.keys(fixture.plist)[0]!]: "26.1029.61003" };
 		assert.throws(
-			() => resolveOfficialComputerUseClient({ userHome: root, legacyPluginRoot: path.join(root, "legacy"), runSync: signedBy() }),
-			/Official Computer Use client was not found\. Checked: .*If it is installed elsewhere, set "computerUseAppPath"/,
+			() => resolveOfficialCuaRepl(fixture.codex, { userHome: fixture.userHome, runSync: signedBy("2DC432GLL2", plist) }),
+			/ChatGPT 26\.1029\.61003 has not prepared its Computer Use runtime yet \(expected .*26\.1029\.61003\/\.mcp\.json\)\. Open ChatGPT \(`open -a ChatGPT`\)/,
 		);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
 });
 
-test("fails closed on an invalid client signature without falling back", async () => {
+test("an executable in ChatGPT's config with the wrong signing team fails closed", async () => {
+	const root = realpathSync(await mkdtemp(path.join(os.tmpdir(), "cu-repl-wrong-team.")));
+	try {
+		const fixture = await makeChatGpt(root);
+		const signed = signedBy("2DC432GLL2", fixture.plist);
+		const runSync: Run = (command, args) => args.at(-1) === fixture.node && args[0] === "-dv"
+			? { status: 0, stdout: "", stderr: "TeamIdentifier=NOT_OPENAI\n" }
+			: signed(command, args);
+		assert.throws(
+			() => resolveOfficialCuaRepl(fixture.codex, { userHome: fixture.userHome, runSync }),
+			/node is not signed by the expected OpenAI team/,
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a config that does not name one node_repl, or names a missing one, fails with the out-of-step step", async () => {
+	const root = realpathSync(await mkdtemp(path.join(os.tmpdir(), "cu-repl-shape.")));
+	try {
+		const fixture = await makeChatGpt(root);
+		const runSync = signedBy("2DC432GLL2", fixture.plist);
+		await writeFile(fixture.configPath, JSON.stringify({ mcpServers: { cua_repl: { ...fixture.server, args: [] } } }));
+		assert.throws(
+			() => resolveOfficialCuaRepl(fixture.codex, { userHome: fixture.userHome, runSync }),
+			/does not name exactly one node_repl executable\. ChatGPT and codex-computer-use-mcp may be out of step/,
+		);
+		await writeFile(fixture.configPath, JSON.stringify({ mcpServers: { cua_repl: { ...fixture.server, args: [path.join(root, "gone/node_repl")] } } }));
+		assert.throws(
+			() => resolveOfficialCuaRepl(fixture.codex, { userHome: fixture.userHome, runSync }),
+			/gone\/node_repl, named by ChatGPT's Computer Use config, does not exist/,
+		);
+		await writeFile(fixture.configPath, JSON.stringify({ mcpServers: {} }));
+		assert.throws(
+			() => resolveOfficialCuaRepl(fixture.codex, { userHome: fixture.userHome, runSync }),
+			/has an unexpected shape/,
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("uses a configured cuaReplConfigPath, even for a Codex outside an app bundle", async () => {
+	const root = realpathSync(await mkdtemp(path.join(os.tmpdir(), "cu-repl-configured.")));
+	try {
+		const fixture = await makeChatGpt(root);
+		const custom = path.join(root, "custom.mcp.json");
+		await writeFile(custom, JSON.stringify({ mcpServers: { cua_repl: fixture.server } }));
+		const configPath = path.join(root, "config.json");
+		await writeFile(configPath, JSON.stringify({ cuaReplConfigPath: custom }));
+		const codex = await makeExecutable(path.join(root, "Somewhere/codex"));
+		const resolved = resolveOfficialCuaRepl(codex, { userHome: fixture.userHome, configPath, runSync: signedBy("2DC432GLL2", fixture.plist) });
+		assert.equal(resolved.configPath, custom);
+		assert.throws(
+			() => resolveOfficialCuaRepl(codex, { userHome: fixture.userHome, runSync: signedBy("2DC432GLL2", fixture.plist) }),
+			/Could not tell which ChatGPT version contains .*Set "cuaReplConfigPath"/,
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a missing Computer Use service says to install ChatGPT's Computer Use component", async () => {
+	const root = realpathSync(await mkdtemp(path.join(os.tmpdir(), "cu-repl-service.")));
+	try {
+		const fixture = await makeChatGpt(root);
+		await rm(fixture.computerUseApp, { recursive: true });
+		assert.throws(
+			() => resolveOfficialCuaRepl(fixture.codex, { userHome: fixture.userHome, runSync: signedBy("2DC432GLL2", fixture.plist) }),
+			/Official Computer Use service was not found\. Checked: .*SkyComputerUseService\. Open ChatGPT and install its Computer Use component\./,
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("an invalid signature names the binary and codesign's reason", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "cu-invalid-signature."));
 	try {
-		await makeClient(path.join(root, ".codex", "computer-use", "Codex Computer Use.app"));
-		await makeClient(path.join(root, "legacy", "Codex Computer Use.app"));
+		const app = path.join(root, "ChatGPT.app");
+		await makeExecutable(path.join(app, "Contents/Resources/codex"));
 		assert.throws(
-			() => resolveOfficialComputerUseClient({
-				userHome: root,
-				legacyPluginRoot: path.join(root, "legacy"),
-				runSync: () => ({ status: 1, stdout: "", stderr: "client: a sealed resource is missing or invalid\nmore" }),
+			() => resolveOfficialCodex({
+				chatGptAppPaths: [app],
+				runSync: (command) => command === "/usr/bin/mdfind" ? { status: 0, stdout: "" } : { status: 1, stdout: "", stderr: "codex: a sealed resource is missing or invalid\nmore" },
 			}),
-			/Signature verification failed for SkyComputerUseClient \(client: a sealed resource is missing or invalid\)\. If ChatGPT is updating/,
+			/Signature verification failed for codex \(codex: a sealed resource is missing or invalid\)\. If ChatGPT is updating/,
 		);
 	} finally {
 		await rm(root, { recursive: true, force: true });
@@ -83,84 +210,15 @@ test("a signature check that does not finish is reported as unfinished, not as a
 	}
 });
 
-test("fails closed when the client has the wrong signing Team ID", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "cu-wrong-team."));
-	try {
-		await makeClient(path.join(root, ".codex", "computer-use", "Codex Computer Use.app"));
-		assert.throws(
-			() => resolveOfficialComputerUseClient({ userHome: root, legacyPluginRoot: path.join(root, "legacy"), runSync: signedBy("NOT_OPENAI") }),
-			/not signed by the expected OpenAI team/,
-		);
-	} finally {
-		await rm(root, { recursive: true, force: true });
-	}
-});
-
-test("rejects a symlinked client layout rather than accepting an arbitrary resolved path", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "cu-symlink-path."));
-	try {
-		const actualApp = path.join(root, "elsewhere", "Codex Computer Use.app");
-		await makeClient(actualApp);
-		const expectedParent = path.join(root, ".codex", "computer-use");
-		await mkdir(expectedParent, { recursive: true });
-		await symlink(actualApp, path.join(expectedParent, "Codex Computer Use.app"));
-		assert.throws(
-			() => resolveOfficialComputerUseClient({ userHome: root, legacyPluginRoot: path.join(root, "legacy"), runSync: signedBy() }),
-			/was not canonical/,
-		);
-	} finally {
-		await rm(root, { recursive: true, force: true });
-	}
-});
-
-test("retains the strict legacy plugin-bundle layout when the current component is absent", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "cu-legacy-resolution."));
-	try {
-		const appPath = path.join(root, "legacy", "Codex Computer Use.app");
-		const clientPath = await makeClient(appPath);
-		const resolved = resolveOfficialComputerUseClient({ userHome: root, legacyPluginRoot: path.join(root, "legacy"), runSync: signedBy() });
-		assert.deepEqual(resolved, { appPath: realpathSync(appPath), clientPath: realpathSync(clientPath), layout: "legacy-plugin-bundle" });
-	} finally {
-		await rm(root, { recursive: true, force: true });
-	}
-});
-
-test("uses a configured Computer Use app instead of the default layouts", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "cu-configured-client."));
-	try {
-		const appPath = path.join(root, "custom", "Codex Computer Use.app");
-		const clientPath = await makeClient(appPath);
-		await makeClient(path.join(root, ".codex", "computer-use", "Codex Computer Use.app"));
-		const configPath = path.join(root, "config.json");
-		await writeFile(configPath, JSON.stringify({ computerUseAppPath: appPath }));
-		const resolved = resolveOfficialComputerUseClient({ userHome: root, legacyPluginRoot: path.join(root, "legacy"), configPath, runSync: signedBy() });
-		assert.deepEqual(resolved, { appPath: realpathSync(appPath), clientPath: realpathSync(clientPath), layout: "configured" });
-	} finally {
-		await rm(root, { recursive: true, force: true });
-	}
-});
-
-async function makeExecutable(filePath: string): Promise<string> {
-	await mkdir(path.dirname(filePath), { recursive: true });
-	await writeFile(filePath, "signed fixture\n", { mode: 0o700 });
-	return realpathSync(filePath);
-}
-
-test("discovers and verifies both bundled components in a per-user ChatGPT installation", async () => {
+test("discovers and verifies Codex in a per-user ChatGPT installation", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "cu-user-applications."));
 	try {
 		const systemApp = path.join(root, "Applications/ChatGPT.app");
 		const userApp = path.join(root, "user/Applications/ChatGPT.app");
 		const options = { userHome: path.join(root, "user"), chatGptAppPaths: [systemApp, userApp], runSync: signedBy() };
 		const codex = await makeExecutable(path.join(userApp, "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"));
-		const appPath = path.join(userApp, "Contents/Resources/plugins/openai-bundled/plugins/computer-use/Codex Computer Use.app");
-		const clientPath = await makeClient(appPath);
 		assert.equal(resolveOfficialCodex(options), codex);
-		assert.deepEqual(resolveOfficialComputerUseClient(options), {
-			appPath: realpathSync(appPath), clientPath: realpathSync(clientPath), layout: "legacy-plugin-bundle",
-		});
 		assert.throws(() => resolveOfficialCodex({ ...options, runSync: signedBy("NOT_OPENAI") }), /not signed by the expected OpenAI team/);
-		assert.throws(() => resolveOfficialComputerUseClient({ ...options, runSync: signedBy("NOT_OPENAI") }), /not signed by the expected OpenAI team/);
 		// Preserve the system installation's precedence, even when its layout is older.
 		const systemCodex = await makeExecutable(path.join(systemApp, "Contents/Resources/codex"));
 		assert.equal(resolveOfficialCodex(options), systemCodex);
@@ -176,8 +234,6 @@ test("finds ChatGPT by bundle ID when the classic ChatGPT app holds ChatGPT.app"
 		await mkdir(path.join(classicApp, "Contents/Resources"), { recursive: true });
 		const codexApp = path.join(root, "Applications/Codex.app");
 		const codex = await makeExecutable(path.join(codexApp, "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"));
-		const clientApp = path.join(codexApp, "Contents/Resources/plugins/openai-bundled/plugins/computer-use/Codex Computer Use.app");
-		const clientPath = await makeClient(clientApp);
 		const queries: string[][] = [];
 		const signed = signedBy();
 		const runSync = (command: string, args: string[]) => {
@@ -187,9 +243,6 @@ test("finds ChatGPT by bundle ID when the classic ChatGPT app holds ChatGPT.app"
 		};
 		const options = { userHome: path.join(root, "user"), chatGptAppPaths: [classicApp], runSync };
 		assert.equal(resolveOfficialCodex(options), codex);
-		assert.deepEqual(resolveOfficialComputerUseClient(options), {
-			appPath: realpathSync(clientApp), clientPath: realpathSync(clientPath), layout: "legacy-plugin-bundle",
-		});
 		assert.deepEqual(queries[0], ['kMDItemCFBundleIdentifier == "com.openai.codex"']);
 	} finally {
 		await rm(root, { recursive: true, force: true });
@@ -283,11 +336,6 @@ test("a missing Codex inside an installed ChatGPT suggests updating this package
 			(error: Error) => error.message.includes(`ChatGPT is installed at ${app}; if it is up to date, an update may have moved this file.`)
 				&& /update codex-computer-use-mcp to its latest release/.test(error.message),
 		);
-		assert.throws(
-			() => resolveOfficialComputerUseClient({ userHome: root, chatGptAppPaths: [app], runSync: signedBy() }),
-			(error: Error) => error.message.includes(`ChatGPT is installed at ${app}`)
-				&& /update codex-computer-use-mcp to its latest release/.test(error.message),
-		);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -310,7 +358,7 @@ test("rejects a config file whose path is not a string", async () => {
 	try {
 		const configPath = path.join(root, "config.json");
 		await writeFile(configPath, JSON.stringify({ codexPath: 7 }));
-		assert.throws(() => resolveOfficialCodex({ configPath, runSync: signedBy() }), /must set "codexPath" and "computerUseAppPath", when present, to path strings/);
+		assert.throws(() => resolveOfficialCodex({ configPath, runSync: signedBy() }), /must set "codexPath" and "cuaReplConfigPath", when present, to path strings/);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
