@@ -22,6 +22,8 @@ Install from npm:
 pi install npm:codex-computer-use-mcp
 ```
 
+After `pi update`, run `/reload` to load the new version. Updating to 0.6.5 from an earlier version also works with `/reload`. Earlier versions loaded their code from `dist/`, which Pi keeps cached until it restarts.
+
 The extension registers the ten official Computer Use methods as Pi tools named `computer_use_<method>`, such as `computer_use_get_app_state` and `computer_use_click`. They use Pi's `codemode` exposure, so agents call and compose them from Pi's built-in `codemode` tool together with other Pi and MCP tools:
 
 ```js
