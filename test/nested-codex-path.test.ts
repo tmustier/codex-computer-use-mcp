@@ -9,7 +9,7 @@ import test from "node:test";
 const broker = await import("../src/direct-broker.ts");
 const service = await import("../src/direct-service.ts");
 
-test("the app-server receives ChatGPT's cua_repl entry unchanged, with the real home and a private cwd", async (t) => {
+test("the app-server runs ChatGPT's node_repl directly, with its official settings, the real home and a private cwd", async (t) => {
 	const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "cu-nested-codex.")));
 	const previous = process.env.CODEX_CLI_PATH;
 	try {
@@ -52,7 +52,7 @@ test("the app-server receives ChatGPT's cua_repl entry unchanged, with the real 
 			assert.notEqual(env.HOME, os.userInfo().homedir);
 			const table = args.find((arg) => arg.startsWith("mcp_servers="));
 			assert.equal(table, `mcp_servers=${broker.toToml({
-				cua_repl: { ...server, env: { ...server.env, HOME: os.userInfo().homedir }, cwd: String(cwd), enabled: true },
+				cua_repl: { ...server, command: nodeRepl, args: [], env: { ...server.env, HOME: os.userInfo().homedir }, cwd: String(cwd), enabled: true },
 			})}`);
 			throw new Error("captured app-server spawn");
 		});

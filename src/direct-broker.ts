@@ -718,9 +718,21 @@ export async function createOfficialCuaReplSession(
 		let commandArgs = options.appServerArgs;
 		if (!commandArgs) {
 			assert(verification.server && verification.codexPath, "Test brokers must supply appServerArgs");
-			// The app-server runs with a private HOME. The official runtime finds the shared Computer Use
-			// service socket under the account's real home, as it does when ChatGPT starts it.
-			const server = { ...verification.server, env: { ...verification.server.env, HOME: os.userInfo().homedir }, cwd: workDir, enabled: true };
+			// ChatGPT launches node_repl through a shell that exports BROWSER_USE_ACCESS_EXECUTOR_ID,
+			// empty when ChatGPT supplies none. Any value makes the runtime ask ChatGPT's per-turn browser
+			// access grant host, which only ChatGPT runs. By the owner's choice, node_repl starts directly so
+			// browser surfaces work without that grant. The app-server runs with a private HOME; the
+			// runtime finds the shared Computer Use service socket under the account's real home.
+			const launch = [verification.server.command, ...verification.server.args];
+			const nodeRepl = launch.findIndex((part) => path.isAbsolute(part) && path.basename(part) === "node_repl");
+			const server = {
+				...verification.server,
+				command: launch[nodeRepl]!,
+				args: launch.slice(nodeRepl + 1),
+				env: { ...verification.server.env, HOME: os.userInfo().homedir },
+				cwd: workDir,
+				enabled: true,
+			};
 			const mcpTable = toToml({ [CUA_REPL_SERVER]: server });
 			const disabledProvider = '{ name = "Direct dispatch disabled provider", base_url = "http://127.0.0.1:9/v1", wire_api = "responses", request_max_retries = 0, stream_max_retries = 0, supports_websockets = false, requires_openai_auth = false }';
 			commandArgs = [

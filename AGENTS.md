@@ -4,7 +4,7 @@ This package is a thin transport adapter to OpenAI's official signed macOS Compu
 
 ## Scope
 
-- Follow ChatGPT's current Computer Use route. Expose the official `js` and `js_reset` tools with the descriptions and parameters ChatGPT's installed runtime gives its own model, and run ChatGPT's `cua_repl` server entry unchanged apart from what the isolated transport needs.
+- Follow ChatGPT's current Computer Use route. Expose the official `js` and `js_reset` tools with the descriptions and parameters ChatGPT's installed runtime gives its own model, and run ChatGPT's `cua_repl` server entry unchanged apart from what the isolated transport needs. By the owner's choice, `node_repl` starts directly, without ChatGPT's per-turn browser access grant.
 - Do not add wrapper permission prompts, app or intent allowlists, action gates, risk classifiers, content inspection, alternate modes or model-driven planning.
 - Do not reintroduce app rewriting, same-app locking or focus telemetry.
 - Add adapter logic only for transport compatibility, zero-model-turn execution, retained official sessions, process lifecycle, packaging or a concrete user-visible bug.

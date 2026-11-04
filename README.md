@@ -46,7 +46,7 @@ await app.getAXState();
 
 Bindings such as `app` last across calls and agent turns until `cua_repl_reset`, a transport failure or the end of the Pi session. When the agent settles, the extension sends the official `turn_ended` notification, as ChatGPT does when its turn stops, so the service can clear that turn's software cursor.
 
-The runtime's browser surfaces, such as Chrome through ChatGPT's extension, need a per-turn browser access grant from ChatGPT itself. Outside ChatGPT there is no grant, so `cua.getState()` reports `The browser access host is unavailable` and lists no browsers. Native apps, including browsers operated as apps, work as usual.
+The runtime also drives browsers ChatGPT can reach, such as Chrome through ChatGPT's Chrome extension. `cua.listTabs()` lists your tabs, and `cua.createBrowserTab("chrome", url, { sessionName })` opens one for the agent, which can read it, act in it and close it. Inside ChatGPT each turn needs ChatGPT's browser access grant. This adapter starts the runtime without ChatGPT's grant host, so browser use needs no grant.
 
 A failed call returns the official error text as an error result, followed by a recovery step when the adapter recognises the cause (see [Failures](#failures)). Pi limits returned text to 50KB or 2,000 lines. When text exceeds that limit, the complete text is written to a mode-0600 file in a private directory under `/tmp`. Images are returned directly and are never spilled to disk.
 
@@ -92,7 +92,7 @@ MCP has no turn boundary, so the server sends `turn_ended` after a minute withou
 
 ## Behaviour
 
-Each session starts ChatGPT's signed Codex app-server with an isolated, credential-free home and asks it to run ChatGPT's own `cua_repl` server: OpenAI's signed `node_repl` with the settings ChatGPT wrote to `~/.codex/plugins/cache/openai-bundled/unified-computer-use/<ChatGPT version>/.mcp.json`. The adapter passes that server entry through unchanged, except for a private working directory and the account's real `HOME`, which the runtime needs to find the shared Computer Use service. The app-server stays isolated. The Computer Use service accepts the runtime only when a signed OpenAI parent starts it, so the app-server cannot be skipped.
+Each session starts ChatGPT's signed Codex app-server with an isolated, credential-free home and asks it to run ChatGPT's own `cua_repl` server: OpenAI's signed `node_repl` with the settings ChatGPT wrote to `~/.codex/plugins/cache/openai-bundled/unified-computer-use/<ChatGPT version>/.mcp.json`. The adapter passes that server entry through unchanged, with three exceptions: a private working directory; the account's real `HOME`, which the runtime needs to find the shared Computer Use service; and starting `node_repl` directly rather than through ChatGPT's shell wrapper, so the runtime does not ask ChatGPT for a browser access grant. The app-server stays isolated. The Computer Use service accepts the runtime only when a signed OpenAI parent starts it, so the app-server cannot be skipped.
 
 Production calls require verified OpenAI-signed binaries with Team ID `2DC432GLL2`: the app-server, `node_repl`, the Node.js binary it names, and the Computer Use service. The adapter rejects any model-turn activity. It adds no permission prompts, app allowlist, action gate or content inspection. App-server uses Codex Full access. The adapter forwards any elicitation that the official host emits.
 
