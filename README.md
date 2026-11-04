@@ -9,7 +9,7 @@ OpenAI does not produce or endorse this independent project. It relies on an exp
 - macOS with an unlocked user session
 - Node.js 22 or newer
 - the official ChatGPT macOS app with its unified Computer Use plugin (tested with ChatGPT for Work 26.1029.61003), by default at `/Applications/ChatGPT.app`
-- ChatGPT opened at least once since its last update, so it has written its Computer Use runtime settings
+- ChatGPT opened at least once since its last update, so it has written its Computer Use runtime settings. ChatGPT writes them only when OpenAI has turned on its unified Computer Use runtime for the account; without it, use version 0.6.5
 - the Computer Use component installed by ChatGPT, by default under `~/.codex/computer-use/`
 - Pi 0.99.0 or newer when using the Pi integration
 
@@ -136,7 +136,7 @@ Errors name the cause and the next step, so an agent can recover or tell the use
 | Cause | What the error says |
 | --- | --- |
 | The Computer Use service is stuck | Official `Sky Computer Use native pipe startup failed`, or a tool-call timeout, followed by `pkill -f MacOS/SkyComputerUseService`. The runtime relaunches the service on the next call. If it fails again, relaunch ChatGPT. |
-| ChatGPT has not prepared its runtime since updating | `ChatGPT <version> has not prepared its Computer Use runtime yet`: open ChatGPT, wait for it to start, and retry. |
+| ChatGPT has not prepared its runtime since updating, or OpenAI has not turned it on for the account | `ChatGPT <version> has not prepared its Computer Use runtime yet`: open ChatGPT, wait for it to start, and retry. If the runtime is still missing, install 0.6.5, which uses ChatGPT's older Computer Use tools. |
 | ChatGPT is updating, or the Mac is busy | `codesign did not finish within 30 seconds`: wait and retry. |
 | A ChatGPT bundle is damaged or mid-update | `Signature verification failed for …`, with the reason from `codesign`. |
 | ChatGPT and this package no longer match | The app-server's own error, the last lines it printed before exiting, or an unexpected runtime settings shape, followed by both versions and a step to update ChatGPT and this package and restart the client. |

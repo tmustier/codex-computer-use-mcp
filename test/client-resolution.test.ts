@@ -95,7 +95,7 @@ test("a ChatGPT that has not prepared its runtime for this version says to open 
 		const plist = { ...fixture.plist, [Object.keys(fixture.plist)[0]!]: "26.1029.61003" };
 		assert.throws(
 			() => resolveOfficialCuaRepl(fixture.codex, { userHome: fixture.userHome, runSync: signedBy("2DC432GLL2", plist) }),
-			/ChatGPT 26\.1029\.61003 has not prepared its Computer Use runtime yet \(expected .*26\.1029\.61003\/\.mcp\.json\)\. Open ChatGPT \(`open -a ChatGPT`\)/,
+			/ChatGPT 26\.1029\.61003 has not prepared its Computer Use runtime yet \(expected .*26\.1029\.61003\/\.mcp\.json\)\. Open ChatGPT \(`open -a ChatGPT`\).*not yet turned on the unified Computer Use runtime.*`pi install npm:codex-computer-use-mcp@0\.6\.5`/,
 		);
 	} finally {
 		await rm(root, { recursive: true, force: true });
