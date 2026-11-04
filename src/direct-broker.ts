@@ -17,6 +17,7 @@ const CODEX_RELATIVE_PATHS = [
 const COMPUTER_USE_PLUGIN_RELATIVE_PATH = "Contents/Resources/plugins/openai-bundled/plugins/computer-use";
 const COMPUTER_USE_APP_RELATIVE_PATH = "computer-use/Codex Computer Use.app";
 const CLIENT_RELATIVE_PATH = "Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient";
+const CHATGPT_APP_BUNDLE_ID = "com.openai.codex";
 const OPENAI_TEAM_ID = "2DC432GLL2";
 // agent-default (not a user rule): 2026-11-04. codesign can take longer than 10s after updates or under load.
 const VERIFY_COMMAND_TIMEOUT_MS = 30_000;
@@ -207,12 +208,22 @@ function defaultChatGptAppPaths(userHome = os.userInfo().homedir): string[] {
 	return ["/Applications/ChatGPT.app", path.join(userHome, "Applications", "ChatGPT.app")];
 }
 
+/**
+ * The default locations first, then any other app Spotlight indexes under ChatGPT's bundle ID, such as
+ * an install still named Codex.app because the separate classic ChatGPT app occupies ChatGPT.app.
+ */
+function installedChatGptAppPaths(defaultApps: string[], runSync: RunSync): string[] {
+	const indexed = runSync("/usr/bin/mdfind", [`kMDItemCFBundleIdentifier == "${CHATGPT_APP_BUNDLE_ID}"`]);
+	const indexedApps = indexed.status === 0 ? (indexed.stdout ?? "").split("\n").filter((line) => line.endsWith(".app")) : [];
+	return [...new Set([...defaultApps, ...indexedApps])];
+}
+
 interface ResolveOfficialComputerUseClientOptions {
 	/** Test-only OS-account home override. Production never reads HOME or CODEX_HOME. */
 	userHome?: string;
 	/** Test-only legacy root override. */
 	legacyPluginRoot?: string;
-	/** Test-only installed ChatGPT app locations override. */
+	/** Test-only override of the default ChatGPT app locations. */
 	chatGptAppPaths?: string[];
 	configPath?: string;
 	runSync?: RunSync;
@@ -253,7 +264,7 @@ export function resolveOfficialComputerUseClient(options: ResolveOfficialCompute
 	if (current) return current;
 
 	const checked = [path.join(currentApp, CLIENT_RELATIVE_PATH)];
-	const chatGptApps = options.chatGptAppPaths ?? defaultChatGptAppPaths(userHome);
+	const chatGptApps = installedChatGptAppPaths(options.chatGptAppPaths ?? defaultChatGptAppPaths(userHome), runSync);
 	const legacyRoots = options.legacyPluginRoot ? [options.legacyPluginRoot]
 		: chatGptApps.map((app) => path.join(app, COMPUTER_USE_PLUGIN_RELATIVE_PATH));
 	for (const legacyRoot of legacyRoots) {
@@ -278,7 +289,7 @@ export function resolveOfficialComputerUseClient(options: ResolveOfficialCompute
 export function resolveOfficialCodex(options: ResolveOfficialComputerUseClientOptions = {}): string {
 	const runSync = options.runSync ?? productionRunSync;
 	const config = options.configPath ? readOfficialPathConfig(options.configPath) : {};
-	const chatGptApps = config.codexPath ? [] : options.chatGptAppPaths ?? defaultChatGptAppPaths(options.userHome);
+	const chatGptApps = config.codexPath ? [] : installedChatGptAppPaths(options.chatGptAppPaths ?? defaultChatGptAppPaths(options.userHome), runSync);
 	const candidates = config.codexPath ? [path.resolve(config.codexPath)]
 		: chatGptApps.flatMap((app) => CODEX_RELATIVE_PATHS.map((relative) => path.join(app, relative)));
 	const found = candidates.find((candidate) => existsSync(candidate));
