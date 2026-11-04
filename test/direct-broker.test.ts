@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { z } from "zod";
-import { callOfficialCuaRepl, createOfficialCuaReplSession, DirectBrokerCallError, toToml } from "../src/direct-broker.ts";
+import { callOfficialCuaRepl, createOfficialCuaReplSession, DirectBrokerCallError } from "../src/direct-broker.ts";
 import packageMetadata from "../package.json" with { type: "json" };
 
 const packageVersion = packageMetadata.version;
@@ -71,7 +71,6 @@ function options(script: string, mode = "ok") {
 		appServerCommand: process.execPath,
 		appServerArgs: [script, mode],
 		skipSignatureVerification: true,
-		cuaReplServer: { command: "/unused/node_repl", args: [], env: {} },
 	};
 }
 
@@ -154,13 +153,6 @@ test("one session keeps REPL bindings across turns, and each ended turn gets its
 		assert.equal(turns[0], turns[1]);
 		assert.notEqual(turns[1], turns[2]);
 	} finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test("app-server settings are serialised as TOML that keeps every official value", () => {
-	assert.equal(
-		toToml({ command: "/bin/sh", args: ["-c", 'exec "$@"'], env: { A: "line\nbreak", B: "x\u007fy" }, enabled: true, startup_timeout_sec: 120, tools: { js: { output_token_limit: 25000 } } }),
-		'{ "command" = "/bin/sh", "args" = ["-c", "exec \\"$@\\""], "env" = { "A" = "line\\nbreak", "B" = "x\\u007Fy" }, "enabled" = true, "startup_timeout_sec" = 120, "tools" = { "js" = { "output_token_limit" = 25000 } } }',
-	);
 });
 
 test("one-shot wrapper preserves a setup-phase cleanup failure", async () => {

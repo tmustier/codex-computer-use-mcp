@@ -26,7 +26,7 @@ test("the app-server runs ChatGPT's node_repl directly, with its official settin
 		const server = {
 			command: "/bin/sh",
 			args: ["-c", 'export X="${X-}"; exec "$@"', "cua-repl", nodeRepl],
-			env: { SKY_CUA_SERVICE_PATH: computerUseApp, NODE_REPL_TOOL_OVERRIDES: '{"a":"b\\nc"}' },
+			env: { SKY_CUA_SERVICE_PATH: computerUseApp, NODE_REPL_TOOL_OVERRIDES: '{"a":"b\\nc"}', EXTRA: "line\nbreak\u007f" },
 			enabled_tools: ["js", "js_reset", "turn_ended"],
 			tools: { js: { output_token_limit: 25000 } },
 		};
@@ -51,9 +51,15 @@ test("the app-server runs ChatGPT's node_repl directly, with its official settin
 			assert.equal(env.PATH, "/usr/bin:/bin:/usr/sbin:/sbin");
 			assert.notEqual(env.HOME, os.userInfo().homedir);
 			const table = args.find((arg) => arg.startsWith("mcp_servers="));
-			assert.equal(table, `mcp_servers=${broker.toToml({
-				cua_repl: { ...server, command: nodeRepl, args: [], env: { ...server.env, HOME: os.userInfo().homedir }, cwd: String(cwd), enabled: true },
-			})}`);
+			assert.equal(table, 'mcp_servers={ "cua_repl" = { '
+				+ `"command" = ${JSON.stringify(nodeRepl)}, "args" = [], `
+				+ `"env" = { "SKY_CUA_SERVICE_PATH" = ${JSON.stringify(computerUseApp)}, `
+				+ `"NODE_REPL_TOOL_OVERRIDES" = ${JSON.stringify(server.env.NODE_REPL_TOOL_OVERRIDES)}, `
+				+ '"EXTRA" = "line\\nbreak\\u007F", '
+				+ `"HOME" = ${JSON.stringify(os.userInfo().homedir)} }, `
+				+ '"enabled_tools" = ["js", "js_reset", "turn_ended"], '
+				+ '"tools" = { "js" = { "output_token_limit" = 25000 } }, '
+				+ `"cwd" = ${JSON.stringify(cwd)}, "enabled" = true } }`);
 			throw new Error("captured app-server spawn");
 		});
 		syncBuiltinESMExports();

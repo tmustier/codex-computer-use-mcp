@@ -88,8 +88,6 @@ export interface DirectBrokerOptions {
 	appServerArgs?: string[];
 	/** Test-only signature bypass. */
 	skipSignatureVerification?: boolean;
-	/** Test-only cua_repl server entry, used only with skipSignatureVerification. */
-	cuaReplServer?: CuaReplServer;
 	/** Test-only process-enumerator override. */
 	processEnumeratorCommand?: string;
 	onSpawn?: (pid: number) => void;
@@ -385,17 +383,8 @@ function processExists(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
 		return true;
-	} catch (error: any) {
-		return error?.code === "EPERM";
-	}
-}
-
-function processGroupExists(pid: number): boolean {
-	try {
-		process.kill(-pid, 0);
-		return true;
-	} catch (error: any) {
-		return error?.code === "EPERM";
+	} catch (error) {
+		return error instanceof Error && "code" in error && error.code === "EPERM";
 	}
 }
 
@@ -528,7 +517,7 @@ async function terminateGroup(
 		}
 	}
 	for (let elapsed = 0; elapsed < 1500; elapsed += 25) {
-		if (!processGroupExists(pid) && [...descendants].every((child) => !processExists(child))) break;
+		if (!processExists(-pid) && [...descendants].every((child) => !processExists(child))) break;
 		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
 	let cwdSurvivors = new Set<number>();
@@ -537,14 +526,14 @@ async function terminateGroup(
 	for (const survivor of cwdSurvivors) {
 		try { process.kill(survivor, "SIGKILL"); } catch { /* exited */ }
 	}
-	if (processGroupExists(pid) || [...descendants, ...cwdSurvivors].some((child) => processExists(child))) {
+	if (processExists(-pid) || [...descendants, ...cwdSurvivors].some((child) => processExists(child))) {
 		cleanupError ??= new Error("Official app-server process tree did not terminate");
 	}
 	if (cleanupError) throw cleanupError;
 }
 
 /** Serialise JSON as a TOML value for the app-server's `-c key=value` overrides. */
-export function toToml(value: JsonValue): string {
+function toToml(value: JsonValue): string {
 	if (value === null) throw new Error("TOML has no null value");
 	if (Array.isArray(value)) return `[${value.map(toToml).join(", ")}]`;
 	if (value instanceof Object) {
@@ -572,7 +561,7 @@ export async function createOfficialCuaReplSession(
 	options: DirectBrokerOptions = {},
 ): Promise<OfficialCuaReplSession> {
 	const verification = options.skipSignatureVerification
-		? { brokerVersion: "test-app-server", clientBuild: "test-client", server: options.cuaReplServer, codexPath: undefined }
+		? { brokerVersion: "test-app-server", clientBuild: "test-client", server: undefined, codexPath: undefined }
 		: (() => {
 			const verified = verifyOfficialDirectBroker({ configPath: options.configPath });
 			return { ...verified, server: verified.cuaRepl.server };
@@ -926,10 +915,12 @@ export async function callOfficialCuaRepl(
 		}
 	} catch (cleanupError) {
 		const closeFailure = cleanupError instanceof Error ? cleanupError : new Error(String(cleanupError));
-		if (closeFailure.message !== "Official direct Computer Use broker cleanup failed") {
-			throw new DirectBrokerCallError(closeFailure.message, true, closeFailure, failure instanceof DirectBrokerCallError ? failure : {});
-		}
-		throw new DirectBrokerCallError(closeFailure.message, false, closeFailure, failure instanceof DirectBrokerCallError ? failure : {});
+		throw new DirectBrokerCallError(
+			closeFailure.message,
+			closeFailure.message !== "Official direct Computer Use broker cleanup failed",
+			closeFailure,
+			failure instanceof DirectBrokerCallError ? failure : {},
+		);
 	}
 	if (failure) {
 		if (failure instanceof DirectBrokerCallError) {
@@ -937,6 +928,6 @@ export async function callOfficialCuaRepl(
 		}
 		throw failure;
 	}
-	if (!result) throw new DirectBrokerCallError("Official direct Computer Use ended without a result", cleanupVerified);
+	assert(result, "A successful Computer Use call returns a result");
 	return { ...result, brokerCleanupVerified: true };
 }

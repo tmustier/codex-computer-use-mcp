@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
-import { appendAudit, type AuditRecord } from "./audit.ts";
+import { appendAudit } from "./audit.ts";
 import {
 	callOfficialCuaRepl,
 	DirectBrokerCallError,
@@ -16,7 +16,6 @@ import {
 import {
 	CUA_REPL_TOOLS,
 	cuaReplToolDefinitions,
-	type CuaReplArguments,
 	type CuaReplTool,
 	type CuaReplToolSet,
 	type JsonObject,
@@ -52,21 +51,6 @@ function inputByteCount(value: JsonValue): number {
 	return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
 
-function contentMetadata(content: JsonObject[]) {
-	const types = [...new Set(content.map((item) => String(item.type ?? "unknown")))].sort();
-	return { types, bytes: Buffer.byteLength(JSON.stringify(content), "utf8") };
-}
-
-/** Give the app-server room beyond node_repl's own execution timeout, which defaults to 30 seconds. */
-const executionTimeoutSchema = z.object({ timeout_ms: z.number().optional() });
-
-function requestTimeoutMs(tool: CuaReplTool, args: CuaReplArguments): number {
-	const requested = executionTimeoutSchema.safeParse(args);
-	const executionMs = tool === "js" && requested.success ? requested.data.timeout_ms ?? 30_000 : 30_000;
-	// agent-default (not a user rule): 2026-11-05. 120s floor kept from the earlier per-method timeout.
-	return Math.max(120_000, executionMs + 30_000);
-}
-
 export async function executeDirectTool(raw: JsonValue, deps: DirectServiceDependencies = {}): Promise<DirectResponse> {
 	const stateRoot = deps.stateRoot ?? defaultStateRoot();
 	const runId = crypto.randomUUID();
@@ -93,58 +77,49 @@ export async function executeDirectTool(raw: JsonValue, deps: DirectServiceDepen
 		throw new Error("Direct Computer Use request did not name a cua_repl tool");
 	}
 	const { tool, arguments: args } = parsed.data;
-	let broker: DirectBrokerResult | undefined;
-	let brokerFailure: DirectBrokerCallError | undefined;
-	let outcome = "broker_failed";
-	let brokerCleanupVerified = false;
-	let failure: Error | undefined;
-
+	const timeout = z.number().safeParse(args.timeout_ms);
+	const executionMs = tool === "js" && timeout.success ? timeout.data : 30_000;
+	let result: { ok: true; broker: DirectBrokerResult } | { ok: false; error: Error };
 	try {
-		broker = await (deps.callTool ?? callOfficialCuaRepl)(tool, args, {
+		const broker = await (deps.callTool ?? callOfficialCuaRepl)(tool, args, {
 			signal: deps.signal,
-			timeoutMs: requestTimeoutMs(tool, args),
+			// Leave room beyond node_repl's execution timeout, with the existing two-minute floor.
+			timeoutMs: Math.max(120_000, executionMs + 30_000),
 			onElicitation: deps.onElicitation,
 			supportsOpenAiFormElicitation: deps.supportsOpenAiFormElicitation,
 			configPath: pathConfigFile(stateRoot),
 		});
-		brokerCleanupVerified = broker.brokerCleanupVerified;
-		outcome = broker.isError ? "official_error" : "ok";
+		result = { ok: true, broker };
 	} catch (error) {
-		if (error instanceof DirectBrokerCallError) {
-			brokerFailure = error;
-			brokerCleanupVerified = error.cleanupVerified;
-		}
-		if (deps.signal?.aborted) outcome = "cancelled";
-		failure = error instanceof Error ? error : new Error("Direct Computer Use failed");
+		result = { ok: false, error: error instanceof Error ? error : new Error("Direct Computer Use failed") };
 	}
 
-	const metadata = broker ? contentMetadata(broker.content) : { types: [], bytes: 0 };
-	const audit: AuditRecord = {
+	const brokerFailure = !result.ok && result.error instanceof DirectBrokerCallError ? result.error : undefined;
+	const evidence = result.ok ? result.broker : brokerFailure;
+	const content = result.ok ? result.broker.content : [];
+
+	await appendAudit(stateRoot, {
 		timestamp: new Date().toISOString(),
 		runId,
 		method: tool,
 		inputBytes: inputByteCount(args),
-		outcome,
+		outcome: result.ok
+			? result.broker.isError ? "official_error" : "ok"
+			: deps.signal?.aborted ? "cancelled" : "broker_failed",
 		durationMs: Date.now() - startedAt,
-		brokerVersion: broker?.brokerVersion ?? brokerFailure?.brokerVersion ?? null,
-		clientBuild: broker?.clientBuild ?? brokerFailure?.clientBuild ?? null,
-		directCalls: broker ? 1 : brokerFailure?.directCalls ?? 0,
-		modelTurnsStarted: broker?.modelTurnsStarted ?? brokerFailure?.modelTurnsStarted ?? 0,
-		ephemeralThread: broker?.ephemeralThread ?? brokerFailure?.ephemeralThread ?? null,
-		elicitationRequests: broker?.elicitationRequests ?? brokerFailure?.elicitationRequests ?? 0,
-		brokerCleanupVerified,
-		resultContentTypes: metadata.types,
-		resultBytes: metadata.bytes,
-	};
-	await appendAudit(stateRoot, audit);
-	if (failure) throw failure;
-	if (!broker) throw new Error("Direct Computer Use ended without a result");
-
-	return {
-		isError: broker.isError,
-		content: broker.content,
-		structuredContent: broker.structuredContent,
-	};
+		brokerVersion: evidence?.brokerVersion ?? null,
+		clientBuild: evidence?.clientBuild ?? null,
+		directCalls: result.ok ? 1 : brokerFailure?.directCalls ?? 0,
+		modelTurnsStarted: evidence?.modelTurnsStarted ?? 0,
+		ephemeralThread: evidence?.ephemeralThread ?? null,
+		elicitationRequests: evidence?.elicitationRequests ?? 0,
+		brokerCleanupVerified: result.ok ? result.broker.brokerCleanupVerified : brokerFailure?.cleanupVerified ?? false,
+		resultContentTypes: [...new Set(content.map((item) => String(item.type ?? "unknown")))].sort(),
+		resultBytes: result.ok ? Buffer.byteLength(JSON.stringify(content), "utf8") : 0,
+	});
+	if (!result.ok) throw result.error;
+	const { isError, structuredContent } = result.broker;
+	return { isError, content, structuredContent };
 }
 
 type DirectStatus = {
@@ -172,26 +147,18 @@ export function getDirectStatus(stateRoot = defaultStateRoot()): DirectStatus {
 	}
 }
 
-export interface OfficialToolDefinitions extends CuaReplToolSet {
-	/** Why the official definitions could not be read; the fallback definitions name it. */
-	unavailable?: string;
-}
-
-const FALLBACK_JS_DESCRIPTION = "Control native apps or browsers on the user's computer through OpenAI's official Computer Use JavaScript runtime (cua_repl).";
-
 /** The official tool definitions for the installed ChatGPT, or minimal stand-ins that say why they are missing. */
-export function officialToolDefinitions(stateRoot = defaultStateRoot()): OfficialToolDefinitions {
+export function officialToolDefinitions(stateRoot = defaultStateRoot()): CuaReplToolSet {
 	try {
 		return cuaReplToolDefinitions(readOfficialCuaReplServer({ configPath: pathConfigFile(stateRoot) }).env);
 	} catch (error) {
 		const unavailable = error instanceof Error ? error.message : String(error);
 		const note = ` Computer Use is not ready: ${unavailable}`;
 		return {
-			unavailable,
 			tools: [
 				{
 					name: "js",
-					description: FALLBACK_JS_DESCRIPTION + note,
+					description: "Control native apps or browsers on the user's computer through OpenAI's official Computer Use JavaScript runtime (cua_repl)." + note,
 					inputSchema: { type: "object", properties: { code: { type: "string", description: "JavaScript to run in the official cua_repl runtime." } }, additionalProperties: false },
 					annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 				},

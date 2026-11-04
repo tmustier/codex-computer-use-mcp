@@ -137,3 +137,31 @@ test("official tool errors remain errors without entering audit content", async 
 		await rm(root, { recursive: true, force: true });
 	}
 });
+
+test("transport failures and cancellation are audited without inventing broker evidence", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-transport-failure-test."));
+	try {
+		for (const cancelled of [false, true]) {
+			const error = new Error("transport failed");
+			await assert.rejects(executeDirectTool({ tool: "js", arguments: { code: "1" } }, {
+				stateRoot: root,
+				signal: cancelled ? AbortSignal.abort() : undefined,
+				callTool: async () => { throw error; },
+			}), (caught) => caught === error);
+		}
+		const records = (await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8"))
+			.trim().split("\n").map((line) => JSON.parse(line));
+		assert.deepEqual(records.map((record) => record.outcome), ["broker_failed", "cancelled"]);
+		for (const record of records) {
+			assert.equal(record.brokerVersion, null);
+			assert.equal(record.clientBuild, null);
+			assert.equal(record.directCalls, 0);
+			assert.equal(record.ephemeralThread, null);
+			assert.equal(record.brokerCleanupVerified, false);
+			assert.deepEqual(record.resultContentTypes, []);
+			assert.equal(record.resultBytes, 0);
+		}
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});

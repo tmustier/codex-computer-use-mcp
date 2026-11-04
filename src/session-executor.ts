@@ -50,18 +50,6 @@ export class DirectSessionExecutor {
 		await session?.close();
 	}
 
-	private scheduleIdleTurnEnd(): void {
-		this.clearIdleTimer();
-		if (!this.dependencies.idleTurnEndMs || !this.session) return;
-		const timer = setTimeout(() => {
-			void this.runExclusive(async () => {
-				if (this.idleTimer === timer) await this.session?.endTurn();
-			}).catch(() => undefined);
-		}, this.dependencies.idleTurnEndMs);
-		this.idleTimer = timer;
-		timer.unref();
-	}
-
 	async execute(
 		tool: CuaReplTool,
 		params: CuaReplArguments,
@@ -80,7 +68,15 @@ export class DirectSessionExecutor {
 						return this.session.call(directTool, args, options);
 					},
 				});
-				this.scheduleIdleTurnEnd();
+				if (this.dependencies.idleTurnEndMs) {
+					const timer = setTimeout(() => {
+						void this.runExclusive(async () => {
+							if (this.idleTimer === timer) await this.session?.endTurn();
+						}).catch(() => undefined);
+					}, this.dependencies.idleTurnEndMs);
+					this.idleTimer = timer;
+					timer.unref();
+				}
 				return response;
 			} catch (error) {
 				await this.closeSession().catch(() => undefined);
