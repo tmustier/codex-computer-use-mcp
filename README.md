@@ -104,6 +104,18 @@ The adapter reads this file when it starts each Computer Use session, so changes
 
 If a component is missing, install or update the [official ChatGPT macOS app](https://chatgpt.com/download), open it, and install its Computer Use component. Installing this npm package alone does not install those signed components. The error lists every path checked and the exact config file to edit. Correct `codexPath` / `computerUseAppPath` there, or remove a stale override to restore automatic discovery. For Pi this is normally `~/.pi/agent/direct-computer-use/config.json`; for standalone MCP/CLI it is `~/.direct-computer-use/config.json`. `CODEX_COMPUTER_USE_HOME` overrides the state directory. `/computer-use-status` and `codex-computer-use-mcp --status` show the effective config path and the current error.
 
+### Operating ChatGPT itself
+
+By default the official service refuses to operate the ChatGPT app, with `Computer Use is not allowed to use the app 'com.openai.codex' for safety reasons.` As of ChatGPT for Work 26.1029.61003 with Computer Use 1001730, a global macOS preference lifts this:
+
+```bash
+defaults write -g ComputerUseAllowForbiddenTargets -bool YES
+```
+
+It applies to every Computer Use client on the Mac, including ChatGPT's own threads. The name suggests it also allows the service's other forbidden apps; only ChatGPT has been tested. To undo it, run `defaults delete -g ComputerUseAllowForbiddenTargets`.
+
+Select ChatGPT by full path, such as `/Applications/ChatGPT.app`, when another copy of the app shares its `com.openai.codex` bundle identifier. ChatGPT exposes little beyond its window controls and menu bar to the accessibility tree, so most interaction needs the screenshot and coordinates.
+
 Pi limits returned text to 50KB or 2,000 lines. When text exceeds that limit, the complete text is written to a mode-0600 file in a private directory under `/tmp`. Images are returned directly and are never spilled to disk.
 
 ### Failures
