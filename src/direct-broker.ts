@@ -307,7 +307,7 @@ function readCuaReplServer(codexPath: string, options: ResolveOfficialOptions): 
 		}
 		configPath = path.join(userHome, CUA_REPL_CACHE_RELATIVE_PATH, version, ".mcp.json");
 		if (!existsSync(configPath)) {
-			throw new BrokerVerificationError(`ChatGPT ${version} has not prepared its Computer Use runtime yet (expected ${configPath}). Open ChatGPT (\`open -a ChatGPT\`) and wait for it to finish starting, then retry. If the file is still missing, this ChatGPT build does not include the unified Computer Use plugin; update ChatGPT, or tell the user.`);
+			throw new BrokerVerificationError(`ChatGPT ${version} has not prepared its Computer Use runtime yet (expected ${configPath}). Open ChatGPT (\`open -a ChatGPT\`) and wait for it to finish starting, then retry. If the file is still missing while ChatGPT is running, OpenAI has not yet turned on the unified Computer Use runtime for this ChatGPT account. Until it does, tell the user to install codex-computer-use-mcp 0.6.5, which uses the older Computer Use tools: \`pi install npm:codex-computer-use-mcp@0.6.5\` for Pi, or \`npx codex-computer-use-mcp@0.6.5\` for MCP.`);
 		}
 	}
 	let server: CuaReplServer;
