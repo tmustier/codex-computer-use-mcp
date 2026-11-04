@@ -18,6 +18,15 @@ const COMPUTER_USE_PLUGIN_RELATIVE_PATH = "Contents/Resources/plugins/openai-bun
 const COMPUTER_USE_APP_RELATIVE_PATH = "computer-use/Codex Computer Use.app";
 const CLIENT_RELATIVE_PATH = "Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient";
 const OPENAI_TEAM_ID = "2DC432GLL2";
+// agent-default (not a user rule): 2026-11-04. codesign can take longer than 10s after updates or under load.
+const VERIFY_COMMAND_TIMEOUT_MS = 30_000;
+
+function outOfStepHint(codexVersion?: string): string {
+	const versions = `codex-computer-use-mcp ${PACKAGE_VERSION}${codexVersion ? `, ${codexVersion}` : ""}`;
+	return `ChatGPT and codex-computer-use-mcp may be out of step (${versions}). Open ChatGPT so it can install updates (\`open -a ChatGPT\`), update codex-computer-use-mcp to its latest release, restart Pi or the MCP client, then retry. If it still fails, tell the user.`;
+}
+
+const STUCK_SERVICE_HINT = "The Computer Use service may be stuck. Restart it with `pkill -f MacOS/SkyComputerUseService` (it relaunches on the next call, with or without ChatGPT running), then retry once. If it fails again, ask the user to relaunch ChatGPT.";
 
 const jsonObjectSchema = z.record(z.string(), z.json());
 const elicitationRequestSchema = z.object({
@@ -133,12 +142,19 @@ interface CommandResult {
 type RunSync = (command: string, args: string[]) => CommandResult;
 
 function productionRunSync(command: string, args: string[]): CommandResult {
-	return spawnSync(command, args, { encoding: "utf8", timeout: 10_000 });
+	return spawnSync(command, args, { encoding: "utf8", timeout: VERIFY_COMMAND_TIMEOUT_MS });
 }
 
 function verifySignedBinary(binaryPath: string, runSync: RunSync): void {
+	const name = path.basename(binaryPath);
 	const verify = runSync("/usr/bin/codesign", ["--verify", "--strict", binaryPath]);
-	if (verify.status !== 0) throw new BrokerVerificationError(`Signature verification failed for ${path.basename(binaryPath)}`);
+	if (verify.status === null) {
+		throw new BrokerVerificationError(`Could not check the signature of ${name}: codesign did not finish within ${VERIFY_COMMAND_TIMEOUT_MS / 1000} seconds. ChatGPT may be updating, or the Mac is busy. Wait a minute, then retry.`);
+	}
+	if (verify.status !== 0) {
+		const reason = (verify.stderr ?? "").trim().split("\n")[0].slice(0, 300);
+		throw new BrokerVerificationError(`Signature verification failed for ${name}${reason ? ` (${reason})` : ""}. If ChatGPT is updating, wait for it to finish and retry. Otherwise reinstall ChatGPT from https://chatgpt.com/download.`);
+	}
 	const details = runSync("/usr/bin/codesign", ["-dv", "--verbose=2", binaryPath]);
 	const output = `${details.stdout ?? ""}\n${details.stderr ?? ""}`;
 	if (details.status !== 0 || !new RegExp(`(?:^|\\n)TeamIdentifier=${OPENAI_TEAM_ID}(?:\\n|$)`).test(output)) {
@@ -179,10 +195,11 @@ export function readOfficialPathConfig(configPath: string): OfficialPathConfig {
 	return config.data;
 }
 
-function notFoundError(component: string, checked: string[], key: keyof OfficialPathConfig, hint: string, configPath?: string): BrokerVerificationError {
+function notFoundError(component: string, checked: string[], key: keyof OfficialPathConfig, hint: string, configPath?: string, installedChatGpt?: string): BrokerVerificationError {
 	const where = configPath ? `in ${configPath}` : "in the Computer Use config.json in the state directory";
+	const moved = installedChatGpt ? ` ChatGPT is installed at ${installedChatGpt}; if it is up to date, an update may have moved this file. ${outOfStepHint()}` : "";
 	return new BrokerVerificationError(
-		`${component} was not found. Checked: ${checked.join(", ")}. ${hint} Then set "${key}" to its absolute path ${where}, or remove "${key}" to restore automatic discovery.`,
+		`${component} was not found. Checked: ${checked.join(", ")}. ${hint}${moved} If it is installed elsewhere, set "${key}" to its absolute path ${where}, or remove "${key}" to restore automatic discovery.`,
 	);
 }
 
@@ -236,8 +253,9 @@ export function resolveOfficialComputerUseClient(options: ResolveOfficialCompute
 	if (current) return current;
 
 	const checked = [path.join(currentApp, CLIENT_RELATIVE_PATH)];
+	const chatGptApps = options.chatGptAppPaths ?? defaultChatGptAppPaths(userHome);
 	const legacyRoots = options.legacyPluginRoot ? [options.legacyPluginRoot]
-		: (options.chatGptAppPaths ?? defaultChatGptAppPaths(userHome)).map((app) => path.join(app, COMPUTER_USE_PLUGIN_RELATIVE_PATH));
+		: chatGptApps.map((app) => path.join(app, COMPUTER_USE_PLUGIN_RELATIVE_PATH));
 	for (const legacyRoot of legacyRoots) {
 		const canonicalLegacyRoot = existsSync(legacyRoot) ? realpathSync(legacyRoot) : path.resolve(legacyRoot);
 		const legacyApp = path.join(canonicalLegacyRoot, "Codex Computer Use.app");
@@ -252,6 +270,7 @@ export function resolveOfficialComputerUseClient(options: ResolveOfficialCompute
 		"computerUseAppPath",
 		clientHint,
 		options.configPath,
+		chatGptApps.find((app) => existsSync(app)),
 	);
 }
 
@@ -259,8 +278,9 @@ export function resolveOfficialComputerUseClient(options: ResolveOfficialCompute
 export function resolveOfficialCodex(options: ResolveOfficialComputerUseClientOptions = {}): string {
 	const runSync = options.runSync ?? productionRunSync;
 	const config = options.configPath ? readOfficialPathConfig(options.configPath) : {};
+	const chatGptApps = config.codexPath ? [] : options.chatGptAppPaths ?? defaultChatGptAppPaths(options.userHome);
 	const candidates = config.codexPath ? [path.resolve(config.codexPath)]
-		: (options.chatGptAppPaths ?? defaultChatGptAppPaths(options.userHome)).flatMap((app) => CODEX_RELATIVE_PATHS.map((relative) => path.join(app, relative)));
+		: chatGptApps.flatMap((app) => CODEX_RELATIVE_PATHS.map((relative) => path.join(app, relative)));
 	const found = candidates.find((candidate) => existsSync(candidate));
 	if (!found) {
 		throw notFoundError(
@@ -269,6 +289,7 @@ export function resolveOfficialCodex(options: ResolveOfficialComputerUseClientOp
 			"codexPath",
 			"Install or update the official ChatGPT macOS app (https://chatgpt.com/download), then open it.",
 			options.configPath,
+			chatGptApps.find((app) => existsSync(app)),
 		);
 	}
 	const codexPath = realpathSync(found);
@@ -554,7 +575,10 @@ export async function createOfficialDirectToolSession(
 		return new Promise((resolve, reject) => {
 			const timer = setTimeout(() => {
 				pending.delete(id);
-				const error = new Error(`Official app-server request timed out: ${methodName}`);
+				const recovery = methodName === "mcpServer/tool/call"
+					? `The target app may be unresponsive. ${STUCK_SERVICE_HINT}`
+					: `Retry once. If it times out again: ${outOfStepHint(verification.brokerVersion)}`;
+				const error = new Error(`Official app-server request timed out: ${methodName}. ${recovery}`);
 				reject(error);
 				if (methodName === "mcpServer/tool/call") cancel(error);
 				// A stalled cursor cleanup must not fail the session; teardown follows.
@@ -681,9 +705,14 @@ export async function createOfficialDirectToolSession(
 		if (proc.pid) options.onSpawn?.(proc.pid);
 		proc.stdin.on("error", (error: NodeJS.ErrnoException) => { if (error.code !== "EPIPE") fail(error); });
 		proc.stderr.setEncoding("utf8");
-		proc.stderr.on("data", (chunk: string) => { if (stderr.length < 16_384) stderr += chunk.slice(0, 16_384 - stderr.length); });
+		proc.stderr.on("data", (chunk: string) => { stderr = (stderr + chunk).slice(-16_384); });
 		proc.once("error", (error) => fail(error));
-		proc.once("close", (code) => { if (pending.size > 0) fail(new Error(`Official app-server exited before completing the request (${code ?? "unknown"})`)); });
+		proc.once("close", (code) => {
+			if (pending.size === 0) return;
+			// eslint-disable-next-line no-control-regex
+			const output = stderr.replace(/\u001b\[[0-9;]*m/g, "").trim().split("\n").slice(-6).join("\n").slice(-1_000);
+			fail(new Error(`Official app-server exited before completing the request (${code ?? "unknown"})${output ? `. It reported:\n${output}\n` : ". "}${outOfStepHint(verification.brokerVersion)}`));
+		});
 
 		const processProtocolLine = (line: string): void => {
 			let parsedMessage: ReturnType<typeof protocolMessageSchema.safeParse>;
@@ -709,7 +738,7 @@ export async function createOfficialDirectToolSession(
 					if (!waiter) return;
 					pending.delete(String(message.id));
 					clearTimeout(waiter.timer);
-					if (message.error) waiter.reject(new Error(`Official app-server error: ${message.error.message ?? "unknown"}`));
+					if (message.error) waiter.reject(new Error(`Official app-server error: ${message.error.message ?? "unknown"}. ${outOfStepHint(verification.brokerVersion)}`));
 					else waiter.resolve(message.result ?? null);
 					return;
 				}
@@ -780,8 +809,12 @@ export async function createOfficialDirectToolSession(
 				directCalls = 1;
 				if (modelTurnsStarted !== 0) throw new BrokerVerificationError("Model-turn activity was observed during direct dispatch");
 				const result = directResultSchema.parse(raw);
+				const officialText = result.content.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join("\n").trim();
+				const content = result.isError && officialText === "bootstrapTimedOut"
+					? [...result.content, { type: "text", text: STUCK_SERVICE_HINT }]
+					: result.content;
 				return {
-					content: result.content,
+					content,
 					structuredContent: result.structuredContent,
 					isError: result.isError === true,
 					brokerVersion: verification.brokerVersion,

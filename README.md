@@ -39,7 +39,7 @@ text(next.text);
 
 The extension does not change which tools are active. Turn on `codemode` with `"defaultTools": ["+codemode"]` in `settings.json` or with `pi --tools +codemode`; Pi also turns it on when an MCP server uses `codemode` exposure. When neither `codemode` nor a Computer Use tool is active, the extension shows one notice at the first prompt.
 
-`computer_use_get_app_state` resolves to `{ app, text, screenshot }`, where `screenshot` is an image block for `image()` or `null`. It may return an accessibility-tree diff after the first inspection; pass `disableDiff: true` to request a fresh full tree. `computer_use_list_apps` resolves to the official text inventory produced by the app-server transport; unlike native `@oai/sky`, that transport does not provide the structured app array. Other methods resolve to their official text output. A failed call rejects with the official error text. Calls run one at a time, and calls after `get_app_state` reuse the signed session until the agent settles. The namespace instructions, available from `describeNamespace("computer_use")`, summarise this workflow.
+`computer_use_get_app_state` resolves to `{ app, text, screenshot }`, where `screenshot` is an image block for `image()` or `null`. It may return an accessibility-tree diff after the first inspection; pass `disableDiff: true` to request a fresh full tree. `computer_use_list_apps` resolves to the official text inventory produced by the app-server transport; unlike native `@oai/sky`, that transport does not provide the structured app array. Other methods resolve to their official text output. A failed call rejects with the official error text, followed by a recovery step when the adapter recognises the cause (see [Failures](#failures)). Calls run one at a time, and calls after `get_app_state` reuse the signed session until the agent settles. The namespace instructions, available from `describeNamespace("computer_use")`, summarise this workflow.
 
 Use `/computer-use-status` to inspect the installed component and transport status.
 
@@ -103,6 +103,20 @@ The adapter reads this file when it starts each Computer Use session, so changes
 If a component is missing, install or update the [official ChatGPT macOS app](https://chatgpt.com/download), open it, and install its Computer Use component. Installing this npm package alone does not install those signed components. The error lists every path checked and the exact config file to edit. Correct `codexPath` / `computerUseAppPath` there, or remove a stale override to restore automatic discovery. For Pi this is normally `~/.pi/agent/direct-computer-use/config.json`; for standalone MCP/CLI it is `~/.direct-computer-use/config.json`. `CODEX_COMPUTER_USE_HOME` overrides the state directory. `/computer-use-status` and `codex-computer-use-mcp --status` show the effective config path and the current error.
 
 Pi limits returned text to 50KB or 2,000 lines. When text exceeds that limit, the complete text is written to a mode-0600 file in a private directory under `/tmp`. Images are returned directly and are never spilled to disk.
+
+### Failures
+
+ChatGPT does not need to be running. The official client starts the Computer Use service when a call needs it.
+
+Errors name the cause and the next step, so an agent can recover or tell the user:
+
+| Cause | What the error says |
+| --- | --- |
+| The Computer Use service is stuck | Official `bootstrapTimedOut`, or a tool-call timeout, followed by `pkill -f MacOS/SkyComputerUseService`. The service relaunches on the next call. If it fails again, relaunch ChatGPT. |
+| ChatGPT is updating, or the Mac is busy | `codesign did not finish within 30 seconds`: wait and retry. |
+| A ChatGPT bundle is damaged or mid-update | `Signature verification failed for …`, with the reason from `codesign`. |
+| ChatGPT and this package no longer match | The app-server's own error, or the last lines it printed before exiting, followed by both versions and a step to update ChatGPT and this package and restart the client. The same step follows a missing file inside an installed ChatGPT. |
+| ChatGPT or its Computer Use component is not installed | The paths checked and how to install it. |
 
 ## Development
 

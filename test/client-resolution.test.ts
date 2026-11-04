@@ -43,7 +43,7 @@ test("fails closed when no supported client path exists", async () => {
 	try {
 		assert.throws(
 			() => resolveOfficialComputerUseClient({ userHome: root, legacyPluginRoot: path.join(root, "legacy"), runSync: signedBy() }),
-			/Official Computer Use client was not found\. Checked: .*Then set "computerUseAppPath"/,
+			/Official Computer Use client was not found\. Checked: .*If it is installed elsewhere, set "computerUseAppPath"/,
 		);
 	} finally {
 		await rm(root, { recursive: true, force: true });
@@ -59,9 +59,24 @@ test("fails closed on an invalid client signature without falling back", async (
 			() => resolveOfficialComputerUseClient({
 				userHome: root,
 				legacyPluginRoot: path.join(root, "legacy"),
-				runSync: () => ({ status: 1, stdout: "", stderr: "invalid" }),
+				runSync: () => ({ status: 1, stdout: "", stderr: "client: a sealed resource is missing or invalid\nmore" }),
 			}),
-			/Signature verification failed/,
+			/Signature verification failed for SkyComputerUseClient \(client: a sealed resource is missing or invalid\)\. If ChatGPT is updating/,
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a signature check that does not finish is reported as unfinished, not as a bad signature", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "cu-codesign-timeout."));
+	try {
+		const app = path.join(root, "ChatGPT.app");
+		await makeExecutable(path.join(app, "Contents/Resources/codex"));
+		assert.throws(
+			() => resolveOfficialCodex({ chatGptAppPaths: [app], runSync: () => ({ status: null, stdout: "", stderr: "" }) }),
+			(error: Error) => /Could not check the signature of codex: codesign did not finish within 30 seconds\. ChatGPT may be updating/.test(error.message)
+				&& !/Signature verification failed/.test(error.message),
 		);
 	} finally {
 		await rm(root, { recursive: true, force: true });
@@ -225,6 +240,26 @@ test("reports a missing Codex as not found, naming the checked paths and the con
 				&& error.message.includes(`set "codexPath" to its absolute path in ${configPath}`)
 				&& error.message.includes("Install or update the official ChatGPT macOS app")
 				&& !/Signature verification failed/.test(error.message),
+		);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a missing Codex inside an installed ChatGPT suggests updating this package", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "cu-codex-moved."));
+	try {
+		const app = path.join(root, "ChatGPT.app");
+		await mkdir(path.join(app, "Contents/Resources/new-layout"), { recursive: true });
+		assert.throws(
+			() => resolveOfficialCodex({ chatGptAppPaths: [app], runSync: signedBy() }),
+			(error: Error) => error.message.includes(`ChatGPT is installed at ${app}; if it is up to date, an update may have moved this file.`)
+				&& /update codex-computer-use-mcp to its latest release/.test(error.message),
+		);
+		assert.throws(
+			() => resolveOfficialComputerUseClient({ userHome: root, chatGptAppPaths: [app], runSync: signedBy() }),
+			(error: Error) => error.message.includes(`ChatGPT is installed at ${app}`)
+				&& /update codex-computer-use-mcp to its latest release/.test(error.message),
 		);
 	} finally {
 		await rm(root, { recursive: true, force: true });

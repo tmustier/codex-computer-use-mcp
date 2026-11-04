@@ -41,7 +41,7 @@ await tools.computer_use_type_text({ app: "TextEdit", text: "hello" });
 get_app_state resolves to { app, text, screenshot }. text is the accessibility tree; after the first inspection it may be a diff, so pass disableDiff: true for a fresh full tree. screenshot is an image block for image(), or null.
 Take element_index values from the latest get_app_state text, and inspect again after acting.
 Calls run one at a time, in the order the script makes them.
-list_apps resolves to the official text inventory. A failed call rejects with the official error text.`,
+list_apps resolves to the official text inventory. A failed call rejects with the official error text. When the adapter recognises the cause, the error also gives a recovery step; follow it before falling back to other tools, and tell the user if it still fails.`,
 };
 
 export function computerUseToolName(method: DirectMethod): string {
