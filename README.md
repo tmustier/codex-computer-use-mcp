@@ -114,7 +114,7 @@ defaults write -g ComputerUseAllowForbiddenTargets -bool YES
 
 It applies to every Computer Use client on the Mac, including ChatGPT's own threads. The name suggests it also allows the service's other forbidden apps; only ChatGPT has been tested. To undo it, run `defaults delete -g ComputerUseAllowForbiddenTargets`.
 
-Select ChatGPT by full path, such as `/Applications/ChatGPT.app`, when another copy of the app shares its `com.openai.codex` bundle identifier. ChatGPT exposes little beyond its window controls and menu bar to the accessibility tree, so most interaction needs the screenshot and coordinates.
+Select ChatGPT by full path, such as `/Applications/ChatGPT.app`, when another copy of the app shares its `com.openai.codex` bundle identifier. ChatGPT exposes its full interface to the accessibility tree, including the conversation list and composer, whether or not it is in front. In testing, the first reads returned only the window frame and menu bar; if that happens, read the state again.
 
 Pi limits returned text to 50KB or 2,000 lines. When text exceeds that limit, the complete text is written to a mode-0600 file in a private directory under `/tmp`. Images are returned directly and are never spilled to disk.
 
