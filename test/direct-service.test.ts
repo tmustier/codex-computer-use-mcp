@@ -3,10 +3,9 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { DirectBrokerCallError, type DirectBrokerResult } from "../src/direct-broker.ts";
 import { executeDirectTool, type DirectServiceDependencies } from "../src/direct-service.ts";
-import { TOOL_INPUT_SCHEMAS, type DirectMethod, type DirectToolArguments } from "../src/tools.ts";
+import type { CuaReplArguments, CuaReplTool } from "../src/tools.ts";
 
 function brokerResult(content = "ok", isError = false): DirectBrokerResult {
 	return {
@@ -25,61 +24,24 @@ function deps(root: string, callTool: DirectServiceDependencies["callTool"]): Di
 	return { stateRoot: root, callTool };
 }
 
-test("element indices accept strings and integers but forward only strings to the official tools", async () => {
-	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-indices."));
-	const cases = [
-		["click", {}],
-		["perform_secondary_action", { action: "AXPress" }],
-		["set_value", { value: "hello" }],
-		["select_text", { text: "hello" }],
-		["scroll", { direction: "down" }],
-	] satisfies Array<[DirectMethod, DirectToolArguments]>;
-	try {
-		for (const [method, extra] of cases) {
-			// Clients validate these advertised schemas before the service sees arguments.
-			const validate = new AjvJsonSchemaValidator().getValidator(TOOL_INPUT_SCHEMAS[method]);
-			for (const [input, expected] of [[7, "7"], [0, "0"], [-3, "-3"], ["007", "007"], ["node:42", "node:42"]] as const) {
-				const args = { app: "com.apple.TextEdit", ...extra, element_index: input, futureOption: true };
-				assert.equal(validate(args).valid, true, `${method}: ${input}`);
-				const result = await executeDirectTool({ method, arguments: args }, deps(root, async (_method, actual) => {
-					assert.deepEqual(actual, { ...args, element_index: expected });
-					return brokerResult("accepted");
-				}));
-				assert.equal(result.content[0].text, "accepted");
-				assert.equal(args.element_index, input);
-			}
-			for (const invalid of [1.5, true, null, {}, [], Number.MAX_SAFE_INTEGER + 1]) {
-				const args = { app: "TextEdit", ...extra, element_index: invalid };
-				assert.equal(validate(args).valid, false, `${method}: ${JSON.stringify(invalid)}`);
-				await assert.rejects(executeDirectTool({ method, arguments: args },
-					deps(root, async () => { assert.fail("invalid index must not dispatch"); })), /did not match a tool schema/);
-			}
-		}
-		const coordinates = { app: "TextEdit", x: 12, y: 34 };
-		await executeDirectTool({ method: "click", arguments: coordinates }, deps(root, async (_method, actual) => {
-			assert.deepEqual(actual, coordinates);
-			return brokerResult();
-		}));
-	} finally {
-		await rm(root, { recursive: true, force: true });
-	}
-});
-
-test("direct service passes official arguments through unchanged", async () => {
+test("direct service passes cua_repl arguments through unchanged and sizes the request timeout from timeout_ms", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-passthrough-test."));
-	const calls: Array<{ method: DirectMethod; args: DirectToolArguments }> = [];
+	const calls: Array<{ tool: CuaReplTool; args: CuaReplArguments; timeoutMs?: number }> = [];
 	try {
-		await executeDirectTool({
-			method: "press_key",
-			arguments: { app: "/Applications/Alternate App.app", key: "CMD+A", futureOption: true },
-		}, deps(root, async (method, args) => {
-			calls.push({ method, args });
+		const record: DirectServiceDependencies["callTool"] = async (tool, args, options) => {
+			calls.push({ tool, args, timeoutMs: options?.timeoutMs });
 			return brokerResult();
-		}));
-		assert.deepEqual(calls, [{
-			method: "press_key",
-			args: { app: "/Applications/Alternate App.app", key: "CMD+A", futureOption: true },
-		}]);
+		};
+		await executeDirectTool({ tool: "js", arguments: { code: 'await cua.getApp("/Applications/Alternate App.app")', title: "Opening", futureOption: true } }, deps(root, record));
+		await executeDirectTool({ tool: "js", arguments: { code: "1", timeout_ms: 600_000 } }, deps(root, record));
+		await executeDirectTool({ tool: "js_reset", arguments: {} }, deps(root, record));
+		assert.deepEqual(calls, [
+			{ tool: "js", args: { code: 'await cua.getApp("/Applications/Alternate App.app")', title: "Opening", futureOption: true }, timeoutMs: 120_000 },
+			{ tool: "js", args: { code: "1", timeout_ms: 600_000 }, timeoutMs: 630_000 },
+			{ tool: "js_reset", args: {}, timeoutMs: 120_000 },
+		]);
+		await assert.rejects(executeDirectTool({ tool: "turn_ended", arguments: {} }, deps(root, record)), /did not name a cua_repl tool/);
+		assert.equal(calls.length, 3);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
@@ -90,8 +52,8 @@ test("direct service forwards elicitation handling", async () => {
 	const onElicitation = async () => ({ action: "accept" as const, content: { choice: "allow" } });
 	let observedOptions: Parameters<NonNullable<DirectServiceDependencies["callTool"]>>[2];
 	try {
-		await executeDirectTool({ method: "list_apps", arguments: {} }, {
-			...deps(root, async (_method, _args, options) => {
+		await executeDirectTool({ tool: "js_reset", arguments: {} }, {
+			...deps(root, async (_tool, _args, options) => {
 				observedOptions = options;
 				return brokerResult();
 			}),
@@ -105,19 +67,20 @@ test("direct service forwards elicitation handling", async () => {
 	}
 });
 
-test("mutating methods dispatch without wrapper prompts or contentful audit", async () => {
+test("actions dispatch without wrapper prompts or contentful audit", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-full-test."));
-	let observed: { method: DirectMethod; args: DirectToolArguments } | undefined;
+	let observed: { tool: CuaReplTool; args: CuaReplArguments } | undefined;
+	const code = 'let app = await cua.getApp("TextEdit"); await app.typeText("arbitrary direct action");';
 	try {
 		const response = await executeDirectTool(
-			{ method: "type_text", arguments: { app: "TextEdit", text: "arbitrary direct action" } },
-			deps(root, async (method, args) => {
-				observed = { method, args };
+			{ tool: "js", arguments: { code } },
+			deps(root, async (tool, args) => {
+				observed = { tool, args };
 				return brokerResult("typed");
 			}),
 		);
 		assert.equal(response.isError, false);
-		assert.deepEqual(observed, { method: "type_text", args: { app: "TextEdit", text: "arbitrary direct action" } });
+		assert.deepEqual(observed, { tool: "js", args: { code } });
 		const auditText = await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8");
 		assert.doesNotMatch(auditText, /arbitrary direct action|TextEdit/);
 		const audit = JSON.parse(auditText);
@@ -133,7 +96,7 @@ test("broker failures preserve architecture evidence in audit", async () => {
 	try {
 		await assert.rejects(
 			executeDirectTool(
-				{ method: "get_app_state", arguments: { app: "TextEdit" } },
+				{ tool: "js", arguments: { code: "await cua.getApp('TextEdit')" } },
 				deps(root, async () => {
 					throw new DirectBrokerCallError("model activity", true, undefined, {
 						directCalls: 1,
@@ -161,7 +124,7 @@ test("official tool errors remain errors without entering audit content", async 
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-error-test."));
 	try {
 		const response = await executeDirectTool(
-			{ method: "get_app_state", arguments: { app: "TextEdit" } },
+			{ tool: "js", arguments: { code: "await cua.getApp('TextEdit')" } },
 			deps(root, async () => brokerResult("Official denial details", true)),
 		);
 		assert.equal(response.isError, true);
@@ -170,6 +133,34 @@ test("official tool errors remain errors without entering audit content", async 
 		assert.equal(audit.outcome, "official_error");
 		assert.ok(audit.resultBytes > 0);
 		assert.doesNotMatch(auditText, /Official denial details/);
+	} finally {
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("transport failures and cancellation are audited without inventing broker evidence", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-service-transport-failure-test."));
+	try {
+		for (const cancelled of [false, true]) {
+			const error = new Error("transport failed");
+			await assert.rejects(executeDirectTool({ tool: "js", arguments: { code: "1" } }, {
+				stateRoot: root,
+				signal: cancelled ? AbortSignal.abort() : undefined,
+				callTool: async () => { throw error; },
+			}), (caught) => caught === error);
+		}
+		const records = (await readFile(path.join(root, "audit", "direct-computer-use.jsonl"), "utf8"))
+			.trim().split("\n").map((line) => JSON.parse(line));
+		assert.deepEqual(records.map((record) => record.outcome), ["broker_failed", "cancelled"]);
+		for (const record of records) {
+			assert.equal(record.brokerVersion, null);
+			assert.equal(record.clientBuild, null);
+			assert.equal(record.directCalls, 0);
+			assert.equal(record.ephemeralThread, null);
+			assert.equal(record.brokerCleanupVerified, false);
+			assert.deepEqual(record.resultContentTypes, []);
+			assert.equal(record.resultBytes, 0);
+		}
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}

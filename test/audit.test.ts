@@ -8,8 +8,7 @@ import { appendAudit, type AuditRecord } from "../src/audit.ts";
 const record: AuditRecord = {
 	timestamp: "2026-07-11T00:00:00.000Z",
 	runId: "run",
-	method: "type_text",
-	app: "com.apple.TextEdit",
+	method: "js",
 	inputBytes: 19,
 	outcome: "ok",
 	durationMs: 20,
@@ -31,11 +30,11 @@ test("audit is mode-0600 metadata without arguments, output, or secrets", async 
 		const auditPath = path.join(root, "audit", "direct-computer-use.jsonl");
 		assert.equal((await stat(auditPath)).mode & 0o777, 0o600);
 		const parsed = JSON.parse((await readFile(auditPath, "utf8")).trim());
-		assert.equal(parsed.method, "type_text");
+		assert.equal(parsed.method, "js");
 		assert.equal(parsed.modelTurnsStarted, 0);
 		assert.equal(parsed.directCalls, 1);
 		assert.equal(parsed.inputBytes, 19);
-		for (const forbidden of ["arguments", "text", "value", "content", "structuredContent", "token", "prompt", "modelUsage"]) {
+		for (const forbidden of ["arguments", "code", "app", "text", "value", "content", "structuredContent", "token", "prompt", "modelUsage"]) {
 			assert.equal(Object.hasOwn(parsed, forbidden), false, forbidden);
 		}
 	} finally {

@@ -1,7 +1,7 @@
 import {
-	createOfficialDirectToolSession,
+	createOfficialCuaReplSession,
 	pathConfigFile,
-	type OfficialDirectToolSession,
+	type OfficialCuaReplSession,
 } from "./direct-broker.ts";
 import {
 	defaultStateRoot,
@@ -9,18 +9,23 @@ import {
 	type DirectResponse,
 	type DirectServiceDependencies,
 } from "./direct-service.ts";
-import type { DirectMethod, DirectToolArguments } from "./tools.ts";
+import type { CuaReplArguments, CuaReplTool } from "./tools.ts";
 
 interface DirectSessionExecutorDependencies {
-	createSession?: typeof createOfficialDirectToolSession;
-	idleTimeoutMs?: number;
+	createSession?: typeof createOfficialCuaReplSession;
+	/** End the turn after this long without a call, for clients that never report one ending. */
+	idleTurnEndMs?: number;
 }
 
+/**
+ * Keeps one official cua_repl session, so REPL bindings such as app and tab handles persist across
+ * calls and turns, as they do in ChatGPT. A transport failure discards the session; the next call
+ * starts a fresh one.
+ */
 export class DirectSessionExecutor {
 	private queue = Promise.resolve();
-	private session?: OfficialDirectToolSession;
+	private session?: OfficialCuaReplSession;
 	private idleTimer?: NodeJS.Timeout;
-	private idleFailure?: Error;
 	private readonly dependencies: DirectSessionExecutorDependencies;
 
 	constructor(dependencies: DirectSessionExecutorDependencies = {}) {
@@ -45,69 +50,50 @@ export class DirectSessionExecutor {
 		await session?.close();
 	}
 
-	private scheduleIdleClose(): void {
-		this.clearIdleTimer();
-		if (!this.dependencies.idleTimeoutMs || !this.session) return;
-		const timer = setTimeout(() => {
-			void this.runExclusive(async () => {
-				if (this.idleTimer !== timer) return;
-				await this.closeSession();
-			}).catch((error) => {
-				this.idleFailure = error instanceof Error ? error : new Error(String(error));
-			});
-		}, this.dependencies.idleTimeoutMs);
-		this.idleTimer = timer;
-		timer.unref();
-	}
-
 	async execute(
-		method: DirectMethod,
-		params: DirectToolArguments,
+		tool: CuaReplTool,
+		params: CuaReplArguments,
 		dependencies: DirectServiceDependencies,
 	): Promise<DirectResponse> {
 		return this.runExclusive(async () => {
-			if (this.idleFailure) {
-				const failure = this.idleFailure;
-				this.idleFailure = undefined;
-				throw failure;
-			}
 			this.clearIdleTimer();
-			const session = this.session;
 			try {
-				const response = await executeDirectTool(
-					{ method, arguments: params },
-					session ? {
-						...dependencies,
-						callTool: (directMethod, args, options) => session.call(directMethod, args, options),
-					} : method === "get_app_state" ? {
-						...dependencies,
-						callTool: async (directMethod, args, options) => {
-							this.session = await (this.dependencies.createSession ?? createOfficialDirectToolSession)({
-								supportsOpenAiFormElicitation: dependencies.supportsOpenAiFormElicitation === true,
-								configPath: pathConfigFile(dependencies.stateRoot ?? defaultStateRoot()),
-							});
-							return this.session.call(directMethod, args, options);
-						},
-					} : dependencies,
-				);
-				if (response.isError) await this.closeSession();
-				else this.scheduleIdleClose();
+				const response = await executeDirectTool({ tool, arguments: params }, {
+					...dependencies,
+					callTool: async (directTool, args, options) => {
+						this.session ??= await (this.dependencies.createSession ?? createOfficialCuaReplSession)({
+							supportsOpenAiFormElicitation: dependencies.supportsOpenAiFormElicitation === true,
+							configPath: pathConfigFile(dependencies.stateRoot ?? defaultStateRoot()),
+						});
+						return this.session.call(directTool, args, options);
+					},
+				});
+				if (this.dependencies.idleTurnEndMs) {
+					const timer = setTimeout(() => {
+						void this.runExclusive(async () => {
+							if (this.idleTimer === timer) await this.session?.endTurn();
+						}).catch(() => undefined);
+					}, this.dependencies.idleTurnEndMs);
+					this.idleTimer = timer;
+					timer.unref();
+				}
 				return response;
 			} catch (error) {
-				await this.closeSession();
+				await this.closeSession().catch(() => undefined);
 				throw error;
 			}
 		});
 	}
 
-	async close(): Promise<void> {
+	/** End the current agent turn. The session and its REPL bindings stay for the next turn. */
+	async endTurn(): Promise<void> {
 		await this.runExclusive(async () => {
-			await this.closeSession();
-			if (this.idleFailure) {
-				const failure = this.idleFailure;
-				this.idleFailure = undefined;
-				throw failure;
-			}
+			this.clearIdleTimer();
+			await this.session?.endTurn();
 		});
+	}
+
+	async close(): Promise<void> {
+		await this.runExclusive(() => this.closeSession());
 	}
 }

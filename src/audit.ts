@@ -1,13 +1,12 @@
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, open } from "node:fs/promises";
 import path from "node:path";
-import type { DirectMethod } from "./tools.ts";
+import type { CuaReplTool } from "./tools.ts";
 
 export interface AuditRecord {
 	timestamp: string;
 	runId: string;
-	method: DirectMethod | "invalid_request";
-	app: string | null;
+	method: CuaReplTool | "invalid_request";
 	inputBytes: number;
 	outcome: string;
 	durationMs: number;

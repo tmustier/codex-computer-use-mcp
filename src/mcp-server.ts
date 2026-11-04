@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { Server, type ServerOptions } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
 	CallToolRequestSchema,
@@ -9,15 +9,10 @@ import {
 	type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import { getDirectStatus } from "./direct-service.ts";
+import { getDirectStatus, officialToolDefinitions } from "./direct-service.ts";
 import { forwardOfficialElicitationToMcpClient } from "./mcp-elicitation.ts";
 import { DirectSessionExecutor } from "./session-executor.ts";
-import {
-	COMPUTER_USE_METHODS,
-	TOOL_INPUT_SCHEMAS,
-	TOOL_METADATA,
-	isDirectMethod,
-} from "./tools.ts";
+import { isCuaReplTool } from "./tools.ts";
 import { PACKAGE_VERSION } from "./version.ts";
 
 const cliArgs = process.argv.slice(2);
@@ -30,21 +25,16 @@ if (cliArgs.length > 0) {
 	process.exit(1);
 }
 
-const server = new Server(
-	{ name: "codex-computer-use-mcp", version: PACKAGE_VERSION },
-	{ capabilities: { tools: {} } },
-);
-const sessionExecutor = new DirectSessionExecutor({ idleTimeoutMs: 120_000 });
+const official = officialToolDefinitions();
+const serverOptions: ServerOptions = { capabilities: { tools: {} } };
+if (official.instructions) serverOptions.instructions = official.instructions;
+const server = new Server({ name: "codex-computer-use-mcp", version: PACKAGE_VERSION }, serverOptions);
+// agent-default (not a user rule): 2026-11-05. MCP has no turn boundary, so a quiet minute ends the turn.
+const sessionExecutor = new DirectSessionExecutor({ idleTurnEndMs: 60_000 });
 server.onclose = () => {
 	void sessionExecutor.close().catch(() => { process.exitCode = 1; });
 };
 
-const toolDefinitions = COMPUTER_USE_METHODS.map((method) => ({
-	name: method,
-	description: TOOL_METADATA[method].description,
-	inputSchema: TOOL_INPUT_SCHEMAS[method],
-	annotations: TOOL_METADATA[method].annotations,
-}));
 const statusToolDefinition = {
 	name: "computer_use_status",
 	title: "Computer Use Status",
@@ -54,7 +44,7 @@ const statusToolDefinition = {
 };
 
 server.setRequestHandler(ListToolsRequestSchema, () => Promise.resolve({
-	tools: [...toolDefinitions, statusToolDefinition],
+	tools: [...official.tools, statusToolDefinition],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<CallToolResult> => {
@@ -62,7 +52,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<
 		const status = getDirectStatus();
 		return { content: [{ type: "text", text: JSON.stringify(status, null, 2) }], structuredContent: status };
 	}
-	if (!isDirectMethod(request.params.name)) {
+	if (!isCuaReplTool(request.params.name)) {
 		throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${request.params.name}`);
 	}
 

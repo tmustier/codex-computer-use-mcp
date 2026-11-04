@@ -8,70 +8,20 @@ import {
   getAgentDir,
   truncateHead,
   type ExtensionAPI,
-  type ToolNamespace,
 } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
-import { getDirectStatus } from "../../src/direct-service.ts";
+import { getDirectStatus, officialToolDefinitions } from "../../src/direct-service.ts";
 import {
   type DirectBrokerElicitationRequest,
   type DirectBrokerElicitationResponse,
 } from "../../src/direct-broker.ts";
 import { DirectSessionExecutor } from "../../src/session-executor.ts";
-import {
-  COMPUTER_USE_METHODS,
-  TOOL_INPUT_SCHEMAS,
-  TOOL_METADATA,
-  type DirectMethod,
-  type JsonObject,
-} from "../../src/tools.ts";
+import type { CuaReplTool, JsonObject } from "../../src/tools.ts";
 
 const jsonObjectSchema = z.record(z.string(), z.json());
 
-export const COMPUTER_USE_NAMESPACE: ToolNamespace = {
-  name: "computer_use",
-  description: "OpenAI's official signed macOS Computer Use. Call get_app_state for an app before acting on it, run known actions in sequence, then call get_app_state again before deciding the next step.",
-  instructions: `Compose these tools in codemode scripts:
-
-const state = await tools.computer_use_get_app_state({ app: "TextEdit" });
-text(state.text);
-image(state.screenshot);
-await tools.computer_use_click({ app: "TextEdit", element_index: "7" });
-await tools.computer_use_type_text({ app: "TextEdit", text: "hello" });
-
-get_app_state resolves to { app, text, screenshot }. text is the accessibility tree; after the first inspection it may be a diff, so pass disableDiff: true for a fresh full tree. screenshot is an image block for image(), or null.
-Take element_index values from the latest get_app_state text, and inspect again after acting.
-Calls run one at a time, in the order the script makes them.
-list_apps resolves to the official text inventory. A failed call rejects with the official error text. When the adapter recognises the cause, the error also gives a recovery step; follow it before falling back to other tools, and tell the user if it still fails.`,
-};
-
-export function computerUseToolName(method: DirectMethod): string {
-  return `computer_use_${method}`;
-}
-
-const appStateOutputSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["app", "text", "screenshot"],
-  properties: {
-    app: { type: "string" },
-    text: { type: "string", description: "Accessibility tree, or a diff after the first inspection" },
-    screenshot: {
-      anyOf: [
-        {
-          type: "object",
-          additionalProperties: false,
-          required: ["type", "data", "mimeType"],
-          properties: {
-            type: { type: "string", const: "image" },
-            data: { type: "string" },
-            mimeType: { type: "string" },
-          },
-        },
-        { type: "null" },
-      ],
-    },
-  },
-} as const;
+/** Pi tool names for the official cua_repl tools. The official instructions call `js` "cua_repl". */
+export const PI_TOOL_NAMES = { js: "cua_repl", js_reset: "cua_repl_reset" } as const satisfies Record<CuaReplTool, string>;
 
 interface PiContentResult {
   content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>;
@@ -176,11 +126,11 @@ export async function handleOfficialElicitation(
   }
 }
 
-type ComputerUseSession = Pick<DirectSessionExecutor, "execute" | "close">;
+type ComputerUseSession = Pick<DirectSessionExecutor, "execute" | "endTurn" | "close">;
 
 export default function directComputerUse(pi: ExtensionAPI, session: ComputerUseSession = new DirectSessionExecutor()) {
   const stateRoot = process.env.CODEX_COMPUTER_USE_HOME || path.join(getAgentDir(), "direct-computer-use");
-  const toolNames = COMPUTER_USE_METHODS.map(computerUseToolName);
+  const official = officialToolDefinitions(stateRoot);
 
   pi.registerCommand("computer-use-status", {
     description: "Show Computer Use status",
@@ -189,21 +139,16 @@ export default function directComputerUse(pi: ExtensionAPI, session: ComputerUse
     },
   });
 
-  for (const method of COMPUTER_USE_METHODS) {
+  for (const tool of official.tools) {
     pi.registerTool({
-      name: computerUseToolName(method),
-      label: `Computer Use ${method}`,
-      description: TOOL_METADATA[method].description,
+      name: PI_TOOL_NAMES[tool.name],
+      label: tool.name === "js" ? "Computer Use" : "Computer Use reset",
+      description: tool.description,
       // SAFETY: Pi accepts standard JSON Schema objects as custom-tool parameter schemas.
-      parameters: TOOL_INPUT_SCHEMAS[method] as any,
-      // SAFETY: Pi accepts standard JSON Schema objects as custom-tool output schemas.
-      outputSchema: method === "get_app_state" ? appStateOutputSchema as any : undefined,
-      exposure: "codemode",
-      namespace: COMPUTER_USE_NAMESPACE,
-      annotations: TOOL_METADATA[method].annotations,
+      parameters: tool.inputSchema as any,
+      annotations: tool.annotations,
       async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-        const args = jsonObjectSchema.parse(params);
-        const response = await session.execute(method, args, {
+        const response = await session.execute(tool.name, jsonObjectSchema.parse(params), {
           stateRoot,
           signal,
           supportsOpenAiFormElicitation: true,
@@ -213,43 +158,15 @@ export default function directComputerUse(pi: ExtensionAPI, session: ComputerUse
             async (url) => (await pi.exec("/usr/bin/open", ["--", url], { signal, timeout: 15_000 })).code === 0,
           ),
         });
-        const text = response.content
-          .filter((block) => block.type !== "image")
-          .map((block) => String(block.text ?? ""))
-          .join("\n");
-        if (response.isError) throw new Error(text || "Official Computer Use returned an error");
         const rendered = await toPiContent(response.content);
         const details: JsonObject = {};
         if (rendered.fullOutputPath) details.fullOutputPath = rendered.fullOutputPath;
-        if (method !== "get_app_state") return { content: rendered.content, details };
-        const screenshot = response.content.find((block) => block.type === "image");
-        return {
-          content: rendered.content,
-          details,
-          structuredContent: {
-            app: String(args.app),
-            text,
-            screenshot: screenshot
-              ? { type: "image", data: String(screenshot.data), mimeType: String(screenshot.mimeType) }
-              : null,
-          },
-        };
+        return { content: rendered.content, details, isError: response.isError };
       },
     });
   }
 
-  let reachabilityChecked = false;
-  pi.on("session_start", () => { reachabilityChecked = false; });
-  pi.on("before_agent_start", (_event, ctx) => {
-    if (reachabilityChecked) return;
-    reachabilityChecked = true;
-    const active = pi.getActiveTools();
-    if (active.includes("codemode") || toolNames.some((name) => active.includes(name))) return;
-    ctx.ui.notify(
-      "Computer Use tools are called from codemode, which is not active. Add \"+codemode\" to defaultTools in settings.json, or start Pi with --tools +codemode.",
-      "warning",
-    );
-  });
-  pi.on("agent_settled", () => session.close());
+  // ChatGPT ends a cua_repl turn from its Stop hook; REPL bindings survive into the next turn.
+  pi.on("agent_settled", () => session.endTurn());
   pi.on("session_shutdown", () => session.close());
 }
