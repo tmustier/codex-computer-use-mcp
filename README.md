@@ -9,7 +9,7 @@ OpenAI does not produce or endorse this independent project. It relies on an exp
 - macOS with an unlocked user session
 - Node.js 22 or newer
 - the official ChatGPT macOS app with its unified Computer Use plugin (tested with ChatGPT for Work 26.1029.61003), by default at `/Applications/ChatGPT.app`
-- ChatGPT opened at least once since its last update, so it has written its Computer Use runtime settings. ChatGPT writes them only when OpenAI has turned on its unified Computer Use runtime for the account; without it, use version 0.6.5
+- ChatGPT opened at least once since its last update, so it has written its Computer Use runtime settings. ChatGPT writes them only when OpenAI has turned on its unified Computer Use runtime for the account; without them, the adapter falls back to the older typed tools (see [Accounts without the unified runtime](#accounts-without-the-unified-runtime-deprecated))
 - the Computer Use component installed by ChatGPT, by default under `~/.codex/computer-use/`
 - Pi 0.99.0 or newer when using the Pi integration
 
@@ -54,7 +54,13 @@ Use `/computer-use-status` to inspect the installed components and transport sta
 
 ### Upgrading from 0.6
 
-Version 0.7.0 replaces the ten `computer_use_<method>` codemode tools with `cua_repl`. Scripts that called `tools.computer_use_get_app_state({ app })` and similar tools now call the `cua` API inside `cua_repl`: `cua.getApp(app)`, `app.getAXState()`, `app.click(index or [x, y])`, `app.typeText(text)`, `app.pressKey(key)` and so on. The official tool description lists every method.
+Version 0.7.0 replaces the ten `computer_use_<method>` codemode tools with `cua_repl` wherever ChatGPT has its unified runtime. Scripts that called `tools.computer_use_get_app_state({ app })` and similar tools now call the `cua` API inside `cua_repl`: `cua.getApp(app)`, `app.getAXState()`, `app.click(index or [x, y])`, `app.typeText(text)`, `app.pressKey(key)` and so on. The official tool description lists every method.
+
+### Accounts without the unified runtime (deprecated)
+
+OpenAI turns on ChatGPT's unified Computer Use runtime per account. Where it is off, ChatGPT itself still uses the ten older typed tools, and so does this adapter: when Pi loads the extension or the MCP server starts, and ChatGPT has not written its `cua_repl` settings, the adapter registers the 0.6 tools instead (`computer_use_<method>` codemode tools in Pi, `<method>` tools over MCP). Status reports `"route": "legacy"` and why. Browser control needs the unified runtime.
+
+This fallback is deprecated and is likely to be removed once the unified runtime reaches every account. If OpenAI turns it on later, `/reload` in Pi or restart the MCP server to switch to `cua_repl`.
 
 To run a source checkout:
 
@@ -136,7 +142,7 @@ Errors name the cause and the next step, so an agent can recover or tell the use
 | Cause | What the error says |
 | --- | --- |
 | The Computer Use service is stuck | Official `Sky Computer Use native pipe startup failed`, or a tool-call timeout, followed by `pkill -f MacOS/SkyComputerUseService`. The runtime relaunches the service on the next call. If it fails again, relaunch ChatGPT. |
-| ChatGPT has not prepared its runtime since updating, or OpenAI has not turned it on for the account | `ChatGPT <version> has not prepared its Computer Use runtime yet`: open ChatGPT, wait for it to start, and retry. If the runtime is still missing, install 0.6.5, which uses ChatGPT's older Computer Use tools. |
+| ChatGPT stopped providing its unified runtime after the tools loaded, for example after an update | `ChatGPT <version> has not prepared its Computer Use runtime`: open ChatGPT, wait for it to start, and retry. If the runtime is still missing, `/reload` in Pi or restart the MCP server to switch to the older typed tools. |
 | ChatGPT is updating, or the Mac is busy | `codesign did not finish within 30 seconds`: wait and retry. |
 | A ChatGPT bundle is damaged or mid-update | `Signature verification failed for …`, with the reason from `codesign`. |
 | ChatGPT and this package no longer match | The app-server's own error, the last lines it printed before exiting, or an unexpected runtime settings shape, followed by both versions and a step to update ChatGPT and this package and restart the client. |

@@ -88,14 +88,14 @@ test("reads ChatGPT's own cua_repl entry for the installed version and verifies 
 	}
 });
 
-test("a ChatGPT that has not prepared its runtime for this version says to open it", async () => {
+test("a ChatGPT that has not prepared its runtime for this version says to open it or switch to the older tools", async () => {
 	const root = realpathSync(await mkdtemp(path.join(os.tmpdir(), "cu-repl-unprepared.")));
 	try {
 		const fixture = await makeChatGpt(root, "26.1000.1");
 		const plist = { ...fixture.plist, [Object.keys(fixture.plist)[0]!]: "26.1029.61003" };
 		assert.throws(
 			() => resolveOfficialCuaRepl(fixture.codex, { userHome: fixture.userHome, runSync: signedBy("2DC432GLL2", plist) }),
-			/ChatGPT 26\.1029\.61003 has not prepared its Computer Use runtime yet \(expected .*26\.1029\.61003\/\.mcp\.json\)\. Open ChatGPT \(`open -a ChatGPT`\).*not yet turned on the unified Computer Use runtime.*`pi install npm:codex-computer-use-mcp@0\.6\.5`/,
+			/ChatGPT 26\.1029\.61003 has not prepared its Computer Use runtime \(expected .*26\.1029\.61003\/\.mcp\.json\)\..*Open ChatGPT \(`open -a ChatGPT`\).*run \/reload in Pi or restart the MCP server to switch to the older Computer Use tools/,
 		);
 	} finally {
 		await rm(root, { recursive: true, force: true });

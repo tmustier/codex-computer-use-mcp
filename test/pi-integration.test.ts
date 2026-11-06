@@ -6,7 +6,7 @@ import test from "node:test";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import adapter, { handleOfficialElicitation, PI_TOOL_NAMES, toPiContent } from "../integrations/pi/index.ts";
 import type { DirectBrokerResult } from "../src/direct-broker.ts";
-import { officialToolDefinitions } from "../src/direct-service.ts";
+import { selectComputerUseRoute } from "../src/direct-service.ts";
 import { DirectSessionExecutor } from "../src/session-executor.ts";
 import type { CuaReplArguments, CuaReplTool, JsonValue } from "../src/tools.ts";
 
@@ -142,7 +142,7 @@ function loadAdapter(session: TestSession) {
 		on(name: string, handler: TestHandler) { handlers.set(name, handler); },
 	};
 	// SAFETY: this focused adapter test implements every ExtensionAPI member the adapter uses.
-	adapter(fakePi as any, session);
+	adapter(fakePi as any, { session });
 	const tool = (name: CuaReplTool) => tools.find((candidate) => candidate.name === PI_TOOL_NAMES[name])!;
 	return { tools, commands, handlers, tool };
 }
@@ -168,9 +168,10 @@ test("Pi registers the official cua_repl tools as ordinary tools and ends the tu
 		async close() { events.push("close"); },
 	}));
 	assert.deepEqual(commands, ["computer-use-status"]);
-	const official = officialToolDefinitions(process.env.CODEX_COMPUTER_USE_HOME || path.join(getAgentDir(), "direct-computer-use"));
+	const route = selectComputerUseRoute(process.env.CODEX_COMPUTER_USE_HOME || path.join(getAgentDir(), "direct-computer-use"));
+	assert.equal(route.kind, "cua_repl");
 	assert.deepEqual(tools.map((tool) => tool.name), ["cua_repl", "cua_repl_reset"]);
-	for (const [index, definition] of official.tools.entries()) {
+	for (const [index, definition] of route.official.tools.entries()) {
 		const tool = tools[index]!;
 		assert.equal(tool.exposure, undefined);
 		assert.equal(tool.description, definition.description);

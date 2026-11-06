@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, cp, mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { access, cp, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -41,6 +41,18 @@ test("registry and git packages install and start from a plain npm consumer", as
 			"package.json",
 			"src/version.ts",
 		]) assert.ok(files.includes(required), required);
+		// Pi loads the extension from source, so every module it imports must ship.
+		const pending = ["integrations/pi/index.ts"];
+		for (const seen = new Set<string>(); pending.length > 0;) {
+			const module = pending.pop()!;
+			if (seen.has(module)) continue;
+			seen.add(module);
+			assert.ok(files.includes(module), `${module} is imported by the Pi extension but not packaged`);
+			const source = await readFile(path.join(projectRoot, module), "utf8");
+			for (const [, specifier] of source.matchAll(/from "(\.{1,2}\/[^"]+\.ts)"/g)) {
+				pending.push(path.posix.normalize(path.posix.join(path.posix.dirname(module), specifier!)));
+			}
+		}
 		for (const excluded of ["package-lock.json", "test/package.test.ts", "tsconfig.json"]) {
 			assert.equal(files.includes(excluded), false, excluded);
 		}

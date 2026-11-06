@@ -6,7 +6,7 @@ import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { z } from "zod";
-import { officialToolDefinitions } from "../src/direct-service.ts";
+import { selectComputerUseRoute } from "../src/direct-service.ts";
 import packageMetadata from "../package.json" with { type: "json" };
 
 const packageVersion = packageMetadata.version;
@@ -30,7 +30,9 @@ test("stdio MCP exposes the official cua_repl tools and status", async () => {
 	try {
 		await client.connect(transport);
 		assert.deepEqual(client.getServerVersion(), { name: "codex-computer-use-mcp", version: packageVersion });
-		const official = officialToolDefinitions(stateRoot);
+		const route = selectComputerUseRoute(stateRoot);
+		assert.equal(route.kind, "cua_repl");
+		const official = route.official;
 		assert.equal(client.getInstructions(), official.instructions);
 		const listed = await client.listTools();
 		assert.deepEqual(listed.tools.map((tool) => tool.name), ["js", "js_reset", "computer_use_status"]);
@@ -44,6 +46,7 @@ test("stdio MCP exposes the official cua_repl tools and status", async () => {
 			brokerVerified: z.boolean(),
 		}).passthrough().parse(statusResult.structuredContent);
 		assert.deepEqual(status.tools, ["js", "js_reset"]);
+		assert.equal(status.route, "cua_repl");
 		assert.equal(status.brokerVerified, true);
 	} finally {
 		await client.close().catch(() => undefined);
