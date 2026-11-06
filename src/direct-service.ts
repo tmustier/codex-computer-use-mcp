@@ -8,6 +8,7 @@ import {
 	DirectBrokerCallError,
 	pathConfigFile,
 	readOfficialCuaReplServer,
+	UnifiedRuntimeUnavailableError,
 	verifyOfficialDirectBroker,
 	type DirectBrokerElicitationRequest,
 	type DirectBrokerElicitationResponse,
@@ -21,6 +22,7 @@ import {
 	type JsonObject,
 	type JsonValue,
 } from "./tools.ts";
+import { getDirectStatus as getLegacyStatus } from "./legacy/direct-service.ts";
 
 const requestSchema = z.object({
 	tool: z.enum(CUA_REPL_TOOLS),
@@ -147,14 +149,24 @@ export function getDirectStatus(stateRoot = defaultStateRoot()): DirectStatus {
 	}
 }
 
-/** The official tool definitions for the installed ChatGPT, or minimal stand-ins that say why they are missing. */
-export function officialToolDefinitions(stateRoot = defaultStateRoot()): CuaReplToolSet {
+export type ComputerUseRoute =
+	| { kind: "cua_repl"; official: CuaReplToolSet }
+	/** Deprecated: ChatGPT without its unified runtime still uses the ten typed tools. */
+	| { kind: "legacy"; reason: string };
+
+/**
+ * Follow ChatGPT: use its cua_repl runtime when it has prepared one, and otherwise the ten typed
+ * tools it still uses itself. Errors other than a missing runtime keep the cua_repl tools, whose
+ * descriptions then say why Computer Use is not ready.
+ */
+export function selectComputerUseRoute(stateRoot = defaultStateRoot()): ComputerUseRoute {
 	try {
-		return cuaReplToolDefinitions(readOfficialCuaReplServer({ configPath: pathConfigFile(stateRoot) }).env);
+		return { kind: "cua_repl", official: cuaReplToolDefinitions(readOfficialCuaReplServer({ configPath: pathConfigFile(stateRoot) }).env) };
 	} catch (error) {
+		if (error instanceof UnifiedRuntimeUnavailableError) return { kind: "legacy", reason: error.message };
 		const unavailable = error instanceof Error ? error.message : String(error);
 		const note = ` Computer Use is not ready: ${unavailable}`;
-		return {
+		return { kind: "cua_repl", official: {
 			tools: [
 				{
 					name: "js",
@@ -169,6 +181,13 @@ export function officialToolDefinitions(stateRoot = defaultStateRoot()): CuaRepl
 					annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 				},
 			],
-		};
+		} };
 	}
+}
+
+/** Status of the route this process selected, so it matches the registered tools. */
+export function computerUseStatus(route: ComputerUseRoute, stateRoot = defaultStateRoot()) {
+	return route.kind === "legacy"
+		? { route: "legacy", deprecated: `Using the older typed Computer Use tools because ${route.reason}`, ...getLegacyStatus(stateRoot) }
+		: { route: "cua_repl", ...getDirectStatus(stateRoot) };
 }
