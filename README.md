@@ -133,7 +133,8 @@ ChatGPT for Windows runs the same `cua_repl` runtime, and the adapter follows it
 - ChatGPT starts the runtime through Node and `@oai/cua-repl`'s launcher rather than a shell wrapper. The adapter drops the launcher's `--import` of ChatGPT's browser access bootstrap, which is the Windows form of the same grant check.
 - Binaries must carry a valid Authenticode signature from "OpenAI OpCo, LLC": the app-server, `node.exe`, `node_repl.exe` and the Computer Use helper `codex-computer-use.exe`.
 - The tool descriptions come from the runtime's own `create_launch_environment`, because ChatGPT for Windows builds them at launch instead of writing them into the settings.
-- Cleanup ends the private process tree with `taskkill /T`.
+- ChatGPT must be running. ChatGPT for Windows hosts the pipe that the runtime's Computer Use client connects to, and names a new pipe each time it starts. When the pipe is unavailable, the error says to open ChatGPT, and to `/reload` Pi or restart the MCP server if ChatGPT restarted during the session.
+- Cleanup ends the private process tree with `taskkill /T`. If the app-server has already exited, Windows cannot find its children, so cleanup is reported as unverified.
 
 Windows support has not been run against a real ChatGPT for Windows install yet. CI installs, builds and tests the package on Windows. The paths, the signature subject and the launch form come from ChatGPT's own code and from Ross Zhu's tested 0.6 port, so a live check may still turn up differences. Please report what you find.
 

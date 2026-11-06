@@ -9,7 +9,8 @@ import path from "node:path";
  */
 
 export const OPENAI_SIGNER_ORGANIZATION = "OpenAI OpCo, LLC";
-export const CODEX_BIN_RELATIVE_PATH = path.join("AppData", "Local", "OpenAI", "Codex", "bin");
+/** Relative to %LOCALAPPDATA%. */
+export const CODEX_BIN_RELATIVE_PATH = path.join("OpenAI", "Codex", "bin");
 /** ChatGPT's Windows launch passes this module to Node with --import; it requests ChatGPT's browser access grant. */
 export const BROWSER_ACCESS_BOOTSTRAP = "require-browser-access.mjs";
 /** The Windows helper, preferring the one for this process's architecture as Ross Zhu's 0.6 port did. */
@@ -90,9 +91,11 @@ export function windowsBrokerEnv(codexHome: string, tempRoot: string): NodeJS.Pr
 }
 
 /** End the app-server and every process it started. Windows has no process groups to signal. */
-export function killProcessTree(pid: number): string | undefined {
+export function killProcessTree(pid: number): { outcome: "ended" | "root-exited" } | { outcome: "failed"; reason: string } {
 	const taskkill = path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
 	const result = spawnSync(taskkill, ["/PID", String(pid), "/T", "/F"], { encoding: "utf8", timeout: 10_000, windowsHide: true });
-	// taskkill exits 128 when the process has already exited.
-	return result.status === 0 || result.status === 128 ? undefined : (result.stderr || result.stdout || "taskkill failed").trim();
+	if (result.status === 0) return { outcome: "ended" };
+	// taskkill exits 128 when the app-server has already exited; its children then have no parent to find them through.
+	if (result.status === 128) return { outcome: "root-exited" };
+	return { outcome: "failed", reason: (result.stderr || result.stdout || "taskkill failed").trim() };
 }

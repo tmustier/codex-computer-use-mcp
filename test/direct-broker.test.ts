@@ -52,6 +52,7 @@ rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify(
      child.once("exit",()=>send({id:m.id,error:{message:"native transport closed"}}));
      return;
    }
+   if(mode==="pipe-unavailable") return send({id:m.id,result:{content:[{type:"text",text:"Error: Computer Use native pipe connection timed out"}],isError:true}});
    if(mode==="stuck-service") return send({id:m.id,result:{content:[{type:"text",text:"Sky Computer Use native pipe startup failed"},{type:"text",text:"## Computer Use"}],isError:true}});
    if(mode==="tool-error") return send({id:m.id,result:{content:[{type:"text",text:"official error"}],isError:true}});
    if(mode==="persist"){
@@ -453,6 +454,16 @@ test("closing an unused session does not send a native turn-ended notification",
 		await session.close();
 		const records = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
 		assert.equal(records.some(isTurnEnded), false);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("on Windows, a pipe error says ChatGPT must be running", { skip: process.platform !== "win32" && "the Windows client's pipe errors occur only on Windows" }, async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-windows-pipe-test."));
+	try {
+		const { script } = await makeFake(root);
+		const result = await callOfficialCuaRepl("js", { code: "1" }, options(script, "pipe-unavailable"));
+		assert.equal(result.isError, true);
+		assert.match(String(result.content.at(-1)?.text), /ChatGPT for Windows hosts Computer Use's connection, so ChatGPT must be running/);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 

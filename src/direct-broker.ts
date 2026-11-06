@@ -41,6 +41,9 @@ function outOfStepHint(codexVersion?: string): string {
 
 // What official node_repl reports when the shared Computer Use service does not answer.
 const STUCK_SERVICE_ERROR = "Sky Computer Use native pipe startup failed";
+// What the official Windows client reports when it cannot use the pipe that ChatGPT for Windows hosts.
+const WINDOWS_PIPE_ERROR = "Computer Use native pipe";
+const WINDOWS_PIPE_HINT = "ChatGPT for Windows hosts Computer Use's connection, so ChatGPT must be running. Ask the user to open ChatGPT, then retry. If ChatGPT restarted during this session, run /reload in Pi or restart the MCP server first, so the next session uses ChatGPT's new connection.";
 const STUCK_SERVICE_HINT = "The Computer Use service may be stuck. Restart it with `pkill -f MacOS/SkyComputerUseService` (it relaunches on the next call, with or without ChatGPT running), then retry once. If it fails again, ask the user to relaunch ChatGPT.";
 
 const jsonObjectSchema = z.record(z.string(), z.json());
@@ -253,7 +256,9 @@ function locateOfficialCodex(options: ResolveOfficialOptions = {}): string {
 	const runSync = options.runSync ?? productionRunSync;
 	const config = options.configPath ? readOfficialPathConfig(options.configPath) : {};
 	if ((options.platform ?? process.platform) === "win32" && !config.codexPath) {
-		const binRoot = path.join(options.userHome ?? os.userInfo().homedir, CODEX_BIN_RELATIVE_PATH);
+		// ChatGPT installs under the real %LOCALAPPDATA%, falling back to the profile's AppData\Local as ChatGPT does.
+		const localAppData = options.userHome ? path.join(options.userHome, "AppData", "Local") : process.env.LOCALAPPDATA ?? path.join(os.userInfo().homedir, "AppData", "Local");
+		const binRoot = path.join(localAppData, CODEX_BIN_RELATIVE_PATH);
 		const installed = newestVersionedFile(binRoot, "codex.exe");
 		if (!installed) throw notFoundError("Codex app-server", [path.join(binRoot, "<version>", "codex.exe")], "codexPath", "Install or update the official ChatGPT app for Windows, then open it.", options.configPath);
 		return realpathSync(installed);
@@ -474,6 +479,14 @@ function processExists(pid: number): boolean {
 	}
 }
 
+/** Windows cannot find the children of an app-server that has already exited, so their cleanup is unconfirmed. */
+class UnverifiableCleanupError extends Error {
+	constructor() {
+		super("The official app-server exited before cleanup, so its child processes could not be checked");
+		this.name = "UnverifiableCleanupError";
+	}
+}
+
 class ProcessEnumerationError extends Error {
 	readonly partialPids: Set<number>;
 	constructor(message: string, partialPids: Set<number>, cause?: unknown) {
@@ -539,9 +552,11 @@ async function terminateGroup(
 	const pid = proc?.pid;
 	if (!pid) return;
 	if (process.platform === "win32") {
-		const failure = killProcessTree(pid);
+		const killed = killProcessTree(pid);
 		for (let elapsed = 0; elapsed < 1500 && processExists(pid); elapsed += 25) await new Promise((resolve) => setTimeout(resolve, 25));
-		if (failure || processExists(pid)) throw new Error(`Official app-server process tree did not terminate${failure ? `: ${failure}` : ""}`);
+		if (killed.outcome === "root-exited") throw new UnverifiableCleanupError();
+		if (killed.outcome === "failed") throw new Error(`Official app-server process tree did not terminate: ${killed.reason}`);
+		if (processExists(pid)) throw new Error("Official app-server process tree did not terminate");
 		return;
 	}
 	const descendants = new Set<number>();
@@ -930,6 +945,9 @@ export async function createOfficialCuaReplSession(
 		try { await close(); }
 		catch (closeError) {
 			const closeFailure = closeError instanceof Error ? closeError : new Error(String(closeError));
+			const evidence = { modelTurnsStarted, ephemeralThread, brokerVersion: verification.brokerVersion, clientBuild: verification.clientBuild };
+			// The app-server's own failure explains more than the cleanup it made unverifiable.
+			if (closeFailure.cause instanceof UnverifiableCleanupError) throw new DirectBrokerCallError(primary.message, false, primary, evidence);
 			if (closeFailure.message === "Official direct Computer Use broker cleanup failed") {
 				throw new DirectBrokerCallError(closeFailure.message, false, primary);
 			}
@@ -958,9 +976,12 @@ export async function createOfficialCuaReplSession(
 				directCalls = 1;
 				if (modelTurnsStarted !== 0) throw new BrokerVerificationError("Model-turn activity was observed during direct dispatch");
 				const result = directResultSchema.parse(raw);
-				const stuck = result.isError && result.content.some((block) => block.type === "text" && String(block.text ?? "").includes(STUCK_SERVICE_ERROR));
+				const officialText = result.isError ? result.content.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join("\n") : "";
+				const hint = process.platform === "win32"
+					? officialText.includes(WINDOWS_PIPE_ERROR) ? WINDOWS_PIPE_HINT : undefined
+					: officialText.includes(STUCK_SERVICE_ERROR) ? STUCK_SERVICE_HINT : undefined;
 				return {
-					content: stuck ? [...result.content, { type: "text", text: STUCK_SERVICE_HINT }] : result.content,
+					content: hint ? [...result.content, { type: "text", text: hint }] : result.content,
 					structuredContent: result.structuredContent,
 					isError: result.isError === true,
 					brokerVersion: verification.brokerVersion,

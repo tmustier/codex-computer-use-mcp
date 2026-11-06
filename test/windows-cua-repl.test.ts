@@ -75,6 +75,20 @@ test("on Windows, the newest installed Codex and cua_repl settings are verified 
 	}
 });
 
+test("on Windows, Codex is found under the real %LOCALAPPDATA%", async () => {
+	const root = realpathSync(await mkdtemp(path.join(os.tmpdir(), "cu-windows-localappdata.")));
+	const previous = process.env.LOCALAPPDATA;
+	try {
+		const codex = await file(path.join(root, "Redirected", "OpenAI", "Codex", "bin", "26.1029.1", "codex.exe"));
+		process.env.LOCALAPPDATA = path.join(root, "Redirected");
+		assert.equal(resolveOfficialCodex({ platform: "win32", runSync: authenticode() }), codex);
+	} finally {
+		if (previous === undefined) delete process.env.LOCALAPPDATA;
+		else process.env.LOCALAPPDATA = previous;
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("on Windows, a binary not signed by OpenAI fails closed", async () => {
 	const root = realpathSync(await mkdtemp(path.join(os.tmpdir(), "cu-windows-signer.")));
 	try {
