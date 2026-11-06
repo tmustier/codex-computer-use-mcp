@@ -9,7 +9,10 @@ import { z } from "zod";
 import adapter from "../../integrations/pi/index.ts";
 import { computerUseToolName } from "../../integrations/pi/legacy.ts";
 import { selectComputerUseRoute } from "../../src/direct-service.ts";
-import { COMPUTER_USE_METHODS } from "../../src/legacy/tools.ts";
+import { hostPlatform } from "../../src/legacy/platform.ts";
+
+const platform = hostPlatform();
+const macTest = process.platform === "darwin" ? test : test.skip;
 
 /** A state directory whose config names a ChatGPT for which ChatGPT has written no cua_repl settings. */
 async function stateWithoutUnifiedRuntime(root: string): Promise<string> {
@@ -24,7 +27,7 @@ async function stateWithoutUnifiedRuntime(root: string): Promise<string> {
 	return stateRoot;
 }
 
-test("a ChatGPT without its unified runtime selects the deprecated typed tools", async () => {
+macTest("a ChatGPT without its unified runtime selects the deprecated typed tools", async () => {
 	const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "cu-route-legacy.")));
 	try {
 		const route = selectComputerUseRoute(await stateWithoutUnifiedRuntime(root));
@@ -35,7 +38,7 @@ test("a ChatGPT without its unified runtime selects the deprecated typed tools",
 	}
 });
 
-test("a configured cua_repl settings path that is missing does not fall back", async () => {
+macTest("a configured cua_repl settings path that is missing does not fall back", async () => {
 	const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "cu-route-configured.")));
 	try {
 		await writeFile(path.join(root, "config.json"), JSON.stringify({ cuaReplConfigPath: path.join(root, "missing.mcp.json") }));
@@ -47,7 +50,7 @@ test("a configured cua_repl settings path that is missing does not fall back", a
 	}
 });
 
-test("Pi registers the ten codemode tools when the unified runtime is missing", () => {
+test("Pi registers the host platform codemode tools when the unified runtime is missing", () => {
 	const tools: Array<{ name: string; exposure?: string }> = [];
 	const fakePi = {
 		registerTool(tool: { name: string; exposure?: string }) { tools.push(tool); },
@@ -56,11 +59,11 @@ test("Pi registers the ten codemode tools when the unified runtime is missing", 
 	};
 	// SAFETY: this focused adapter test implements every ExtensionAPI member registration uses.
 	adapter(fakePi as any, { route: { kind: "legacy", reason: "test" } });
-	assert.deepEqual(tools.map((tool) => tool.name), COMPUTER_USE_METHODS.map(computerUseToolName));
+	assert.deepEqual(tools.map((tool) => tool.name), platform.methods.map(computerUseToolName));
 	assert.ok(tools.every((tool) => tool.exposure === "codemode"));
 });
 
-test("stdio MCP serves the ten typed tools and says the route is deprecated", async () => {
+test("stdio MCP serves the host platform typed tools and says the route is deprecated", async () => {
 	const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "cu-route-mcp.")));
 	const client = new Client({ name: "test-client", version: "1.0.0" }, { capabilities: {} });
 	try {
@@ -73,10 +76,11 @@ test("stdio MCP serves the ten typed tools and says the route is deprecated", as
 			stderr: "pipe",
 		}));
 		const listed = await client.listTools();
-		assert.deepEqual(listed.tools.map((tool) => tool.name), [...COMPUTER_USE_METHODS, "computer_use_status"]);
-		const status = z.object({ route: z.string(), deprecated: z.string() }).passthrough()
+		assert.deepEqual(listed.tools.map((tool) => tool.name), [...platform.methods, "computer_use_status"]);
+		const status = z.object({ route: z.string(), deprecated: z.string(), platform: z.string() }).passthrough()
 			.parse((await client.callTool({ name: "computer_use_status", arguments: {} })).structuredContent);
 		assert.equal(status.route, "legacy");
+		assert.equal(status.platform, platform.name);
 		assert.match(status.deprecated, /older typed Computer Use tools/);
 	} finally {
 		await client.close().catch(() => undefined);
