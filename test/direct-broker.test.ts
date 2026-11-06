@@ -4,6 +4,10 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+
+// These exercise macOS behaviour: process-group, pgrep and lsof cleanup, which Windows replaces with
+// taskkill /T, and the macOS service's recovery step.
+const posixTest = process.platform === "win32" ? test.skip : test;
 import { z } from "zod";
 import { callOfficialCuaRepl, createOfficialCuaReplSession, DirectBrokerCallError } from "../src/direct-broker.ts";
 import packageMetadata from "../package.json" with { type: "json" };
@@ -23,7 +27,7 @@ const rl=createInterface({input:process.stdin});
 let pendingTool; let bindings={};
 if(mode==="config-rejected"){process.stderr.write("startup log\\n".repeat(2000)+"\\u001b[31mError\\u001b[0m: invalid type: unit variant, expected string only\\nin \`web_search\`\\n",()=>process.exit(1));}
 if(mode==="child-hang"||mode==="orphan-exit"){const child=spawn(process.execPath,["-e","process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{detached:true,stdio:"ignore"});child.unref();appendFileSync(log,JSON.stringify({childPid:child.pid})+"\\n");if(mode==="orphan-exit")process.exit(0);}
-rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify({method:m.method,id:m.id,params:m.params,result:m.result,codexHome:process.env.CODEX_HOME,home:process.env.HOME,tmpdir:process.env.TMPDIR,hasOpenAIKey:Boolean(process.env.OPENAI_API_KEY)})+"\\n");
+rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify({method:m.method,id:m.id,params:m.params,result:m.result,codexHome:process.env.CODEX_HOME,home:process.env.HOME,tmpdir:process.env.TMPDIR??process.env.TEMP,hasOpenAIKey:Boolean(process.env.OPENAI_API_KEY)})+"\\n");
  if(m.method==="initialize") return send({id:m.id,result:{userAgent:"fake",platformFamily:"unix",platformOs:"macos"}});
  if(m.method==="initialized") return;
  if(m.method==="thread/start"&&mode==="protocol-drift") return send({id:m.id,error:{code:-32600,message:"Invalid request: unknown variant \`thread/start\`, expected one of \`initialize\`, \`thread/begin\`, \`thread/resume\`"}});
@@ -49,6 +53,7 @@ rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify(
      child.once("exit",()=>send({id:m.id,error:{message:"native transport closed"}}));
      return;
    }
+   if(mode==="pipe-unavailable") return send({id:m.id,result:{content:[{type:"text",text:"Error: Computer Use native pipe connection timed out"}],isError:true}});
    if(mode==="stuck-service") return send({id:m.id,result:{content:[{type:"text",text:"Sky Computer Use native pipe startup failed"},{type:"text",text:"## Computer Use"}],isError:true}});
    if(mode==="tool-error") return send({id:m.id,result:{content:[{type:"text",text:"official error"}],isError:true}});
    if(mode==="persist"){
@@ -155,7 +160,7 @@ test("one session keeps REPL bindings across turns, and each ended turn gets its
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("one-shot wrapper preserves a setup-phase cleanup failure", async () => {
+posixTest("one-shot wrapper preserves a setup-phase cleanup failure", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-setup-cleanup-test."));
 	try {
 		const { script } = await makeFake(root);
@@ -261,7 +266,7 @@ test("direct broker fails closed on any model-turn notification, including durin
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("partial process enumeration errors fail closed but still kill already discovered descendants", async () => {
+posixTest("partial process enumeration errors fail closed but still kill already discovered descendants", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-enumerator-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -282,7 +287,7 @@ test("partial process enumeration errors fail closed but still kill already disc
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("an app-server that exits immediately cannot orphan a private-workdir child", async () => {
+posixTest("an app-server that exits immediately cannot orphan a private-workdir child", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-orphan-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -296,7 +301,7 @@ test("an app-server that exits immediately cannot orphan a private-workdir child
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("direct broker cancellation terminates separately-grouped descendants", async () => {
+posixTest("direct broker cancellation terminates separately-grouped descendants", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-child-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -327,7 +332,8 @@ test("directCalls remains zero when no tool-call response confirms dispatch", as
 		try { await callOfficialCuaRepl("js", { code: "1" }, options(script, "close-before-tool")); }
 		catch (error) { observed = error; }
 		assert.equal(observed?.directCalls, 0);
-		assert.equal(observed?.cleanupVerified, true);
+		// The app-server exited first; Windows cannot find its children to confirm their cleanup.
+		assert.equal(observed?.cleanupVerified, process.platform !== "win32");
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -426,7 +432,7 @@ test("drain expiry bounds cancellation and still kills private descendants", asy
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("a transport that disappears between calls still closes cleanly", async () => {
+posixTest("a transport that disappears between calls still closes cleanly", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-idle-exit-test."));
 	try {
 		const { script } = await makeFake(root);
@@ -450,6 +456,16 @@ test("closing an unused session does not send a native turn-ended notification",
 		await session.close();
 		const records = (await readFile(log, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
 		assert.equal(records.some(isTurnEnded), false);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("on Windows, a pipe error says ChatGPT must be running", { skip: process.platform !== "win32" && "the Windows client's pipe errors occur only on Windows" }, async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-windows-pipe-test."));
+	try {
+		const { script } = await makeFake(root);
+		const result = await callOfficialCuaRepl("js", { code: "1" }, options(script, "pipe-unavailable"));
+		assert.equal(result.isError, true);
+		assert.match(String(result.content.at(-1)?.text), /ChatGPT for Windows hosts Computer Use's connection, so ChatGPT must be running/);
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -491,7 +507,7 @@ test("a tool timeout says how to restart a stuck Computer Use service", async ()
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("an official stuck-service error keeps its text and gains a recovery step", async () => {
+posixTest("an official stuck-service error keeps its text and gains a recovery step", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-stuck-test."));
 	try {
 		const { script } = await makeFake(root);

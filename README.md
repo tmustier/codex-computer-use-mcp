@@ -1,12 +1,12 @@
 # Codex Computer Use MCP
 
-Give Pi and MCP clients OpenAI's official signed macOS Computer Use runtime, `cua_repl`: the same JavaScript tool that ChatGPT's own threads use to operate Mac apps and browsers. The calling agent writes each script. This package runs no nested model and generates no action plan.
+Give Pi and MCP clients OpenAI's official signed Computer Use runtime, `cua_repl`: the same JavaScript tool that ChatGPT's own threads use to operate apps and browsers. It runs on macOS, and experimentally on Windows (see [Windows](#windows-experimental)). The calling agent writes each script. This package runs no nested model and generates no action plan.
 
 OpenAI does not produce or endorse this independent project. It relies on an experimental app-server API and installed ChatGPT components that may change.
 
 ## Requirements
 
-- macOS with an unlocked user session
+- macOS with an unlocked user session, or Windows (experimental)
 - Node.js 22 or newer
 - the official ChatGPT macOS app with its unified Computer Use plugin (tested with ChatGPT for Work 26.1029.61003), by default at `/Applications/ChatGPT.app`
 - ChatGPT opened at least once since its last update, so it has written its Computer Use runtime settings. ChatGPT writes them only when OpenAI has turned on its unified Computer Use runtime for the account; without them, the adapter falls back to the older typed tools (see [Accounts without the unified runtime](#accounts-without-the-unified-runtime-deprecated))
@@ -59,6 +59,8 @@ Version 0.7.0 replaces the ten `computer_use_<method>` codemode tools with `cua_
 ### Accounts without the unified runtime (deprecated)
 
 OpenAI turns on ChatGPT's unified Computer Use runtime per account. Where it is off, ChatGPT itself still uses the ten older typed tools, and so does this adapter: when Pi loads the extension or the MCP server starts, and ChatGPT has not written its `cua_repl` settings, the adapter registers the 0.6 tools instead (`computer_use_<method>` codemode tools in Pi, `<method>` tools over MCP). Status reports `"route": "legacy"` and why. Browser control needs the unified runtime.
+
+On Windows the fallback is Ross Zhu's port of the 0.6 route: the official `@oai/sky` Windows client and its thirteen window-based tools (`list_apps`, `list_windows`, `get_window_state`, `launch_app` and so on). Its `computerUseAppPath` setting names the `@oai/sky` package.
 
 This fallback is deprecated and is likely to be removed once the unified runtime reaches every account. If OpenAI turns it on later, `/reload` in Pi or restart the MCP server to switch to `cua_repl`.
 
@@ -122,6 +124,19 @@ When ChatGPT is installed elsewhere, or keeps its settings elsewhere, set either
 The adapter reads this file when it starts each Computer Use session, so changes apply without restarting Pi or the MCP server. Tool descriptions are read when Pi loads the extension or the MCP server starts. Configured binaries must pass the same OpenAI signature and Team ID checks. Explicit overrides take precedence: a missing or invalid configured path never silently falls back to another installation. Version 0.6's `computerUseAppPath` setting is ignored; the runtime settings name the Computer Use app.
 
 If a component is missing, install or update the [official ChatGPT macOS app](https://chatgpt.com/download), open it, and install its Computer Use component. Installing this npm package alone does not install those signed components. The error lists the paths checked and the exact config file to edit. For Pi this is normally `~/.pi/agent/direct-computer-use/config.json`; for standalone MCP/CLI it is `~/.direct-computer-use/config.json`. `CODEX_COMPUTER_USE_HOME` overrides the state directory. `/computer-use-status` and `codex-computer-use-mcp --status` show the effective config path and the current error.
+
+### Windows (experimental)
+
+ChatGPT for Windows runs the same `cua_repl` runtime, and the adapter follows it the same way, with these differences:
+
+- Codex is the newest `%LOCALAPPDATA%\OpenAI\Codex\bin\<version>\codex.exe`, and the settings are the newest `%USERPROFILE%\.codex\plugins\cache\openai-bundled\unified-computer-use\<version>\.mcp.json`. `codexPath` and `cuaReplConfigPath` override them as on macOS.
+- ChatGPT starts the runtime through Node and `@oai/cua-repl`'s launcher rather than a shell wrapper. The adapter drops the launcher's `--import` of ChatGPT's browser access bootstrap, which is the Windows form of the same grant check.
+- Binaries must carry a valid Authenticode signature from "OpenAI OpCo, LLC": the app-server, `node.exe`, `node_repl.exe` and the Computer Use helper `codex-computer-use.exe`.
+- The tool descriptions come from the runtime's own `create_launch_environment`, because ChatGPT for Windows builds them at launch instead of writing them into the settings.
+- ChatGPT must be running. ChatGPT for Windows hosts the pipe that the runtime's Computer Use client connects to, and names a new pipe each time it starts. When the pipe is unavailable, the error says to open ChatGPT, and to `/reload` Pi or restart the MCP server if ChatGPT restarted during the session.
+- Cleanup ends the private process tree with `taskkill /T`. If the app-server has already exited, Windows cannot find its children, so cleanup is reported as unverified.
+
+Windows support has not been run against a real ChatGPT for Windows install yet. CI installs, builds and tests the package on Windows. The paths, the signature subject and the launch form come from ChatGPT's own code and from Ross Zhu's tested 0.6 port, so a live check may still turn up differences. Please report what you find.
 
 ### Operating ChatGPT itself
 

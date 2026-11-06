@@ -6,9 +6,20 @@ import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createInterface } from "node:readline";
+import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import type { CuaReplArguments, CuaReplTool, JsonObject, JsonValue } from "./tools.ts";
 import { PACKAGE_VERSION } from "./version.ts";
+import {
+	authenticodeCheck,
+	CODEX_BIN_RELATIVE_PATH,
+	killProcessTree,
+	newestVersionedFile,
+	realProfileEnv,
+	WINDOWS_HELPER_RELATIVE_PATHS,
+	windowsBrokerEnv,
+	withoutBrowserAccessBootstrap,
+} from "./windows.ts";
 
 const CODEX_RELATIVE_PATHS = [
 	"Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
@@ -30,6 +41,9 @@ function outOfStepHint(codexVersion?: string): string {
 
 // What official node_repl reports when the shared Computer Use service does not answer.
 const STUCK_SERVICE_ERROR = "Sky Computer Use native pipe startup failed";
+// What the official Windows client reports when it cannot use the pipe that ChatGPT for Windows hosts.
+const WINDOWS_PIPE_ERROR = "Computer Use native pipe";
+const WINDOWS_PIPE_HINT = "ChatGPT for Windows hosts Computer Use's connection, so ChatGPT must be running. Ask the user to open ChatGPT, then retry. If ChatGPT restarted during this session, run /reload in Pi or restart the MCP server first, so the next session uses ChatGPT's new connection.";
 const STUCK_SERVICE_HINT = "The Computer Use service may be stuck. Restart it with `pkill -f MacOS/SkyComputerUseService` (it relaunches on the next call, with or without ChatGPT running), then retry once. If it fails again, ask the user to relaunch ChatGPT.";
 
 const jsonObjectSchema = z.record(z.string(), z.json());
@@ -155,8 +169,13 @@ function productionRunSync(command: string, args: string[]): CommandResult {
 	return spawnSync(command, args, { encoding: "utf8", timeout: VERIFY_COMMAND_TIMEOUT_MS });
 }
 
-function verifySignedBinary(binaryPath: string, runSync: RunSync): void {
+function verifySignedBinary(binaryPath: string, runSync: RunSync, platform: NodeJS.Platform = process.platform): void {
 	const name = path.basename(binaryPath);
+	if (platform === "win32") {
+		const failure = authenticodeCheck(binaryPath, runSync);
+		if (failure) throw new BrokerVerificationError(`${failure}. If ChatGPT is updating, wait for it to finish and retry. Otherwise reinstall ChatGPT.`);
+		return;
+	}
 	const verify = runSync("/usr/bin/codesign", ["--verify", "--strict", binaryPath]);
 	if (verify.status === null) {
 		throw new BrokerVerificationError(`Could not check the signature of ${name}: codesign did not finish within ${VERIFY_COMMAND_TIMEOUT_MS / 1000} seconds. ChatGPT may be updating, or the Mac is busy. Wait a minute, then retry.`);
@@ -228,12 +247,22 @@ interface ResolveOfficialOptions {
 	chatGptAppPaths?: string[];
 	configPath?: string;
 	runSync?: RunSync;
+	/** Test-only platform override. */
+	platform?: NodeJS.Platform;
 }
 
 /** Find the configured Codex app-server executable, or else the first default ChatGPT location that exists. */
 function locateOfficialCodex(options: ResolveOfficialOptions = {}): string {
 	const runSync = options.runSync ?? productionRunSync;
 	const config = options.configPath ? readOfficialPathConfig(options.configPath) : {};
+	if ((options.platform ?? process.platform) === "win32" && !config.codexPath) {
+		// ChatGPT installs under the real %LOCALAPPDATA%, falling back to the profile's AppData\Local as ChatGPT does.
+		const localAppData = options.userHome ? path.join(options.userHome, "AppData", "Local") : process.env.LOCALAPPDATA ?? path.join(os.userInfo().homedir, "AppData", "Local");
+		const binRoot = path.join(localAppData, CODEX_BIN_RELATIVE_PATH);
+		const installed = newestVersionedFile(binRoot, "codex.exe");
+		if (!installed) throw notFoundError("Codex app-server", [path.join(binRoot, "<version>", "codex.exe")], "codexPath", "Install or update the official ChatGPT app for Windows, then open it.", options.configPath);
+		return realpathSync(installed);
+	}
 	const chatGptApps = config.codexPath ? [] : installedChatGptAppPaths(options.chatGptAppPaths ?? defaultChatGptAppPaths(options.userHome), runSync);
 	const candidates = config.codexPath ? [path.resolve(config.codexPath)]
 		: chatGptApps.flatMap((app) => CODEX_RELATIVE_PATHS.map((relative) => path.join(app, relative)));
@@ -254,7 +283,7 @@ function locateOfficialCodex(options: ResolveOfficialOptions = {}): string {
 /** Resolve and verify the Codex app-server executable. */
 export function resolveOfficialCodex(options: ResolveOfficialOptions = {}): string {
 	const codexPath = locateOfficialCodex(options);
-	verifySignedBinary(codexPath, options.runSync ?? productionRunSync);
+	verifySignedBinary(codexPath, options.runSync ?? productionRunSync, options.platform);
 	return codexPath;
 }
 
@@ -283,12 +312,12 @@ function plistValue(appPath: string, key: string, runSync: RunSync): string | un
 	return result.status === 0 && value ? value : undefined;
 }
 
-function verifiedExecutable(executable: string, runSync: RunSync): string {
+function verifiedExecutable(executable: string, runSync: RunSync, platform?: NodeJS.Platform): string {
 	if (!existsSync(executable)) {
 		throw new BrokerVerificationError(`${executable}, named by ChatGPT's Computer Use config, does not exist. ${outOfStepHint()}`);
 	}
 	const canonical = realpathSync(executable);
-	verifySignedBinary(canonical, runSync);
+	verifySignedBinary(canonical, runSync, platform);
 	return canonical;
 }
 
@@ -307,6 +336,14 @@ function readCuaReplServer(codexPath: string, options: ResolveOfficialOptions): 
 	const config = options.configPath ? readOfficialPathConfig(options.configPath) : {};
 	const userHome = options.userHome ?? os.userInfo().homedir;
 	let configPath = config.cuaReplConfigPath ? path.resolve(config.cuaReplConfigPath) : undefined;
+	if (!configPath && (options.platform ?? process.platform) === "win32") {
+		// ChatGPT for Windows has no bundle version to read here; it rewrites the current version's settings when it starts.
+		const cacheRoot = path.join(userHome, CUA_REPL_CACHE_RELATIVE_PATH);
+		configPath = newestVersionedFile(cacheRoot, ".mcp.json");
+		if (!configPath) {
+			throw new UnifiedRuntimeUnavailableError(`ChatGPT has not prepared its Computer Use runtime (expected ${path.join(cacheRoot, "<version>", ".mcp.json")}). Either ChatGPT has not started since it was installed or updated, or OpenAI has not turned on the unified Computer Use runtime for this ChatGPT account. Open ChatGPT, wait for it to finish starting, then retry. If the file is still missing, run /reload in Pi or restart the MCP server to switch to the older Computer Use tools.`);
+		}
+	}
 	if (!configPath) {
 		const chatGptApp = /^(.*?\.app)\/Contents\/Resources\//.exec(codexPath)?.[1];
 		const version = chatGptApp ? plistValue(chatGptApp, "CFBundleShortVersionString", runSync) : undefined;
@@ -338,6 +375,7 @@ export function resolveOfficialCuaRepl(codexPath: string, options: ResolveOffici
 	const runSync = options.runSync ?? productionRunSync;
 	const userHome = options.userHome ?? os.userInfo().homedir;
 	const { configPath, server } = readCuaReplServer(codexPath, options);
+	if ((options.platform ?? process.platform) === "win32") return resolveWindowsCuaRepl(configPath, server, runSync, options);
 	const nodeRepls = [server.command, ...server.args].filter((part) => path.isAbsolute(part) && path.basename(part) === "node_repl");
 	if (nodeRepls.length !== 1) {
 		throw new BrokerVerificationError(`ChatGPT's Computer Use config at ${configPath} does not name exactly one node_repl executable. ${outOfStepHint()}`);
@@ -355,6 +393,50 @@ export function resolveOfficialCuaRepl(codexPath: string, options: ResolveOffici
 	return { configPath, server, nodeReplPath, computerUseAppPath, clientBuild };
 }
 
+/**
+ * ChatGPT for Windows starts cua_repl as `node.exe [--import <browser access bootstrap>] <@oai/cua-repl>/bin/cua-repl.mjs`,
+ * naming node_repl in CUA_REPL_NODE_REPL_PATH. Verify the executables and the Windows Computer Use helper.
+ */
+function resolveWindowsCuaRepl(configPath: string, server: CuaReplServer, runSync: RunSync, options: ResolveOfficialOptions): OfficialCuaRepl {
+	const unexpected = (what: string) => new BrokerVerificationError(`ChatGPT's Computer Use config at ${configPath} ${what}. ${outOfStepHint()}`);
+	const moduleDir = server.env.NODE_REPL_NODE_MODULE_DIRS?.split(path.delimiter)[0];
+	if (!server.env.CUA_REPL_NODE_REPL_PATH || !moduleDir) throw unexpected("does not name node_repl and its modules");
+	verifiedExecutable(server.command, runSync, "win32");
+	const nodeReplPath = verifiedExecutable(server.env.CUA_REPL_NODE_REPL_PATH, runSync, "win32");
+	const helpers = WINDOWS_HELPER_RELATIVE_PATHS.map((relative) => path.join(moduleDir, relative));
+	const helper = helpers.find((candidate) => existsSync(candidate));
+	if (!helper) throw notFoundError("Official Windows Computer Use helper", helpers, "cuaReplConfigPath", "Open ChatGPT and turn on Computer Use.", options.configPath);
+	verifySignedBinary(realpathSync(helper), runSync, "win32");
+	const skyPackage = path.join(moduleDir, "@oai", "sky");
+	const clientBuild = z.object({ version: z.string().min(1) }).safeParse(JSON.parse(readFileSync(path.join(skyPackage, "package.json"), "utf8")));
+	if (!clientBuild.success) throw unexpected("names an @oai/sky package without a version");
+	return { configPath, server, nodeReplPath, computerUseAppPath: skyPackage, clientBuild: `@oai/sky ${clientBuild.data.version}` };
+}
+
+/**
+ * The environment official node_repl derives its tool definitions from. On macOS ChatGPT writes it into the
+ * settings; on Windows @oai/cua-repl's launcher builds it at startup, so build it with the same official function.
+ */
+export async function cuaReplToolEnvironment(server: CuaReplServer, platform: NodeJS.Platform = process.platform): Promise<Record<string, string>> {
+	const moduleDir = server.env.NODE_REPL_NODE_MODULE_DIRS?.split(path.delimiter)[0];
+	if (platform !== "win32" || server.env.NODE_REPL_TOOL_OVERRIDES || !moduleDir) return server.env;
+	const cuaRepl = path.join(moduleDir, "@oai", "cua-repl");
+	const exportsSchema = z.object({ exports: z.object({ "./environment": z.string() }) });
+	const entry = exportsSchema.parse(JSON.parse(readFileSync(path.join(cuaRepl, "package.json"), "utf8"))).exports["./environment"];
+	type CreateLaunchEnvironment = (input: { env: Record<string, string>; instructions_directory: URL; platform: NodeJS.Platform }) => JsonObject;
+	const environmentModule = z.object({ create_launch_environment: z.instanceof(Function) }).parse(await import(pathToFileURL(path.join(cuaRepl, entry)).href));
+	// SAFETY: @oai/cua-repl/environment exports this function, checked above; its result is parsed below.
+	const createLaunchEnvironment = environmentModule.create_launch_environment as CreateLaunchEnvironment;
+	const launchEnvironment = z.record(z.string(), z.string().optional()).parse(createLaunchEnvironment({
+		env: server.env,
+		instructions_directory: pathToFileURL(path.join(cuaRepl, "instructions") + path.sep),
+		platform: "win32",
+	}));
+	const env = { ...server.env };
+	for (const [key, value] of Object.entries(launchEnvironment)) if (value !== undefined) env[key] = value;
+	return env;
+}
+
 export function verifyOfficialDirectBroker(options: ResolveOfficialOptions = {}) {
 	const runSync = options.runSync ?? productionRunSync;
 	const codexPath = resolveOfficialCodex({ ...options, runSync });
@@ -367,6 +449,7 @@ export function verifyOfficialDirectBroker(options: ResolveOfficialOptions = {})
 }
 
 function buildBrokerEnv(codexHome: string, tempRoot: string): NodeJS.ProcessEnv {
+	if (process.platform === "win32") return windowsBrokerEnv(codexHome, tempRoot);
 	const env: NodeJS.ProcessEnv = {
 		HOME: tempRoot,
 		CODEX_HOME: codexHome,
@@ -393,6 +476,14 @@ function processExists(pid: number): boolean {
 		return true;
 	} catch (error) {
 		return error instanceof Error && "code" in error && error.code === "EPERM";
+	}
+}
+
+/** Windows cannot find the children of an app-server that has already exited, so their cleanup is unconfirmed. */
+class UnverifiableCleanupError extends Error {
+	constructor() {
+		super("The official app-server exited before cleanup, so its child processes could not be checked");
+		this.name = "UnverifiableCleanupError";
 	}
 }
 
@@ -460,6 +551,14 @@ async function terminateGroup(
 ): Promise<void> {
 	const pid = proc?.pid;
 	if (!pid) return;
+	if (process.platform === "win32") {
+		const killed = killProcessTree(pid);
+		for (let elapsed = 0; elapsed < 1500 && processExists(pid); elapsed += 25) await new Promise((resolve) => setTimeout(resolve, 25));
+		if (killed.outcome === "root-exited") throw new UnverifiableCleanupError();
+		if (killed.outcome === "failed") throw new Error(`Official app-server process tree did not terminate: ${killed.reason}`);
+		if (processExists(pid)) throw new Error("Official app-server process tree did not terminate");
+		return;
+	}
 	const descendants = new Set<number>();
 	const rootWasAlive = processExists(pid);
 	let cleanupError: Error | undefined;
@@ -722,14 +821,17 @@ export async function createOfficialCuaReplSession(
 			// runtime finds the shared Computer Use service socket under the account's real home.
 			const launch = [verification.server.command, ...verification.server.args];
 			const nodeRepl = launch.findIndex((part) => path.isAbsolute(part) && path.basename(part) === "node_repl");
-			const server = {
-				...verification.server,
-				command: launch[nodeRepl]!,
-				args: launch.slice(nodeRepl + 1),
-				env: { ...verification.server.env, HOME: os.userInfo().homedir },
-				cwd: workDir,
-				enabled: true,
-			};
+			const server = process.platform === "win32"
+				// On Windows the equivalent is ChatGPT's --import bootstrap for its Node launcher.
+				? { ...verification.server, args: withoutBrowserAccessBootstrap(verification.server.args), env: { ...verification.server.env, ...realProfileEnv() }, cwd: workDir, enabled: true }
+				: {
+					...verification.server,
+					command: launch[nodeRepl]!,
+					args: launch.slice(nodeRepl + 1),
+					env: { ...verification.server.env, HOME: os.userInfo().homedir },
+					cwd: workDir,
+					enabled: true,
+				};
 			const mcpTable = toToml({ [CUA_REPL_SERVER]: server });
 			const disabledProvider = '{ name = "Direct dispatch disabled provider", base_url = "http://127.0.0.1:9/v1", wire_api = "responses", request_max_retries = 0, stream_max_retries = 0, supports_websockets = false, requires_openai_auth = false }';
 			commandArgs = [
@@ -757,7 +859,10 @@ export async function createOfficialCuaReplSession(
 		}
 		proc = spawn(command, commandArgs, {
 			cwd: workDir,
-			detached: true,
+			// A process group lets cleanup signal the whole tree on macOS; on Windows taskkill /T does that,
+			// and a detached process would get its own console window.
+			detached: process.platform !== "win32",
+			windowsHide: true,
 			shell: false,
 			stdio: ["pipe", "pipe", "pipe"],
 			env: buildBrokerEnv(codexHome, tempRoot),
@@ -840,6 +945,9 @@ export async function createOfficialCuaReplSession(
 		try { await close(); }
 		catch (closeError) {
 			const closeFailure = closeError instanceof Error ? closeError : new Error(String(closeError));
+			const evidence = { modelTurnsStarted, ephemeralThread, brokerVersion: verification.brokerVersion, clientBuild: verification.clientBuild };
+			// The app-server's own failure explains more than the cleanup it made unverifiable.
+			if (closeFailure.cause instanceof UnverifiableCleanupError) throw new DirectBrokerCallError(primary.message, false, primary, evidence);
 			if (closeFailure.message === "Official direct Computer Use broker cleanup failed") {
 				throw new DirectBrokerCallError(closeFailure.message, false, primary);
 			}
@@ -868,9 +976,12 @@ export async function createOfficialCuaReplSession(
 				directCalls = 1;
 				if (modelTurnsStarted !== 0) throw new BrokerVerificationError("Model-turn activity was observed during direct dispatch");
 				const result = directResultSchema.parse(raw);
-				const stuck = result.isError && result.content.some((block) => block.type === "text" && String(block.text ?? "").includes(STUCK_SERVICE_ERROR));
+				const officialText = result.isError ? result.content.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join("\n") : "";
+				const hint = process.platform === "win32"
+					? officialText.includes(WINDOWS_PIPE_ERROR) ? WINDOWS_PIPE_HINT : undefined
+					: officialText.includes(STUCK_SERVICE_ERROR) ? STUCK_SERVICE_HINT : undefined;
 				return {
-					content: stuck ? [...result.content, { type: "text", text: STUCK_SERVICE_HINT }] : result.content,
+					content: hint ? [...result.content, { type: "text", text: hint }] : result.content,
 					structuredContent: result.structuredContent,
 					isError: result.isError === true,
 					brokerVersion: verification.brokerVersion,

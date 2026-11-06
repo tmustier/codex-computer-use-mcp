@@ -7,6 +7,7 @@ import {
 	callOfficialCuaRepl,
 	DirectBrokerCallError,
 	pathConfigFile,
+	cuaReplToolEnvironment,
 	readOfficialCuaReplServer,
 	UnifiedRuntimeUnavailableError,
 	verifyOfficialDirectBroker,
@@ -159,9 +160,10 @@ export type ComputerUseRoute =
  * tools it still uses itself. Errors other than a missing runtime keep the cua_repl tools, whose
  * descriptions then say why Computer Use is not ready.
  */
-export function selectComputerUseRoute(stateRoot = defaultStateRoot()): ComputerUseRoute {
+export async function selectComputerUseRoute(stateRoot = defaultStateRoot()): Promise<ComputerUseRoute> {
 	try {
-		return { kind: "cua_repl", official: cuaReplToolDefinitions(readOfficialCuaReplServer({ configPath: pathConfigFile(stateRoot) }).env) };
+		const server = readOfficialCuaReplServer({ configPath: pathConfigFile(stateRoot) });
+		return { kind: "cua_repl", official: cuaReplToolDefinitions(await cuaReplToolEnvironment(server)) };
 	} catch (error) {
 		if (error instanceof UnifiedRuntimeUnavailableError) return { kind: "legacy", reason: error.message };
 		const unavailable = error instanceof Error ? error.message : String(error);

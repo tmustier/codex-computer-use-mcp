@@ -1,0 +1,20 @@
+name: Windows
+
+# Computer Use itself needs ChatGPT and a signed-in desktop, which hosted runners do not have.
+# This job checks that the package installs, builds and passes its tests on Windows.
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm run check
+      - run: npm run check:pi
+      - run: npm test

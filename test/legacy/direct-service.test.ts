@@ -6,6 +6,7 @@ import test from "node:test";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { DirectBrokerCallError, type DirectBrokerResult } from "../../src/legacy/direct-broker.ts";
 import { executeDirectTool, type DirectServiceDependencies } from "../../src/legacy/direct-service.ts";
+import { MAC_PLATFORM } from "../../src/legacy/platform.ts";
 import { TOOL_INPUT_SCHEMAS, type DirectMethod, type DirectToolArguments } from "../../src/legacy/tools.ts";
 
 function brokerResult(content = "ok", isError = false): DirectBrokerResult {
@@ -22,7 +23,7 @@ function brokerResult(content = "ok", isError = false): DirectBrokerResult {
 }
 
 function deps(root: string, callTool: DirectServiceDependencies["callTool"]): DirectServiceDependencies {
-	return { stateRoot: root, callTool };
+	return { stateRoot: root, callTool, platform: MAC_PLATFORM };
 }
 
 test("element indices accept strings and integers but forward only strings to the official tools", async () => {
