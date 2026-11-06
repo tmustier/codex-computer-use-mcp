@@ -29,7 +29,7 @@
   "files": [
     "dist",
     "src",
-    "integrations/pi/index.ts",
+    "integrations/pi",
     "README.md",
     "SECURITY.md",
     "LICENSE"
