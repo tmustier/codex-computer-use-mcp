@@ -4,6 +4,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+
+// These exercise process-group, pgrep and lsof cleanup, which Windows replaces with taskkill /T.
+const posixTest = process.platform === "win32" ? test.skip : test;
 import { z } from "zod";
 import { callOfficialCuaRepl, createOfficialCuaReplSession, DirectBrokerCallError } from "../src/direct-broker.ts";
 import packageMetadata from "../package.json" with { type: "json" };
@@ -23,7 +26,7 @@ const rl=createInterface({input:process.stdin});
 let pendingTool; let bindings={};
 if(mode==="config-rejected"){process.stderr.write("startup log\\n".repeat(2000)+"\\u001b[31mError\\u001b[0m: invalid type: unit variant, expected string only\\nin \`web_search\`\\n",()=>process.exit(1));}
 if(mode==="child-hang"||mode==="orphan-exit"){const child=spawn(process.execPath,["-e","process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"],{detached:true,stdio:"ignore"});child.unref();appendFileSync(log,JSON.stringify({childPid:child.pid})+"\\n");if(mode==="orphan-exit")process.exit(0);}
-rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify({method:m.method,id:m.id,params:m.params,result:m.result,codexHome:process.env.CODEX_HOME,home:process.env.HOME,tmpdir:process.env.TMPDIR,hasOpenAIKey:Boolean(process.env.OPENAI_API_KEY)})+"\\n");
+rl.on("line",line=>{const m=JSON.parse(line); appendFileSync(log,JSON.stringify({method:m.method,id:m.id,params:m.params,result:m.result,codexHome:process.env.CODEX_HOME,home:process.env.HOME,tmpdir:process.env.TMPDIR??process.env.TEMP,hasOpenAIKey:Boolean(process.env.OPENAI_API_KEY)})+"\\n");
  if(m.method==="initialize") return send({id:m.id,result:{userAgent:"fake",platformFamily:"unix",platformOs:"macos"}});
  if(m.method==="initialized") return;
  if(m.method==="thread/start"&&mode==="protocol-drift") return send({id:m.id,error:{code:-32600,message:"Invalid request: unknown variant \`thread/start\`, expected one of \`initialize\`, \`thread/begin\`, \`thread/resume\`"}});
@@ -155,7 +158,7 @@ test("one session keeps REPL bindings across turns, and each ended turn gets its
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("one-shot wrapper preserves a setup-phase cleanup failure", async () => {
+posixTest("one-shot wrapper preserves a setup-phase cleanup failure", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-setup-cleanup-test."));
 	try {
 		const { script } = await makeFake(root);
@@ -261,7 +264,7 @@ test("direct broker fails closed on any model-turn notification, including durin
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("partial process enumeration errors fail closed but still kill already discovered descendants", async () => {
+posixTest("partial process enumeration errors fail closed but still kill already discovered descendants", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-enumerator-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -282,7 +285,7 @@ test("partial process enumeration errors fail closed but still kill already disc
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("an app-server that exits immediately cannot orphan a private-workdir child", async () => {
+posixTest("an app-server that exits immediately cannot orphan a private-workdir child", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-orphan-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -296,7 +299,7 @@ test("an app-server that exits immediately cannot orphan a private-workdir child
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("direct broker cancellation terminates separately-grouped descendants", async () => {
+posixTest("direct broker cancellation terminates separately-grouped descendants", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-child-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -426,7 +429,7 @@ test("drain expiry bounds cancellation and still kills private descendants", asy
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("a transport that disappears between calls still closes cleanly", async () => {
+posixTest("a transport that disappears between calls still closes cleanly", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-idle-exit-test."));
 	try {
 		const { script } = await makeFake(root);

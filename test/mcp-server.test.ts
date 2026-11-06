@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import nodeTest from "node:test";
+
+// macOS ChatGPT layout and live macOS Computer Use; Windows has its own tests.
+const test = process.platform === "darwin" ? nodeTest : nodeTest.skip;
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { z } from "zod";

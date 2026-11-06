@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import nodeTest from "node:test";
+
+// File modes and symlink refusal are POSIX behaviour.
+const test = process.platform === "win32" ? nodeTest.skip : nodeTest;
 import { appendAudit, type AuditRecord } from "../src/audit.ts";
 
 const record: AuditRecord = {

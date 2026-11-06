@@ -333,7 +333,7 @@ test("Pi truncates aggregate text to a private spill file without spilling image
 	assert.ok(rendered.fullOutputPath);
 	try {
 		assert.equal(await readFile(rendered.fullOutputPath, "utf8"), original);
-		assert.equal((await stat(rendered.fullOutputPath)).mode & 0o777, 0o600);
+		if (process.platform !== "win32") assert.equal((await stat(rendered.fullOutputPath)).mode & 0o777, 0o600);
 		assert.deepEqual(rendered.content.map((block) => block.type), ["text", "image", "text", "image"]);
 		assert.deepEqual(rendered.content[0], { type: "text", text: first });
 		assert.deepEqual(rendered.content[1], { type: "image", data: "first-image", mimeType: "image/png" });
