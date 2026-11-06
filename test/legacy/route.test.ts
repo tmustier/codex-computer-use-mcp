@@ -27,7 +27,7 @@ async function stateWithoutUnifiedRuntime(root: string): Promise<string> {
 test("a ChatGPT without its unified runtime selects the deprecated typed tools", async () => {
 	const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "cu-route-legacy.")));
 	try {
-		const route = selectComputerUseRoute(await stateWithoutUnifiedRuntime(root));
+		const route = await selectComputerUseRoute(await stateWithoutUnifiedRuntime(root));
 		assert.equal(route.kind, "legacy");
 		assert.match(route.kind === "legacy" ? route.reason : "", /ChatGPT 0\.0\.1-no-unified-runtime has not prepared its Computer Use runtime/);
 	} finally {
@@ -39,7 +39,7 @@ test("a configured cua_repl settings path that is missing does not fall back", a
 	const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "cu-route-configured.")));
 	try {
 		await writeFile(path.join(root, "config.json"), JSON.stringify({ cuaReplConfigPath: path.join(root, "missing.mcp.json") }));
-		const route = selectComputerUseRoute(root);
+		const route = await selectComputerUseRoute(root);
 		assert.equal(route.kind, "cua_repl");
 		assert.match(route.kind === "cua_repl" ? route.official.tools[0]!.description : "", /Computer Use is not ready: .*missing\.mcp\.json/s);
 	} finally {
@@ -47,7 +47,7 @@ test("a configured cua_repl settings path that is missing does not fall back", a
 	}
 });
 
-test("Pi registers the ten codemode tools when the unified runtime is missing", () => {
+test("Pi registers the ten codemode tools when the unified runtime is missing", async () => {
 	const tools: Array<{ name: string; exposure?: string }> = [];
 	const fakePi = {
 		registerTool(tool: { name: string; exposure?: string }) { tools.push(tool); },
@@ -55,7 +55,7 @@ test("Pi registers the ten codemode tools when the unified runtime is missing", 
 		on() {},
 	};
 	// SAFETY: this focused adapter test implements every ExtensionAPI member registration uses.
-	adapter(fakePi as any, { route: { kind: "legacy", reason: "test" } });
+	await adapter(fakePi as any, { route: { kind: "legacy", reason: "test" } });
 	assert.deepEqual(tools.map((tool) => tool.name), COMPUTER_USE_METHODS.map(computerUseToolName));
 	assert.ok(tools.every((tool) => tool.exposure === "codemode"));
 });

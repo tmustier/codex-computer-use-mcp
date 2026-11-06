@@ -30,7 +30,7 @@ test("stdio MCP exposes the official cua_repl tools and status", async () => {
 	try {
 		await client.connect(transport);
 		assert.deepEqual(client.getServerVersion(), { name: "codex-computer-use-mcp", version: packageVersion });
-		const route = selectComputerUseRoute(stateRoot);
+		const route = await selectComputerUseRoute(stateRoot);
 		assert.equal(route.kind, "cua_repl");
 		const official = route.official;
 		assert.equal(client.getInstructions(), official.instructions);

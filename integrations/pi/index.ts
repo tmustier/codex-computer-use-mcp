@@ -23,9 +23,9 @@ interface DirectComputerUseOptions {
   route?: ComputerUseRoute;
 }
 
-export default function directComputerUse(pi: ExtensionAPI, options: DirectComputerUseOptions = {}) {
+export default async function directComputerUse(pi: ExtensionAPI, options: DirectComputerUseOptions = {}) {
   const stateRoot = process.env.CODEX_COMPUTER_USE_HOME || path.join(getAgentDir(), "direct-computer-use");
-  const route = options.route ?? selectComputerUseRoute(stateRoot);
+  const route = options.route ?? await selectComputerUseRoute(stateRoot);
 
   pi.registerCommand("computer-use-status", {
     description: "Show Computer Use status",

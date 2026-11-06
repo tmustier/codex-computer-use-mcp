@@ -21,14 +21,14 @@ import { PACKAGE_VERSION } from "./version.ts";
 const cliArgs = process.argv.slice(2);
 if (cliArgs.length > 0) {
 	if (cliArgs.length === 1 && cliArgs[0] === "--status") {
-		console.log(JSON.stringify(computerUseStatus(selectComputerUseRoute()), null, 2));
+		console.log(JSON.stringify(computerUseStatus(await selectComputerUseRoute()), null, 2));
 		process.exit(0);
 	}
 	console.error("Usage: codex-computer-use-mcp [--status]");
 	process.exit(1);
 }
 
-const route = selectComputerUseRoute();
+const route = await selectComputerUseRoute();
 const serverOptions: ServerOptions = { capabilities: { tools: {} } };
 if (route.kind === "cua_repl" && route.official.instructions) serverOptions.instructions = route.official.instructions;
 const server = new Server({ name: "codex-computer-use-mcp", version: PACKAGE_VERSION }, serverOptions);

@@ -132,7 +132,7 @@ interface RegisteredTool {
 
 type TestSession = Pick<DirectSessionExecutor, "execute" | "endTurn" | "close">;
 
-function loadAdapter(session: TestSession) {
+async function loadAdapter(session: TestSession) {
 	const tools: RegisteredTool[] = [];
 	const commands: string[] = [];
 	const handlers = new Map<string, TestHandler>();
@@ -142,7 +142,7 @@ function loadAdapter(session: TestSession) {
 		on(name: string, handler: TestHandler) { handlers.set(name, handler); },
 	};
 	// SAFETY: this focused adapter test implements every ExtensionAPI member the adapter uses.
-	adapter(fakePi as any, { session });
+	await adapter(fakePi as any, { session });
 	const tool = (name: CuaReplTool) => tools.find((candidate) => candidate.name === PI_TOOL_NAMES[name])!;
 	return { tools, commands, handlers, tool };
 }
@@ -163,12 +163,12 @@ function testSession(overrides: Partial<TestSession> = {}): TestSession {
 
 test("Pi registers the official cua_repl tools as ordinary tools and ends the turn when the agent settles", async () => {
 	const events: string[] = [];
-	const { tools, commands, handlers } = loadAdapter(testSession({
+	const { tools, commands, handlers } = await loadAdapter(testSession({
 		async endTurn() { events.push("endTurn"); },
 		async close() { events.push("close"); },
 	}));
 	assert.deepEqual(commands, ["computer-use-status"]);
-	const route = selectComputerUseRoute(process.env.CODEX_COMPUTER_USE_HOME || path.join(getAgentDir(), "direct-computer-use"));
+	const route = await selectComputerUseRoute(process.env.CODEX_COMPUTER_USE_HOME || path.join(getAgentDir(), "direct-computer-use"));
 	assert.equal(route.kind, "cua_repl");
 	assert.deepEqual(tools.map((tool) => tool.name), ["cua_repl", "cua_repl_reset"]);
 	for (const [index, definition] of route.official.tools.entries()) {
@@ -185,7 +185,7 @@ test("Pi registers the official cua_repl tools as ordinary tools and ends the tu
 
 test("cua_repl calls pass their arguments through and return text and images in order", async () => {
 	const calls: Array<{ tool: CuaReplTool; args: CuaReplArguments; supportsOpenAiFormElicitation?: boolean }> = [];
-	const { tool } = loadAdapter(testSession({
+	const { tool } = await loadAdapter(testSession({
 		async execute(name, args, dependencies) {
 			calls.push({ tool: name, args, supportsOpenAiFormElicitation: dependencies.supportsOpenAiFormElicitation });
 			return {
@@ -210,7 +210,7 @@ test("cua_repl calls pass their arguments through and return text and images in 
 });
 
 test("an official error is returned as an error result that keeps its content", async () => {
-	const { tool } = loadAdapter(testSession({
+	const { tool } = await loadAdapter(testSession({
 		async execute() {
 			return { isError: true, content: [{ type: "text", text: "ReferenceError: app is not defined" }, { type: "image", data: "png", mimeType: "image/png" }] };
 		},
