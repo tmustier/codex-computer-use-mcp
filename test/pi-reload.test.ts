@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -57,7 +57,9 @@ test("after a package update, Pi reload runs the updated adapter code", async ()
 		await command("/test-reload");
 		assert.equal(await permissionMode(), "updated");
 	} finally {
-		pi.kill();
-		await rm(root, { recursive: true, force: true });
+		// On Windows, pi runs under a shell, which does not pass the kill on to it.
+		if (process.platform === "win32") spawnSync("taskkill", ["/PID", String(pi.pid), "/T", "/F"]);
+		else pi.kill();
+		await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 	}
 });
