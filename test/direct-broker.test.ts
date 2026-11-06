@@ -5,7 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-// These exercise process-group, pgrep and lsof cleanup, which Windows replaces with taskkill /T.
+// These exercise macOS behaviour: process-group, pgrep and lsof cleanup, which Windows replaces with
+// taskkill /T, and the macOS service's recovery step.
 const posixTest = process.platform === "win32" ? test.skip : test;
 import { z } from "zod";
 import { callOfficialCuaRepl, createOfficialCuaReplSession, DirectBrokerCallError } from "../src/direct-broker.ts";
@@ -331,7 +332,8 @@ test("directCalls remains zero when no tool-call response confirms dispatch", as
 		try { await callOfficialCuaRepl("js", { code: "1" }, options(script, "close-before-tool")); }
 		catch (error) { observed = error; }
 		assert.equal(observed?.directCalls, 0);
-		assert.equal(observed?.cleanupVerified, true);
+		// The app-server exited first; Windows cannot find its children to confirm their cleanup.
+		assert.equal(observed?.cleanupVerified, process.platform !== "win32");
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -505,7 +507,7 @@ test("a tool timeout says how to restart a stuck Computer Use service", async ()
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("an official stuck-service error keeps its text and gains a recovery step", async () => {
+posixTest("an official stuck-service error keeps its text and gains a recovery step", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-stuck-test."));
 	try {
 		const { script } = await makeFake(root);
