@@ -5,6 +5,9 @@ import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promise
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+
+// The macOS app-server transport fixtures rely on process groups, pgrep and lsof.
+const macTest = process.platform === "darwin" ? test : test.skip;
 import { z } from "zod";
 import { callOfficialDirectTool, createOfficialDirectToolSession, DirectBrokerCallError } from "../../src/legacy/direct-broker.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
@@ -94,7 +97,7 @@ async function waitForChildPid(log: string): Promise<number> {
 	throw new Error("Fake app-server did not report its child process");
 }
 
-test("direct broker isolates credentials and ends its native turn through a signed zero-turn command", async () => {
+macTest("direct broker isolates credentials and ends its native turn through a signed zero-turn command", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-test."));
 	const previousKey = process.env.OPENAI_API_KEY;
 	process.env.OPENAI_API_KEY = "must-not-cross";
@@ -133,7 +136,7 @@ test("direct broker isolates credentials and ends its native turn through a sign
 	}
 });
 
-test("one broker session preserves the official active-app lease across inspection and action", async () => {
+macTest("one broker session preserves the official active-app lease across inspection and action", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-lease-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -154,7 +157,7 @@ test("one broker session preserves the official active-app lease across inspecti
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("one-shot wrapper preserves a setup-phase cleanup failure", async () => {
+macTest("one-shot wrapper preserves a setup-phase cleanup failure", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-setup-cleanup-test."));
 	try {
 		const { script } = await makeFake(root);
@@ -172,7 +175,7 @@ test("one-shot wrapper preserves a setup-phase cleanup failure", async () => {
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("direct broker forwards official elicitations and returns the invoking client's exact response", async () => {
+macTest("direct broker forwards official elicitations and returns the invoking client's exact response", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-elicit-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -202,7 +205,7 @@ test("direct broker forwards official elicitations and returns the invoking clie
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("headless direct broker cancels rather than fabricating a decline", async () => {
+macTest("headless direct broker cancels rather than fabricating a decline", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-headless-elicit-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -214,7 +217,7 @@ test("headless direct broker cancels rather than fabricating a decline", async (
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("cancellation while an elicitation UI is pending does not write to a closed broker", async () => {
+macTest("cancellation while an elicitation UI is pending does not write to a closed broker", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-pending-elicit-test."));
 	let release!: () => void;
 	let entered!: () => void;
@@ -245,7 +248,7 @@ test("cancellation while an elicitation UI is pending does not write to a closed
 	}
 });
 
-test("direct broker fails closed on any model-turn notification, including during teardown", async () => {
+macTest("direct broker fails closed on any model-turn notification, including during teardown", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-model-test."));
 	try {
 		const { script } = await makeFake(root);
@@ -260,7 +263,7 @@ test("direct broker fails closed on any model-turn notification, including durin
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("partial process enumeration errors fail closed but still kill already discovered descendants", async () => {
+macTest("partial process enumeration errors fail closed but still kill already discovered descendants", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-enumerator-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -281,7 +284,7 @@ test("partial process enumeration errors fail closed but still kill already disc
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("an app-server that exits immediately cannot orphan a private-workdir child", async () => {
+macTest("an app-server that exits immediately cannot orphan a private-workdir child", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-orphan-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -295,7 +298,7 @@ test("an app-server that exits immediately cannot orphan a private-workdir child
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("direct broker cancellation terminates separately-grouped descendants", async () => {
+macTest("direct broker cancellation terminates separately-grouped descendants", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-child-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -318,7 +321,7 @@ test("direct broker cancellation terminates separately-grouped descendants", asy
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("directCalls remains zero when no tool-call response confirms dispatch", async () => {
+macTest("directCalls remains zero when no tool-call response confirms dispatch", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-call-count-test."));
 	try {
 		const { script } = await makeFake(root);
@@ -330,7 +333,7 @@ test("directCalls remains zero when no tool-call response confirms dispatch", as
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("direct broker cancellation terminates the process group", async () => {
+macTest("direct broker cancellation terminates the process group", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-cancel-test."));
 	try {
 		const { script } = await makeFake(root);
@@ -347,7 +350,7 @@ test("direct broker cancellation terminates the process group", async () => {
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("tool timeout ends the dispatched native turn before terminating the broker", async () => {
+macTest("tool timeout ends the dispatched native turn before terminating the broker", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-timeout-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -363,7 +366,7 @@ test("tool timeout ends the dispatched native turn before terminating the broker
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("a failed or stalled cursor cleanup keeps the completed action's result and still terminates the private process", async () => {
+macTest("a failed or stalled cursor cleanup keeps the completed action's result and still terminates the private process", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-cleanup-test."));
 	try {
 		for (const mode of ["cleanup-error", "cleanup-hang"]) {
@@ -385,7 +388,7 @@ test("a failed or stalled cursor cleanup keeps the completed action's result and
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("protocol faults during cursor cleanup still fail the call and terminate the private process", async () => {
+macTest("protocol faults during cursor cleanup still fail the call and terminate the private process", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-cleanup-fault-test."));
 	try {
 		for (const mode of ["cleanup-model", "cleanup-malformed"]) {
@@ -408,7 +411,7 @@ test("protocol faults during cursor cleanup still fail the call and terminate th
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("drain expiry bounds cancellation and still kills private descendants", async () => {
+macTest("drain expiry bounds cancellation and still kills private descendants", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-native-hang-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -425,7 +428,7 @@ test("drain expiry bounds cancellation and still kills private descendants", asy
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("a transport that disappears between calls still closes cleanly", async () => {
+macTest("a transport that disappears between calls still closes cleanly", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-idle-exit-test."));
 	try {
 		const { script } = await makeFake(root);
@@ -441,7 +444,7 @@ test("a transport that disappears between calls still closes cleanly", async () 
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("configured bundles outside the default layout use a private cleanup resolver home", async () => {
+macTest("configured bundles outside the default layout use a private cleanup resolver home", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-configured-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -464,7 +467,7 @@ test("configured bundles outside the default layout use a private cleanup resolv
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("closing an unused session does not send a native turn-ended notification", async () => {
+macTest("closing an unused session does not send a native turn-ended notification", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-unused-test."));
 	try {
 		const { script, log } = await makeFake(root);
@@ -475,7 +478,7 @@ test("closing an unused session does not send a native turn-ended notification",
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("an app-server that rejects its startup settings reports the end of stderr and how to recover", async () => {
+macTest("an app-server that rejects its startup settings reports the end of stderr and how to recover", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-config-rejected-test."));
 	try {
 		const { script } = await makeFake(root);
@@ -491,7 +494,7 @@ test("an app-server that rejects its startup settings reports the end of stderr 
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("an app-server protocol error preserves the official text and says how to recover from version drift", async () => {
+macTest("an app-server protocol error preserves the official text and says how to recover from version drift", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-protocol-drift-test."));
 	try {
 		const { script } = await makeFake(root);
@@ -502,7 +505,7 @@ test("an app-server protocol error preserves the official text and says how to r
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("a tool timeout says how to restart a stuck Computer Use service", async () => {
+macTest("a tool timeout says how to restart a stuck Computer Use service", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-timeout-hint-test."));
 	try {
 		const { script } = await makeFake(root);
@@ -513,7 +516,7 @@ test("a tool timeout says how to restart a stuck Computer Use service", async ()
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("an official stuck-service error keeps its text and gains a recovery step", async () => {
+macTest("an official stuck-service error keeps its text and gains a recovery step", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-bootstrap-test."));
 	try {
 		const { script } = await makeFake(root);
@@ -526,7 +529,7 @@ test("an official stuck-service error keeps its text and gains a recovery step",
 	} finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("official tool errors still end the native turn", async () => {
+macTest("official tool errors still end the native turn", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-tool-error-test."));
 	try {
 		const { script, log } = await makeFake(root);
