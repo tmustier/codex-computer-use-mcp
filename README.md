@@ -104,6 +104,8 @@ Production calls require verified OpenAI-signed binaries with Team ID `2DC432GLL
 
 Closing a session ends its turn, then terminates its private processes. Cancellation and tool timeouts briefly wait for an outstanding native reply before ending the turn, so a late reply cannot recreate the cursor after cleanup. A stalled request, failed notification or lost transport can prevent native cleanup. The call still returns its result, because the action already ran, and private process teardown still runs. `brokerCleanupVerified` describes private process cleanup, not visual confirmation that a cursor disappeared.
 
+A successful `completion_summary` call immediately ends the native Computer Use turn, without waiting for the host agent to finish or the MCP idle timer. REPL bindings remain available for later calls. Reset sends the turn-end notification before discarding the runtime's cleanup state; resetting JavaScript alone is not native cursor cleanup.
+
 Audit records contain bounded metadata. They exclude code, arguments, app content, screenshots, prompts and credentials. MCP and CLI state defaults to `~/.direct-computer-use`. Pi state defaults to `direct-computer-use` under the Pi agent directory. Set `CODEX_COMPUTER_USE_HOME` to override either default.
 
 ### Paths
