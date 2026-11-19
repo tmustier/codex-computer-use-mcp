@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +9,7 @@ import { createInterface } from "node:readline";
 import { z } from "zod";
 import type { DirectMethod, DirectToolArguments, JsonObject, JsonValue } from "./tools.ts";
 import { PACKAGE_VERSION } from "../version.ts";
+import { unexpectedLsofStderr } from "../lsof-stderr.ts";
 
 const CODEX_RELATIVE_PATHS = [
 	"Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
@@ -89,6 +90,8 @@ export interface DirectBrokerOptions {
 	computerUseClient?: OfficialComputerUseClient;
 	/** Test-only process-enumerator override. */
 	processEnumeratorCommand?: string;
+	/** Test-only cwd process-enumerator override. */
+	cwdProcessEnumeratorCommand?: string;
 	onSpawn?: (pid: number) => void;
 	/** Path configuration file; see `readOfficialPathConfig`. */
 	configPath?: string;
@@ -398,15 +401,15 @@ function collectDescendants(rootPid: number, processEnumeratorCommand = "/usr/bi
 	return descendants;
 }
 
-function collectProcessesWithCwd(workDir: string): Set<number> {
-	const result = spawnSync("/usr/sbin/lsof", ["-a", "-d", "cwd", "+d", workDir, "-Fp"], {
+function collectProcessesWithCwd(workDir: string, command = "/usr/sbin/lsof"): Set<number> {
+	const result = spawnSync(command, ["-a", "-d", "cwd", "+d", workDir, "-Fp"], {
 		encoding: "utf8",
 		timeout: 3000,
 	});
 	if (
 		result.error
 		|| (result.status !== 0 && result.status !== 1)
-		|| (result.status === 1 && (result.stderr ?? "").trim().length > 0)
+		|| (result.status === 1 && unexpectedLsofStderr(result.stderr ?? "", workDir, statSync(workDir).dev).length > 0)
 	) {
 		throw new ProcessEnumerationError("Could not enumerate processes owned by the private broker working directory", new Set(), result.error);
 	}
@@ -424,6 +427,7 @@ async function terminateGroup(
 	proc: ChildProcessWithoutNullStreams | undefined,
 	workDir: string,
 	processEnumeratorCommand = "/usr/bin/pgrep",
+	cwdProcessEnumeratorCommand = "/usr/sbin/lsof",
 ): Promise<void> {
 	const pid = proc?.pid;
 	if (!pid) return;
@@ -441,7 +445,7 @@ async function terminateGroup(
 			cleanupError ??= error instanceof Error ? error : new Error(String(error));
 		}
 		try {
-			for (const owned of collectProcessesWithCwd(workDir)) found.add(owned);
+			for (const owned of collectProcessesWithCwd(workDir, cwdProcessEnumeratorCommand)) found.add(owned);
 		} catch (error) {
 			if (error instanceof ProcessEnumerationError) {
 				for (const owned of error.partialPids) found.add(owned);
@@ -496,7 +500,7 @@ async function terminateGroup(
 		await new Promise((resolve) => setTimeout(resolve, 25));
 	}
 	let cwdSurvivors = new Set<number>();
-	try { cwdSurvivors = collectProcessesWithCwd(workDir); }
+	try { cwdSurvivors = collectProcessesWithCwd(workDir, cwdProcessEnumeratorCommand); }
 	catch (error) { cleanupError ??= error instanceof Error ? error : new Error(String(error)); }
 	for (const survivor of cwdSurvivors) {
 		try { process.kill(survivor, "SIGKILL"); } catch { /* exited */ }
@@ -557,7 +561,7 @@ export async function createOfficialDirectToolSession(
 		pending.clear();
 	};
 	const ensureTerminated = (): Promise<void> => {
-		termination ??= terminateGroup(proc, workDir, options.processEnumeratorCommand);
+		termination ??= terminateGroup(proc, workDir, options.processEnumeratorCommand, options.cwdProcessEnumeratorCommand);
 		return termination;
 	};
 	const fail = (error: Error): void => {
