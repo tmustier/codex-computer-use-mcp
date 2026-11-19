@@ -61,6 +61,8 @@ export class DirectSessionExecutor {
 				const response = await executeDirectTool({ tool, arguments: params }, {
 					...dependencies,
 					callTool: async (directTool, args, options) => {
+						// Reset discards the runtime that receives native cleanup hooks.
+						if (directTool === "js_reset") await this.session?.endTurn();
 						this.session ??= await (this.dependencies.createSession ?? createOfficialCuaReplSession)({
 							supportsOpenAiFormElicitation: dependencies.supportsOpenAiFormElicitation === true,
 							configPath: pathConfigFile(dependencies.stateRoot ?? defaultStateRoot()),
@@ -68,7 +70,12 @@ export class DirectSessionExecutor {
 						return this.session.call(directTool, args, options);
 					},
 				});
-				if (this.dependencies.idleTurnEndMs) {
+				// The official completion-only call marks the end of Computer Use, even when
+				// the host keeps working or has no turn-boundary hook (generic MCP clients).
+				// Release native UI state before returning, without resetting REPL bindings.
+				if (tool === "js" && params.completion_summary !== undefined && !response.isError) {
+					await this.session?.endTurn();
+				} else if (this.dependencies.idleTurnEndMs) {
 					const timer = setTimeout(() => {
 						void this.runExclusive(async () => {
 							if (this.idleTimer === timer) await this.session?.endTurn();
