@@ -24,7 +24,7 @@ import { isWindowsDirectMethod, type WindowsDirectMethod } from "./windows-tools
 // `codex-computer-use.exe` helper over stdio; there is no MCP mode and no
 // app-server in that path, so this broker loads the official client directly.
 const SKY_PACKAGE_NAME = "@oai/sky";
-const CODEX_RUNTIMES_RELATIVE_PATH = path.join("AppData", "Local", "OpenAI", "Codex", "runtimes", "cua_node");
+const CODEX_RUNTIMES_RELATIVE_PATH = path.join("OpenAI", "Codex", "runtimes", "cua_node");
 const SKY_PACKAGE_RELATIVE_PATH = path.join("bin", "node_modules", "@oai", "sky");
 // The Codex app installs only the helper for the machine's architecture, and its
 // own Node matches it. This process may run under another architecture's Node
@@ -198,7 +198,7 @@ export function resolveOfficialWindowsClient(options: ResolveOfficialWindowsClie
 	const runSync = options.runSync ?? productionRunSync;
 	const config = options.configPath ? readOfficialPathConfig(options.configPath) : {};
 	const where = options.configPath ? `in ${options.configPath}` : "in the Computer Use config.json in the state directory";
-	const hint = `Find the ${SKY_PACKAGE_NAME} package installed by the Codex app under AppData\\Local\\OpenAI\\Codex\\runtimes\\cua_node. Then set "computerUseAppPath" to its absolute path ${where}.`;
+	const hint = `Find the ${SKY_PACKAGE_NAME} package installed by the Codex app under %LOCALAPPDATA%\\OpenAI\\Codex\\runtimes\\cua_node. Then set "computerUseAppPath" to its absolute path ${where}.`;
 	if (config.computerUseAppPath) {
 		const configuredPackage = existsSync(config.computerUseAppPath) ? realpathSync(config.computerUseAppPath) : path.resolve(config.computerUseAppPath);
 		const configured = checkedCandidate(configuredPackage, "configured", runSync);
@@ -207,8 +207,8 @@ export function resolveOfficialWindowsClient(options: ResolveOfficialWindowsClie
 			`Official Windows Computer Use helper was not found. Checked: ${WINDOWS_HELPER_RELATIVE_PATHS.map((relativePath) => path.join(configuredPackage, relativePath)).join(", ")}. ${hint}`,
 		);
 	}
-	const userHome = options.userHome ?? os.userInfo().homedir;
-	const runtimesRoot = path.join(existsSync(userHome) ? realpathSync(userHome) : path.resolve(userHome), CODEX_RUNTIMES_RELATIVE_PATH);
+	const localAppData = options.userHome ? path.join(options.userHome, "AppData", "Local") : process.env.LOCALAPPDATA ?? path.join(os.userInfo().homedir, "AppData", "Local");
+	const runtimesRoot = path.join(existsSync(localAppData) ? realpathSync(localAppData) : path.resolve(localAppData), CODEX_RUNTIMES_RELATIVE_PATH);
 	const checked: string[] = [];
 	for (const packagePath of installedRuntimeCandidates(runtimesRoot)) {
 		const installed = checkedCandidate(packagePath, "installed-runtime", runSync);
@@ -224,7 +224,7 @@ export function resolveOfficialWindowsClient(options: ResolveOfficialWindowsClie
 // needs, finding it through CODEX_CLI_PATH or else PATH. The Codex app sets that
 // for its own helper; its codex.exe is not on PATH, so this process sets it too.
 const CODEX_CLI_PATH_ENV = "CODEX_CLI_PATH";
-const CODEX_BIN_RELATIVE_PATH = path.join("AppData", "Local", "OpenAI", "Codex", "bin");
+const CODEX_BIN_RELATIVE_PATH = path.join("OpenAI", "Codex", "bin");
 
 /** Newest first: the Codex app keeps one bin directory per installed version. */
 function installedCodexCandidates(binRoot: string): string[] {
@@ -258,8 +258,8 @@ export function resolveOfficialWindowsCodex(options: ResolveOfficialWindowsClien
 		}
 	} else {
 		if ((options.env ?? process.env)[CODEX_CLI_PATH_ENV]) return undefined;
-		const userHome = options.userHome ?? os.userInfo().homedir;
-		candidate = installedCodexCandidates(path.join(existsSync(userHome) ? realpathSync(userHome) : path.resolve(userHome), CODEX_BIN_RELATIVE_PATH))[0];
+		const localAppData = options.userHome ? path.join(options.userHome, "AppData", "Local") : process.env.LOCALAPPDATA ?? path.join(os.userInfo().homedir, "AppData", "Local");
+		candidate = installedCodexCandidates(path.join(existsSync(localAppData) ? realpathSync(localAppData) : path.resolve(localAppData), CODEX_BIN_RELATIVE_PATH))[0];
 		if (candidate === undefined) return undefined;
 	}
 	const codexPath = realpathSync(candidate);

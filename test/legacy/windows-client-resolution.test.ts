@@ -60,6 +60,26 @@ test("resolves the newest installed Codex runtime and verifies its Authenticode 
 	}
 });
 
+test("discovers the helper and Codex under redirected LOCALAPPDATA", async () => {
+	const root = await makeRoot();
+	const previous = process.env.LOCALAPPDATA;
+	try {
+		const redirected = path.join(root, "Redirected Local");
+		const packagePath = path.join(redirected, "OpenAI", "Codex", "runtimes", "cua_node", "current", "bin", "node_modules", "@oai", "sky");
+		const helper = await makePackage(packagePath, "0.7.12", new Date());
+		const codex = path.join(redirected, "OpenAI", "Codex", "bin", "current", "codex.exe");
+		await mkdir(path.dirname(codex), { recursive: true });
+		await writeFile(codex, "codex");
+		process.env.LOCALAPPDATA = redirected;
+		assert.equal(resolveOfficialWindowsClient({ runSync: signed() }).clientPath, helper);
+		assert.equal(resolveOfficialWindowsCodex({ env: {}, runSync: signed() }), codex);
+	} finally {
+		if (previous === undefined) delete process.env.LOCALAPPDATA;
+		else process.env.LOCALAPPDATA = previous;
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("falls back to the other architecture's signed helper when only that one is installed", async () => {
 	const root = await makeRoot();
 	try {
