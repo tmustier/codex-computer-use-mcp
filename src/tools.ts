@@ -30,6 +30,7 @@ export interface CuaReplToolDefinition {
 	inputSchema: {
 		type: "object";
 		properties: Partial<JsProperties>;
+		required?: string[];
 		additionalProperties: false;
 	};
 	annotations: { readOnlyHint: boolean; destructiveHint: boolean; openWorldHint: boolean };
@@ -59,7 +60,8 @@ const ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, openWorldHint:
 /**
  * Build the tool definitions that official node_repl derives from ChatGPT's cua_repl environment.
  * They match its tools/list output except for the top-level `oneOf`, which some model providers
- * reject; node_repl still enforces it.
+ * reject; node_repl still enforces it. Without a completion summary there is no `oneOf`, and
+ * node_repl marks `code` as required.
  */
 export function cuaReplToolDefinitions(env: Record<string, string>): CuaReplToolSet {
 	const overrides = overridesSchema.parse(JSON.parse(env.NODE_REPL_TOOL_OVERRIDES ?? "null"));
@@ -77,7 +79,9 @@ export function cuaReplToolDefinitions(env: Record<string, string>): CuaReplTool
 			{
 				name: "js",
 				description: completion ? `${overrides.tools.js.description}\n\n${completion.instructions}` : overrides.tools.js.description,
-				inputSchema: { type: "object", properties, additionalProperties: false },
+				inputSchema: completion
+					? { type: "object", properties, additionalProperties: false }
+					: { type: "object", properties, required: ["code"], additionalProperties: false },
 				annotations: ANNOTATIONS,
 			},
 			{
