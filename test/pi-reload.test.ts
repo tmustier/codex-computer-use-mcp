@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -13,11 +13,12 @@ test("after a package update, Pi reload runs the updated adapter code", async ()
 	const installed = path.join(root, "node_modules", "codex-computer-use-mcp");
 	const pi = spawn(path.join(projectRoot, "node_modules", ".bin", "pi"), ["--mode", "rpc", "--no-session"], {
 		cwd: root,
+		shell: process.platform === "win32",
 		env: { ...process.env, PI_CODING_AGENT_DIR: path.join(root, "agent"), CODEX_COMPUTER_USE_HOME: path.join(root, "state") },
 	});
 	try {
 		for (const entry of ["package.json", "src", "dist", "integrations"]) await cp(path.join(projectRoot, entry), path.join(installed, entry), { recursive: true });
-		await symlink(path.join(projectRoot, "node_modules"), path.join(installed, "node_modules"), "dir");
+		await symlink(path.join(projectRoot, "node_modules"), path.join(installed, "node_modules"), process.platform === "win32" ? "junction" : "dir");
 		await mkdir(path.join(root, "agent", "extensions"), { recursive: true });
 		await writeFile(path.join(root, "agent", "settings.json"), JSON.stringify({ packages: [installed] }));
 		await writeFile(
@@ -56,7 +57,9 @@ test("after a package update, Pi reload runs the updated adapter code", async ()
 		await command("/test-reload");
 		assert.equal(await permissionMode(), "updated");
 	} finally {
-		pi.kill();
-		await rm(root, { recursive: true, force: true });
+		// On Windows, pi runs under a shell, which does not pass the kill on to it.
+		if (process.platform === "win32") spawnSync("taskkill", ["/PID", String(pi.pid), "/T", "/F"]);
+		else pi.kill();
+		await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 	}
 });

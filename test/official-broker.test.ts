@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import os from "node:os";
-import test from "node:test";
+import nodeTest from "node:test";
+
+// macOS ChatGPT layout and live macOS Computer Use; Windows has its own tests.
+const test = process.platform === "darwin" ? nodeTest : nodeTest.skip;
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { callOfficialCuaRepl, readOfficialCuaReplServer } from "../src/direct-broker.ts";

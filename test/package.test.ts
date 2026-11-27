@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 import { z } from "zod";
 
 const execFileAsync = promisify(execFile);
@@ -26,8 +27,8 @@ test("registry and git packages install and start from a plain npm consumer", as
 			recursive: true,
 			filter: (entry) => ![".git", "dist", "node_modules"].includes(path.relative(projectRoot, entry).split(path.sep)[0]),
 		});
-		await symlink(path.join(projectRoot, "node_modules"), path.join(sourceRoot, "node_modules"), "dir");
-		const { stdout } = await execFileAsync("npm", ["pack", "--json", "--pack-destination", root], { cwd: sourceRoot });
+		await symlink(path.join(projectRoot, "node_modules"), path.join(sourceRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
+		const { stdout } = await execFileAsync("npm", ["pack", "--json", "--pack-destination", root], { cwd: sourceRoot, shell: process.platform === "win32" });
 		const parsedReport = packOutputSchema.parse(JSON.parse(stdout));
 		const report = Array.isArray(parsedReport) ? parsedReport[0] : Object.values(parsedReport)[0];
 		assert.ok(report);
@@ -63,12 +64,12 @@ test("registry and git packages install and start from a plain npm consumer", as
 
 		for (const [name, source] of [
 			["registry", path.join(root, report.filename)],
-			["git", `git+file://${sourceRoot}`],
+			["git", `git+${pathToFileURL(sourceRoot).href}`],
 		]) {
 			const consumer = path.join(root, name);
 			await mkdir(consumer);
 			await writeFile(path.join(consumer, "package.json"), '{"private":true}\n');
-			await execFileAsync("npm", ["install", "--no-audit", "--no-fund", "--allow-git=all", source], { cwd: consumer });
+			await execFileAsync("npm", ["install", "--no-audit", "--no-fund", "--allow-git=all", source], { cwd: consumer, shell: process.platform === "win32" });
 
 			const installedRoot = path.join(consumer, "node_modules", "codex-computer-use-mcp");
 			await assert.rejects(access(path.join(consumer, "node_modules", "typescript")));

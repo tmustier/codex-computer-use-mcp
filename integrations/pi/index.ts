@@ -4,7 +4,7 @@ import { z } from "zod";
 import { computerUseStatus, selectComputerUseRoute, type ComputerUseRoute } from "../../src/direct-service.ts";
 import { DirectSessionExecutor } from "../../src/session-executor.ts";
 import type { CuaReplTool, JsonObject } from "../../src/tools.ts";
-import { handleOfficialElicitation, toPiContent } from "./content.ts";
+import { handleOfficialElicitation, openUrl, toPiContent } from "./content.ts";
 import { registerLegacyComputerUse, type LegacyComputerUseSession } from "./legacy.ts";
 
 export { handleOfficialElicitation, toPiContent } from "./content.ts";
@@ -23,9 +23,9 @@ interface DirectComputerUseOptions {
   route?: ComputerUseRoute;
 }
 
-export default function directComputerUse(pi: ExtensionAPI, options: DirectComputerUseOptions = {}) {
+export default async function directComputerUse(pi: ExtensionAPI, options: DirectComputerUseOptions = {}) {
   const stateRoot = process.env.CODEX_COMPUTER_USE_HOME || path.join(getAgentDir(), "direct-computer-use");
-  const route = options.route ?? selectComputerUseRoute(stateRoot);
+  const route = options.route ?? await selectComputerUseRoute(stateRoot);
 
   pi.registerCommand("computer-use-status", {
     description: "Show Computer Use status",
@@ -55,7 +55,7 @@ export default function directComputerUse(pi: ExtensionAPI, options: DirectCompu
           onElicitation: (request) => handleOfficialElicitation(
             request,
             ctx,
-            async (url) => (await pi.exec("/usr/bin/open", ["--", url], { signal, timeout: 15_000 })).code === 0,
+            (url) => openUrl(pi, url, signal),
           ),
         });
         const rendered = await toPiContent(response.content);

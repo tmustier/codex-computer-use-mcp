@@ -2,6 +2,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
+  type ExtensionAPI,
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
   formatSize,
@@ -69,6 +70,22 @@ interface PiElicitationContext {
   };
 }
 
+const approvalPersistLabels = new Map([
+  ["session", "Allow for this session"],
+  ["always", "Always allow"],
+]);
+const approvalSchema = z.object({
+  properties: z.object({ persist: z.object({ enum: z.array(z.string().min(1)).min(1) }) }),
+});
+
+/** The Windows helper asks the host to approve each app; the answer carries the chosen persistence. */
+function approvalPersistOptions(request: DirectBrokerElicitationRequest): string[] | undefined {
+  const meta = jsonObjectSchema.safeParse(request._meta);
+  if (!meta.success || meta.data.codex_approval_kind === undefined) return undefined;
+  const schema = approvalSchema.safeParse(request.requestedSchema);
+  return schema.success ? schema.data.properties.persist.enum : undefined;
+}
+
 export async function handleOfficialElicitation(
   request: DirectBrokerElicitationRequest,
   ctx: PiElicitationContext,
@@ -93,6 +110,15 @@ export async function handleOfficialElicitation(
     ctx.ui.notify(`Official Computer Use sent an unsupported elicitation mode: ${request.mode}`, "warning");
     return { action: "cancel" };
   }
+  const persistOptions = request.mode === "openai/form" ? undefined : approvalPersistOptions(request);
+  if (persistOptions) {
+    const labels = persistOptions.map((option) => approvalPersistLabels.get(option) ?? `Allow (${option})`);
+    const choice = await ctx.ui.select(message, [...labels, "Decline", "Cancel"]);
+    if (choice === "Decline") return { action: "decline" };
+    const index = choice === undefined ? -1 : labels.indexOf(choice);
+    if (index < 0) return { action: "cancel" };
+    return { action: "accept", content: { persist: persistOptions[index] } };
+  }
   const openAiForm = request.mode === "openai/form";
   if (request.requestedSchema === undefined || (!openAiForm && !jsonObjectSchema.safeParse(request.requestedSchema).success)) {
     return { action: "cancel" };
@@ -116,3 +142,10 @@ export async function handleOfficialElicitation(
   }
 }
 
+
+export async function openUrl(pi: Pick<ExtensionAPI, "exec">, url: string, signal: AbortSignal | undefined): Promise<boolean> {
+  const [command, args] = process.platform === "win32"
+    ? ["rundll32.exe", ["url.dll,FileProtocolHandler", url]]
+    : ["/usr/bin/open", ["--", url]];
+  return (await pi.exec(command, args, { signal, timeout: 15_000 })).code === 0;
+}

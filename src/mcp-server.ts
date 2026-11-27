@@ -13,7 +13,7 @@ import { z } from "zod";
 import { computerUseStatus, selectComputerUseRoute, type DirectServiceDependencies } from "./direct-service.ts";
 import { forwardOfficialElicitationToMcpClient } from "./mcp-elicitation.ts";
 import { LegacySessionExecutor } from "./legacy/session-executor.ts";
-import { COMPUTER_USE_METHODS, isDirectMethod, TOOL_INPUT_SCHEMAS, TOOL_METADATA } from "./legacy/tools.ts";
+import { hostPlatform } from "./legacy/platform.ts";
 import { DirectSessionExecutor } from "./session-executor.ts";
 import { isCuaReplTool, type JsonObject } from "./tools.ts";
 import { PACKAGE_VERSION } from "./version.ts";
@@ -21,14 +21,14 @@ import { PACKAGE_VERSION } from "./version.ts";
 const cliArgs = process.argv.slice(2);
 if (cliArgs.length > 0) {
 	if (cliArgs.length === 1 && cliArgs[0] === "--status") {
-		console.log(JSON.stringify(computerUseStatus(selectComputerUseRoute()), null, 2));
+		console.log(JSON.stringify(computerUseStatus(await selectComputerUseRoute()), null, 2));
 		process.exit(0);
 	}
 	console.error("Usage: codex-computer-use-mcp [--status]");
 	process.exit(1);
 }
 
-const route = selectComputerUseRoute();
+const route = await selectComputerUseRoute();
 const serverOptions: ServerOptions = { capabilities: { tools: {} } };
 if (route.kind === "cua_repl" && route.official.instructions) serverOptions.instructions = route.official.instructions;
 const server = new Server({ name: "codex-computer-use-mcp", version: PACKAGE_VERSION }, serverOptions);
@@ -48,17 +48,18 @@ function routeTools() {
 		};
 	}
 	// Deprecated typed tools for ChatGPT without its unified runtime, with their 0.6 idle close.
-	const executor = new LegacySessionExecutor({ idleTimeoutMs: 120_000 });
+	const platform = hostPlatform();
+	const executor = new LegacySessionExecutor({ idleTimeoutMs: 120_000, platform });
 	return {
-		definitions: COMPUTER_USE_METHODS.map((method) => ({
+		definitions: platform.methods.map((method) => ({
 			name: method,
-			description: TOOL_METADATA[method].description,
-			inputSchema: TOOL_INPUT_SCHEMAS[method],
-			annotations: TOOL_METADATA[method].annotations,
+			description: platform.metadata[method].description,
+			inputSchema: platform.inputSchemas[method],
+			annotations: platform.metadata[method].annotations,
 		})),
-		accepts: isDirectMethod,
+		accepts: platform.isMethod,
 		call(name: string, args: JsonObject, deps: Dependencies) {
-			assert(isDirectMethod(name));
+			assert(platform.isMethod(name));
 			return executor.execute(name, args, deps);
 		},
 		close: () => executor.close(),

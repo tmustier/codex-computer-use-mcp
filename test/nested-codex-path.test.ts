@@ -4,7 +4,10 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promis
 import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import nodeTest from "node:test";
+
+// macOS ChatGPT layout and live macOS Computer Use; Windows has its own tests.
+const test = process.platform === "darwin" ? nodeTest : nodeTest.skip;
 
 const broker = await import("../src/direct-broker.ts");
 const service = await import("../src/direct-service.ts");
