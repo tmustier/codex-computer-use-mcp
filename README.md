@@ -104,6 +104,8 @@ Production calls require verified OpenAI-signed binaries with Team ID `2DC432GLL
 
 Closing a session ends its turn, then terminates its private processes. Cancellation and tool timeouts briefly wait for an outstanding native reply before ending the turn, so a late reply cannot recreate the cursor after cleanup. A stalled request, failed notification or lost transport can prevent native cleanup. The call still returns its result, because the action already ran, and private process teardown still runs. `brokerCleanupVerified` describes private process cleanup, not visual confirmation that a cursor disappeared.
 
+Before each call, retained sessions check whether the verified runtime executables or settings changed on disk. If ChatGPT updated or a runtime file disappeared, the call fails before dispatch and the old session closes. Once ChatGPT finishes updating, retry with fresh JavaScript bindings: the next call verifies and starts a new runtime without restarting Pi or the MCP server. Calls are never automatically replayed across an update.
+
 Audit records contain bounded metadata. They exclude code, arguments, app content, screenshots, prompts and credentials. MCP and CLI state defaults to `~/.direct-computer-use`. Pi state defaults to `direct-computer-use` under the Pi agent directory. Set `CODEX_COMPUTER_USE_HOME` to override either default.
 
 ### Paths
