@@ -305,6 +305,50 @@ test("one session serves every call and turn, and a transport failure replaces i
 	}
 });
 
+test("completion releases the native turn immediately and keeps the REPL for later calls", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-session-completion-test."));
+	const log: string[] = [];
+	const executor = new DirectSessionExecutor({ createSession: async () => fakeSession(log, 1) });
+	try {
+		await executor.execute("js", { code: "let app = await cua.getApp('TextEdit')" }, { stateRoot: root });
+		await executor.execute("js", { completion_summary: "Inspected the application window" }, { stateRoot: root });
+		assert.deepEqual(log, ["1:js", "1:js", "1:endTurn"]);
+		await executor.execute("js", { code: "await app.getAXState()" }, { stateRoot: root });
+		assert.deepEqual(log, ["1:js", "1:js", "1:endTurn", "1:js"]);
+	} finally {
+		await executor.close();
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("reset ends the native turn before discarding runtime cleanup state", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-session-reset-test."));
+	const log: string[] = [];
+	const executor = new DirectSessionExecutor({ createSession: async () => fakeSession(log, 1) });
+	try {
+		await executor.execute("js", { code: "let app = await cua.getApp('TextEdit')" }, { stateRoot: root });
+		await executor.execute("js_reset", {}, { stateRoot: root });
+		assert.deepEqual(log, ["1:js", "1:endTurn", "1:js_reset"]);
+	} finally {
+		await executor.close();
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
+test("a rejected completion does not end the native turn", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-session-rejected-completion-test."));
+	const log: string[] = [];
+	const executor = new DirectSessionExecutor({ createSession: async () => fakeSession(log, 1, { ...brokerResult("rejected"), isError: true }) });
+	try {
+		const response = await executor.execute("js", { completion_summary: "Rejected completion" }, { stateRoot: root });
+		assert.equal(response.isError, true);
+		assert.deepEqual(log, ["1:js"]);
+	} finally {
+		await executor.close();
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("a quiet MCP session ends its turn but keeps its REPL", async () => {
 	const root = await mkdtemp(path.join(os.tmpdir(), "pi-direct-idle-test."));
 	const log: string[] = [];

@@ -106,6 +106,8 @@ Closing a session ends its turn, then terminates its private processes. Cancella
 
 Before each call, retained sessions check whether the verified runtime executables or settings changed on disk. If ChatGPT updated or a runtime file disappeared, the call fails before dispatch and the old session closes. Once ChatGPT finishes updating, retry with fresh JavaScript bindings: the next call verifies and starts a new runtime without restarting Pi or the MCP server. Calls are never automatically replayed across an update.
 
+A successful `completion_summary` call immediately ends the native Computer Use turn, without waiting for the host agent to finish or the MCP idle timer. REPL bindings remain available for later calls. Reset sends the turn-end notification before discarding the runtime's cleanup state; resetting JavaScript alone is not native cursor cleanup.
+
 Audit records contain bounded metadata. They exclude code, arguments, app content, screenshots, prompts and credentials. MCP and CLI state defaults to `~/.direct-computer-use`. Pi state defaults to `direct-computer-use` under the Pi agent directory. Set `CODEX_COMPUTER_USE_HOME` to override either default.
 
 ### Paths

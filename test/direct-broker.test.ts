@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -153,6 +153,38 @@ test("one session keeps REPL bindings across turns, and each ended turn gets its
 		assert.equal(turns[0], turns[1]);
 		assert.notEqual(turns[1], turns[2]);
 	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("a stale Time Machine snapshot warning does not discard a completed tool result", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-lsof-test."));
+	try {
+		const { script } = await makeFake(root);
+		const enumerator = path.resolve("test/fixtures/lsof-snapshot-warning.mjs");
+		await chmod(enumerator, 0o700);
+		const result = await callOfficialCuaRepl("js", { code: "1" }, {
+			...options(script), cwdProcessEnumeratorCommand: enumerator,
+		});
+		assert.equal(result.content[0].text, "direct-ok");
+		assert.equal(result.brokerCleanupVerified, true);
+	} finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("Time Machine warnings on the working directory's device still fail cleanup", async () => {
+	const root = await mkdtemp(path.join(os.tmpdir(), "direct-broker-lsof-device-test."));
+	const previous = process.env.LSOF_TEST_SAME_DEVICE;
+	process.env.LSOF_TEST_SAME_DEVICE = "1";
+	try {
+		const { script } = await makeFake(root);
+		const enumerator = path.resolve("test/fixtures/lsof-snapshot-warning.mjs");
+		await chmod(enumerator, 0o700);
+		await assert.rejects(callOfficialCuaRepl("js", { code: "1" }, {
+			...options(script), cwdProcessEnumeratorCommand: enumerator,
+		}), (error: Error) => error instanceof DirectBrokerCallError && !error.cleanupVerified && /cleanup failed/.test(error.message));
+	} finally {
+		if (previous === undefined) delete process.env.LSOF_TEST_SAME_DEVICE;
+		else process.env.LSOF_TEST_SAME_DEVICE = previous;
+		await rm(root, { recursive: true, force: true });
+	}
 });
 
 test("one-shot wrapper preserves a setup-phase cleanup failure", async () => {
