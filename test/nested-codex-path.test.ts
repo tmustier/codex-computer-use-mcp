@@ -9,7 +9,7 @@ import test from "node:test";
 const broker = await import("../src/direct-broker.ts");
 const service = await import("../src/direct-service.ts");
 
-test("the app-server runs ChatGPT's node_repl directly, with its official settings, the real home and a private cwd", async (t) => {
+test("the app-server runs ChatGPT's node_repl directly, with its official settings less --require-browser-access, the real home and a private cwd", async (t) => {
 	const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "cu-nested-codex.")));
 	const previous = process.env.CODEX_CLI_PATH;
 	try {
@@ -25,7 +25,7 @@ test("the app-server runs ChatGPT's node_repl directly, with its official settin
 		await symlink(codex, alias);
 		const server = {
 			command: "/bin/sh",
-			args: ["-c", 'export X="${X-}"; exec "$@"', "cua-repl", nodeRepl],
+			args: ["-c", 'export X="${X-}"; exec "$@"', "cua-repl", nodeRepl, "--require-browser-access"],
 			env: { SKY_CUA_SERVICE_PATH: computerUseApp, NODE_REPL_TOOL_OVERRIDES: '{"a":"b\\nc"}', EXTRA: "line\nbreak\u007f" },
 			enabled_tools: ["js", "js_reset", "turn_ended"],
 			tools: { js: { output_token_limit: 25000 } },

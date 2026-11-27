@@ -18,6 +18,9 @@ const COMPUTER_USE_APP_RELATIVE_PATH = "computer-use/Codex Computer Use.app";
 const SERVICE_RELATIVE_PATH = "Contents/MacOS/SkyComputerUseService";
 const CUA_REPL_CACHE_RELATIVE_PATH = ".codex/plugins/cache/openai-bundled/unified-computer-use";
 const CUA_REPL_SERVER = "cua_repl";
+// node_repl flag that ChatGPT 26.1120 and later passes. It makes the runtime ask ChatGPT's browser
+// access grant host even when no executor identity is set, so every browser call fails without ChatGPT.
+const REQUIRE_BROWSER_ACCESS_FLAG = "--require-browser-access";
 const CHATGPT_APP_BUNDLE_ID = "com.openai.codex";
 const OPENAI_TEAM_ID = "2DC432GLL2";
 // agent-default (not a user rule): 2026-11-04. codesign can take longer than 10s after updates or under load.
@@ -718,14 +721,16 @@ export async function createOfficialCuaReplSession(
 			// ChatGPT launches node_repl through a shell that exports BROWSER_USE_ACCESS_EXECUTOR_ID,
 			// empty when ChatGPT supplies none. Any value makes the runtime ask ChatGPT's per-turn browser
 			// access grant host, which only ChatGPT runs. By the owner's choice, node_repl starts directly so
-			// browser surfaces work without that grant. The app-server runs with a private HOME; the
-			// runtime finds the shared Computer Use service socket under the account's real home.
+			// browser surfaces work without that grant. Newer ChatGPT starts node_repl directly with
+			// --require-browser-access, which forces the same grant, so the adapter drops that flag.
+			// The app-server runs with a private HOME; the runtime finds the shared Computer Use service
+			// socket under the account's real home.
 			const launch = [verification.server.command, ...verification.server.args];
 			const nodeRepl = launch.findIndex((part) => path.isAbsolute(part) && path.basename(part) === "node_repl");
 			const server = {
 				...verification.server,
 				command: launch[nodeRepl]!,
-				args: launch.slice(nodeRepl + 1),
+				args: launch.slice(nodeRepl + 1).filter((arg) => arg !== REQUIRE_BROWSER_ACCESS_FLAG && !arg.startsWith(`${REQUIRE_BROWSER_ACCESS_FLAG}=`)),
 				env: { ...verification.server.env, HOME: os.userInfo().homedir },
 				cwd: workDir,
 				enabled: true,
