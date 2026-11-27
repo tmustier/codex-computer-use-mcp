@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -572,10 +572,27 @@ export async function createOfficialCuaReplSession(
 	options: DirectBrokerOptions = {},
 ): Promise<OfficialCuaReplSession> {
 	const verification = options.skipSignatureVerification
-		? { brokerVersion: "test-app-server", clientBuild: "test-client", server: undefined, codexPath: undefined }
+		? { brokerVersion: "test-app-server", clientBuild: "test-client", server: undefined, codexPath: undefined, isCurrent: () => true }
 		: (() => {
 			const verified = verifyOfficialDirectBroker({ configPath: options.configPath });
-			return { ...verified, server: verified.cuaRepl.server };
+			const { cuaRepl } = verified;
+			// Sparkle can replace ChatGPT while this session's signed processes keep running.
+			// Check file identities, not tool-result text, and never replay an action after an update.
+			const files = [
+				verified.codexPath, cuaRepl.nodeReplPath, cuaRepl.configPath,
+				path.join(cuaRepl.computerUseAppPath, SERVICE_RELATIVE_PATH),
+				...(cuaRepl.server.env.NODE_REPL_NODE_PATH ? [cuaRepl.server.env.NODE_REPL_NODE_PATH] : []),
+			].map((file) => ({ file, stat: statSync(file, { bigint: true }) }));
+			const isCurrent = (): boolean => {
+				try {
+					return files.every(({ file, stat }) => {
+						const now = statSync(file, { bigint: true });
+						return now.dev === stat.dev && now.ino === stat.ino && now.size === stat.size
+							&& now.mtimeNs === stat.mtimeNs && now.ctimeNs === stat.ctimeNs;
+					});
+				} catch { return false; }
+			};
+			return { ...verified, server: cuaRepl.server, isCurrent };
 		})();
 	const tempRoot = await mkdtemp(path.join(os.tmpdir(), "pi-direct-computer-use."));
 	const codexHome = path.join(tempRoot, "codex-home");
@@ -868,6 +885,9 @@ export async function createOfficialCuaReplSession(
 					else callOptions.signal.addEventListener("abort", abortHandler, { once: true });
 				}
 				if (fatalError) throw fatalError;
+				if (!verification.isCurrent()) {
+					throw new Error("The verified Computer Use runtime changed or became unavailable on disk. This call was not dispatched. Retry after ChatGPT finishes updating; the next call starts a freshly verified session and previous REPL bindings are lost.");
+				}
 				turnActive = true;
 				const raw = await toolCall(tool, args, callOptions.timeoutMs ?? 120_000, "tool");
 				directCalls = 1;
