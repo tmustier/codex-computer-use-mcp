@@ -9,7 +9,12 @@ import test from "node:test";
 const broker = await import("../src/direct-broker.ts");
 const service = await import("../src/direct-service.ts");
 
-test("the app-server runs ChatGPT's node_repl directly, with its official settings less --require-browser-access, the real home and a private cwd", async (t) => {
+for (const { label, shell, runtimeArgs } of [
+	{ label: "shell launch with browser flag", shell: true, runtimeArgs: ["--require-browser-access", "--other-runtime-option", "value"] },
+	{ label: "direct launch with assigned browser flag", shell: false, runtimeArgs: ["--require-browser-access=true", "--other-runtime-option", "value"] },
+	{ label: "older launch without browser flag", shell: true, runtimeArgs: ["--other-runtime-option", "value"] },
+]) {
+ test(`the app-server preserves official settings except browser grants (${label})`, async (t) => {
 	const root = await realpath(await mkdtemp(path.join(os.tmpdir(), "cu-nested-codex.")));
 	const previous = process.env.CODEX_CLI_PATH;
 	try {
@@ -24,8 +29,8 @@ test("the app-server runs ChatGPT's node_repl directly, with its official settin
 		}
 		await symlink(codex, alias);
 		const server = {
-			command: "/bin/sh",
-			args: ["-c", 'export X="${X-}"; exec "$@"', "cua-repl", nodeRepl, "--require-browser-access"],
+			command: shell ? "/bin/sh" : nodeRepl,
+			args: shell ? ["-c", 'export X="${X-}"; exec "$@"', "cua-repl", nodeRepl, ...runtimeArgs] : runtimeArgs,
 			env: { SKY_CUA_SERVICE_PATH: computerUseApp, NODE_REPL_TOOL_OVERRIDES: '{"a":"b\\nc"}', EXTRA: "line\nbreak\u007f" },
 			enabled_tools: ["js", "js_reset", "turn_ended"],
 			tools: { js: { output_token_limit: 25000 } },
@@ -52,7 +57,7 @@ test("the app-server runs ChatGPT's node_repl directly, with its official settin
 			assert.notEqual(env.HOME, os.userInfo().homedir);
 			const table = args.find((arg) => arg.startsWith("mcp_servers="));
 			assert.equal(table, 'mcp_servers={ "cua_repl" = { '
-				+ `"command" = ${JSON.stringify(nodeRepl)}, "args" = [], `
+				+ `"command" = ${JSON.stringify(nodeRepl)}, "args" = ["--other-runtime-option", "value"], `
 				+ `"env" = { "SKY_CUA_SERVICE_PATH" = ${JSON.stringify(computerUseApp)}, `
 				+ `"NODE_REPL_TOOL_OVERRIDES" = ${JSON.stringify(server.env.NODE_REPL_TOOL_OVERRIDES)}, `
 				+ '"EXTRA" = "line\\nbreak\\u007F", '
@@ -79,4 +84,5 @@ test("the app-server runs ChatGPT's node_repl directly, with its official settin
 		else process.env.CODEX_CLI_PATH = previous;
 		await rm(root, { recursive: true, force: true });
 	}
-});
+ });
+}
